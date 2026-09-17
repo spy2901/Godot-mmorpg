@@ -8,7 +8,7 @@ extends Control
 
 var hp = 100
 var mana = 100
-var ime_igraca = "Spajko"
+var ime_igraca: String = GameState.ime_igraca if GameState.ime_igraca != "" else "Spajko"
 var max_hp = 100
 var max_mana = 100
 var hp_regen = 2.0
@@ -31,8 +31,18 @@ var spawn_pozicija: Vector3 = Vector3.ZERO
 var je_mrtav: bool = false
 var neosjetljiv: bool = false
 
+# Save / load
+const AUTOSAVE_INTERVAL = 30.0
+const DIRTY_SAVE_DELAY = 3.0
+var _ucitano: bool = false
+var _dirty: bool = false
+var _dirty_timer: float = 0.0
+var _autosave_timer: float = 0.0
+var _saving: bool = false
+
 func _ready():
 	add_to_group("hud")
+	get_tree().auto_accept_quit = false
 
 	label_ime.text = ime_igraca + "  Lv." + str(level)
 	label_ime.position = Vector2(20, 5)
@@ -102,7 +112,7 @@ func _ready():
 	quest_tracker.add_theme_constant_override("shadow_offset_y", 1)
 	quest_tracker.visible = false
 	add_child(quest_tracker)
-	
+
 	quest_abandon_btn = Button.new()
 	quest_abandon_btn.text = "✕ Odustani"
 	quest_abandon_btn.position = Vector2(screen_w - 340, 100)
@@ -122,10 +132,99 @@ func _ready():
 	_osvezi_gold()
 	_osvezi_quest_tracker()
 
-	# Zapamti spawn poziciju
 	var player = get_tree().get_first_node_in_group("player")
 	if player:
 		spawn_pozicija = player.global_position
+
+	await _ucitaj_igraca()
+
+# ---------------------------------------------------------------- SAVE / LOAD
+
+func oznaci_promenu() -> void:
+	_dirty = true
+	_dirty_timer = 0.0
+
+func _prikupi_stanje() -> Dictionary:
+	var player = get_tree().get_first_node_in_group("player")
+	var pos: Vector3 = player.global_position if player else Vector3.ZERO
+	var dmg: int = int(player.napad_damage) if player else 250
+	var q: Dictionary = QuestManager.serijalizuj()
+	var inv: Dictionary = inventory_ui.serijalizuj()
+	return {
+		"level": int(level), "xp": int(xp), "max_xp": int(max_xp),
+		"gold": int(gold),
+		"hp": int(hp), "max_hp": int(max_hp),
+		"mana": int(mana), "max_mana": int(max_mana),
+		"napad_damage": dmg,
+		"pos_x": pos.x, "pos_y": pos.y, "pos_z": pos.z,
+		"inventory": inv.get("inventory", []),
+		"equipment": inv.get("equipment", {}),
+		"aktivni_quest_id": q.get("aktivni_quest_id", null),
+		"quest_progres": int(q.get("quest_progres", 0))
+	}
+
+func sacuvaj_igraca() -> void:
+	if not _ucitano or _saving:
+		return
+	_saving = true
+	_dirty = false
+	var ok = await ApiManager.save_player(ime_igraca, _prikupi_stanje())
+	_saving = false
+	if ok:
+		print("[SAVE] Sačuvano.")
+	else:
+		print("[SAVE] Čuvanje nije uspelo (server?)")
+		_dirty = true
+
+func _ucitaj_igraca() -> void:
+	var p: Dictionary = await ApiManager.get_player(ime_igraca)
+	if p.is_empty():
+		print("[SAVE] Server nedostupan, koristim default stanje (bez čuvanja).")
+		return
+
+	level = int(p.get("level", 1))
+	xp = int(p.get("xp", 0))
+	max_xp = int(p.get("max_xp", 100))
+	gold = int(p.get("gold", 100))
+	max_hp = int(p.get("max_hp", 100))
+	max_mana = int(p.get("max_mana", 100))
+	hp = clamp(int(p.get("hp", max_hp)), 1, max_hp)
+	mana = clamp(int(p.get("mana", max_mana)), 0, max_mana)
+
+	var player = get_tree().get_first_node_in_group("player")
+	if player:
+		player.napad_damage = int(p.get("napad_damage", 250))
+		var pos = Vector3(float(p.get("pos_x", 0)), float(p.get("pos_y", 0)), float(p.get("pos_z", 0)))
+		if pos != Vector3.ZERO:
+			player.global_position = pos
+
+	hp_bar.max_value = max_hp
+	mana_bar.max_value = max_mana
+	xp_bar.max_value = max_xp
+	label_ime.text = ime_igraca + "  Lv." + str(level)
+
+	await get_tree().process_frame
+	await inventory_ui.ucitaj(p.get("inventory", []), p.get("equipment", {}))
+
+	await QuestManager.ucitaj_zavrsene(ime_igraca)
+
+	var qid = p.get("aktivni_quest_id", null)
+	if qid != null and str(qid) != "":
+		await QuestManager.ucitaj_stanje(str(qid), int(p.get("quest_progres", 0)))
+
+	_osvezi_barove()
+	_osvezi_gold()
+	_osvezi_quest_tracker()
+	_ucitano = true
+	print("[SAVE] Lik učitan: Lv.%d, %d gold" % [level, gold])
+
+func _notification(what):
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		if _ucitano:
+			await sacuvaj_igraca()
+		get_tree().quit()
+
+# ---------------------------------------------------------------- UI
 
 func _osvezi_barove() -> void:
 	hp_bar.value = hp
@@ -166,15 +265,19 @@ func _osvezi_quest_tracker() -> void:
 	quest_tracker.visible = true
 	quest_abandon_btn.visible = true
 
+# ---------------------------------------------------------------- STATS
+
 func dodaj_gold(kolicina: int) -> void:
 	gold += kolicina
 	_osvezi_gold()
+	oznaci_promenu()
 
 func potrosi_gold(kolicina: int) -> bool:
 	if gold < kolicina:
 		return false
 	gold -= kolicina
 	_osvezi_gold()
+	oznaci_promenu()
 	return true
 
 func dodaj_xp(kolicina):
@@ -183,15 +286,15 @@ func dodaj_xp(kolicina):
 	_osvezi_barove()
 	if xp >= max_xp:
 		level_up()
+	oznaci_promenu()
 
 func level_up():
 	level += 1
 	xp = 0
 	max_xp = int(max_xp * 1.5)
 
-	# Stat boost
-	max_hp = int(max_hp * 1.15)    # +15% max HP
-	max_mana = int(max_mana * 1.1) # +10% max mana
+	max_hp = int(max_hp * 1.15)
+	max_mana = int(max_mana * 1.1)
 	hp = max_hp
 	mana = max_mana
 
@@ -199,16 +302,16 @@ func level_up():
 	mana_bar.max_value = max_mana
 	xp_bar.max_value = max_xp
 
-	# Povećaj damage playeru
 	var player = get_tree().get_first_node_in_group("player")
 	if player:
-		player.napad_damage = int(player.napad_damage * 1.1) # +10% damage
+		player.napad_damage = int(player.napad_damage * 1.1)
 
 	label_ime.text = ime_igraca + "  Lv." + str(level)
 	_osvezi_barove()
 	print("LEVEL UP! Lv.%d | Max HP: %d | Max Mana: %d | Damage: %d" % [
 		level, max_hp, max_mana, player.napad_damage if player else 0
 	])
+	oznaci_promenu()
 
 func primi_damage(kolicina):
 	if neosjetljiv or je_mrtav:
@@ -248,6 +351,7 @@ func _respawn() -> void:
 	await get_tree().create_timer(2.0).timeout
 	neosjetljiv = false
 	print("Neosjetljivost gotova.")
+	oznaci_promenu()
 
 func potrosi_manu(kolicina):
 	mana -= kolicina
@@ -257,6 +361,8 @@ func potrosi_manu(kolicina):
 func dodaj_item(ime):
 	inventory_ui.dodaj_item_u_slot(ime)
 	print("Pokupljen item: ", ime)
+
+# ---------------------------------------------------------------- PROCESS
 
 func _process(delta):
 	if Input.is_action_just_pressed("ui_inventory"):
@@ -276,3 +382,16 @@ func _process(delta):
 			mana = min(mana + mana_regen, max_mana)
 		_osvezi_barove()
 		_osvezi_quest_tracker()
+
+	if not _ucitano:
+		return
+
+	if _dirty:
+		_dirty_timer += delta
+		if _dirty_timer >= DIRTY_SAVE_DELAY:
+			sacuvaj_igraca()
+
+	_autosave_timer += delta
+	if _autosave_timer >= AUTOSAVE_INTERVAL:
+		_autosave_timer = 0.0
+		sacuvaj_igraca()

@@ -11,13 +11,14 @@ config_version=5
 [application]
 
 config/name="mmorpg"
-run/main_scene="uid://dvak2jm840ef7"
+run/main_scene="uid://bvlks5a04xi7y"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 
 [autoload]
 
 ApiManager="*uid://t3dw6jiic3yp"
+GameState="*uid://cwnqbvtliavil"
 DialogueUI="*res://Scripts/ui/dialogue_ui.tscn"
 MerchantUI="*res://Scripts/ui/merchant_ui.tscn"
 QuestManager="*uid://vor7ksgqk5dt"

@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://ceowldtybmt7n" path="res://Scripts/Player_Movement.gd" id="1_v1gob"]
 [ext_resource type="PackedScene" uid="uid://c2fjbmberid1r" path="res://Models/CharacterMain.glb" id="2_jw32o"]
-[ext_resource type="Script" path="res://Scripts/TopBar.gd" id="3_50glp"]
+[ext_resource type="Script" uid="uid://b5ch8pf68vvb7" path="res://Scripts/ui/TopBar.gd" id="3_50glp"]
 [ext_resource type="PackedScene" uid="uid://cljkfnkgprjv5" path="res://Scenes/Inventory/InventoryUI.tscn" id="4_50glp"]
 [ext_resource type="Script" uid="uid://cdlb6r28e8hn2" path="res://Scripts/spawner.gd" id="5_bmxlf"]
 [ext_resource type="PackedScene" uid="uid://pvyt60hf52lf" path="res://Scenes/Enemies/goblin.tscn" id="6_50glp"]

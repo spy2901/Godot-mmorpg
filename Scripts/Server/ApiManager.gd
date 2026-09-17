@@ -2,74 +2,58 @@ extends Node
 
 const SERVER_URL = "http://localhost:8000"
 
-func get_item(item_id: String) -> Dictionary:
+func _zahtev(path: String, method: int = HTTPClient.METHOD_GET, body: Dictionary = {}) -> Variant:
 	var http = HTTPRequest.new()
 	add_child(http)
-	
-	var error = http.request(SERVER_URL + "/items/" + item_id)
-	if error != OK:
-		print("HTTP greška!")
-		return {}
-	
+
+	var headers: PackedStringArray = []
+	var body_str := ""
+	if method == HTTPClient.METHOD_POST:
+		headers = ["Content-Type: application/json"]
+		body_str = JSON.stringify(body)
+
+	var err = http.request(SERVER_URL + path, headers, method, body_str)
+	if err != OK:
+		print("[API] HTTP greška: ", path)
+		http.queue_free()
+		return null
+
 	var response = await http.request_completed
-	var json = JSON.new()
-	json.parse(response[3].get_string_from_utf8())
-	var result = json.get_data()
-	
 	http.queue_free()
-	return result
+
+	if response[0] != HTTPRequest.RESULT_SUCCESS:
+		print("[API] Server nedostupan: ", path)
+		return null
+
+	var json = JSON.new()
+	if json.parse(response[3].get_string_from_utf8()) != OK:
+		print("[API] Neispravan JSON: ", path)
+		return null
+	return json.get_data()
+
+# ---------------------------------------------------------------- ITEMS
+
+func get_item(item_id: String) -> Dictionary:
+	var r = await _zahtev("/items/" + item_id)
+	return r if r is Dictionary else {}
 
 func get_all_items() -> Array:
-	var http = HTTPRequest.new()
-	add_child(http)
-	
-	var error = http.request(SERVER_URL + "/items")
-	if error != OK:
-		print("HTTP greška!")
-		return []
-	
-	var response = await http.request_completed
-	var json = JSON.new()
-	json.parse(response[3].get_string_from_utf8())
-	var result = json.get_data()
-	
-	http.queue_free()
-	return result.get("items", [])
+	var r = await _zahtev("/items")
+	if r is Dictionary:
+		return r.get("items", [])
+	return []
+
+# ---------------------------------------------------------------- QUESTS
 
 func get_quest(quest_id: String) -> Dictionary:
-	var http = HTTPRequest.new()
-	add_child(http)
-	
-	var error = http.request(SERVER_URL + "/quests/" + quest_id)
-	if error != OK:
-		print("HTTP greška!")
-		return {}
-	
-	var response = await http.request_completed
-	var json = JSON.new()
-	json.parse(response[3].get_string_from_utf8())
-	var result = json.get_data()
-	
-	http.queue_free()
-	return result
+	var r = await _zahtev("/quests/" + quest_id)
+	return r if r is Dictionary else {}
 
 func get_all_quests() -> Array:
-	var http = HTTPRequest.new()
-	add_child(http)
-	
-	var error = http.request(SERVER_URL + "/quests")
-	if error != OK:
-		print("HTTP greška!")
-		return []
-	
-	var response = await http.request_completed
-	var json = JSON.new()
-	json.parse(response[3].get_string_from_utf8())
-	var result = json.get_data()
-	
-	http.queue_free()
-	return result.get("quests", [])
-
+	var r = await _zahtev("/quests")
+	if r is Dictionary:
+		return r.get("quests", [])
+	return []
 
 func complete_quest(ime: String, quest_id: String) -> Dictionary:
 	var r = await _zahtev("/quests/" + quest_id + "/complete/" + ime, HTTPClient.METHOD_POST)
@@ -80,3 +64,13 @@ func get_completed_quests(ime: String) -> Array:
 	if r is Dictionary:
 		return r.get("completed", [])
 	return []
+
+# ---------------------------------------------------------------- PLAYERS
+
+func get_player(ime: String) -> Dictionary:
+	var r = await _zahtev("/players/" + ime)
+	return r if r is Dictionary else {}
+
+func save_player(ime: String, data: Dictionary) -> bool:
+	var r = await _zahtev("/players/" + ime + "/save", HTTPClient.METHOD_POST, data)
+	return r is Dictionary and r.get("status", "") == "ok"
