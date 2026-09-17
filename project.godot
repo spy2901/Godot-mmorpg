@@ -18,6 +18,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 ApiManager="*uid://t3dw6jiic3yp"
+NetworkManager="*uid://dphwybls24csg"
 GameState="*uid://cwnqbvtliavil"
 DialogueUI="*res://Scripts/ui/dialogue_ui.tscn"
 MerchantUI="*res://Scripts/ui/merchant_ui.tscn"

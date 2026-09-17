@@ -15,6 +15,7 @@ script = ExtResource("1_vgqql")
 transform = Transform3D(-0.9971851, 0, -0.07497882, 0, 1, 0, 0.07497882, 0, -0.9971851, 0, 0, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1760512229]
+transform = Transform3D(0.9999999, 0, 0, 0, 1, 0, 0, 0, 0.9999999, 0, 0.97684455, 0)
 shape = SubResource("CapsuleShape3D_7q7q3")
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=1548796639]

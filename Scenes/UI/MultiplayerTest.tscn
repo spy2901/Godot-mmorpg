@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://crhan17klim2v"]
+
+[ext_resource type="Script" uid="uid://g2oj230rn8cy" path="res://Scripts/ui/multiplayer_test_ui.gd" id="1_2srvm"]
+
+[node name="MultiplayerTest" type="Control" unique_id=1842320786]
+layout_mode = 3
+anchors_preset = 0
+script = ExtResource("1_2srvm")
