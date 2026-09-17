@@ -1,0 +1,98 @@
+[gd_scene format=3 uid="uid://d3aogsj4obhhq"]
+
+[ext_resource type="Script" uid="uid://ceowldtybmt7n" path="res://Scripts/Player_Movement.gd" id="1_vgqql"]
+[ext_resource type="PackedScene" uid="uid://c2fjbmberid1r" path="res://Models/CharacterMain.glb" id="2_fkybt"]
+[ext_resource type="Script" uid="uid://b5ch8pf68vvb7" path="res://Scripts/ui/TopBar.gd" id="3_x3wgy"]
+[ext_resource type="PackedScene" uid="uid://cljkfnkgprjv5" path="res://Scenes/Inventory/InventoryUI.tscn" id="4_3smsa"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_7q7q3"]
+
+[node name="Player" type="CharacterBody3D" unique_id=1441937363]
+transform = Transform3D(-0.99840355, 0, 0.056483656, 0, 1, 0, -0.056483656, 0, -0.99840355, 0, 0, 0)
+script = ExtResource("1_vgqql")
+
+[node name="CharacterMain" parent="." unique_id=2011961617 instance=ExtResource("2_fkybt")]
+transform = Transform3D(-0.9971851, 0, -0.07497882, 0, 1, 0, 0.07497882, 0, -0.9971851, 0, 0, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1760512229]
+shape = SubResource("CapsuleShape3D_7q7q3")
+
+[node name="Camera3D" type="Camera3D" parent="." unique_id=1548796639]
+transform = Transform3D(0.9994864, 0.011633491, 0.029860593, -0.01478054, 0.99410224, 0.107434556, -0.028434642, -0.107820734, 0.9937636, 0, 1.8632631, 1.1881659)
+
+[node name="ui" type="CanvasLayer" parent="." unique_id=1002385842]
+
+[node name="Control" type="Control" parent="ui" unique_id=975070932]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 149.0
+offset_bottom = 41.0
+script = ExtResource("3_x3wgy")
+
+[node name="Label (Name)" type="Label" parent="ui/Control" unique_id=1003435209]
+top_level = true
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.010000001
+anchor_top = 0.052
+anchor_right = 0.177
+anchor_bottom = 0.106000006
+offset_left = -2.2000008
+offset_top = -0.15999985
+offset_right = -0.83999634
+offset_bottom = -0.30226898
+theme_override_font_sizes/font_size = 22
+vertical_alignment = 1
+
+[node name="ProgressBar(HP)" type="ProgressBar" parent="ui/Control" unique_id=282519026]
+modulate = Color(1, 0, 0, 1)
+self_modulate = Color(0.8627451, 0, 0, 1)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.126
+anchor_top = 3.2440002
+anchor_right = 2.289
+anchor_bottom = 5.0730004
+offset_left = -2.7740002
+offset_top = -0.0040130615
+offset_right = -0.06100464
+offset_bottom = -24.993011
+theme_override_colors/font_color = Color(0.95, 0.95, 0.95, 1)
+
+[node name="ProgressBar(Mana_Resurce)" type="ProgressBar" parent="ui/Control" unique_id=893315509]
+modulate = Color(0.24705882, 0.29411766, 1, 1)
+self_modulate = Color(0.16862746, 0.21960784, 1, 1)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.10700001
+anchor_top = 5.366
+anchor_right = 2.289
+anchor_bottom = 7.195
+offset_left = 0.056999207
+offset_top = -0.006011963
+offset_right = -0.06100464
+offset_bottom = -24.994995
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="ProgressBar(XP)" type="ProgressBar" parent="ui/Control" unique_id=1180961392]
+modulate = Color(0.627451, 0.1254902, 0.9411765, 1)
+self_modulate = Color(0.627451, 0.1254902, 0.9411765, 1)
+layout_mode = 0
+offset_right = 4.0
+offset_bottom = 27.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="Panel" type="Panel" parent="ui" unique_id=864243027]
+visible = false
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="ui/Panel" unique_id=1505324314]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="Inventory" type="Label" parent="ui/Panel/VBoxContainer" unique_id=1098072043]
+layout_mode = 2
+
+[node name="InventoryUI" parent="ui" unique_id=1342373889 instance=ExtResource("4_3smsa")]
