@@ -1,0 +1,24 @@
+[gd_scene format=3 uid="uid://ciodrpv3bukr"]
+
+[ext_resource type="Script" uid="uid://ctkdna1af7i4a" path="res://Scripts/Enemy.gd" id="1_t2y35"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_rijkx"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_rijkx"]
+
+[node name="Node3D" type="Node3D" unique_id=1075531957]
+
+[node name="CharacterBody3D" type="CharacterBody3D" parent="." unique_id=567055309]
+script = ExtResource("1_t2y35")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CharacterBody3D" unique_id=747303743]
+mesh = SubResource("CapsuleMesh_rijkx")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CharacterBody3D" unique_id=631741011]
+shape = SubResource("CapsuleShape3D_rijkx")
+
+[node name="ImeLabel" type="Label3D" parent="CharacterBody3D" unique_id=1572783055]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, 0)
+
+[node name="HpLabel" type="Label3D" parent="CharacterBody3D" unique_id=2143532782]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, 0)

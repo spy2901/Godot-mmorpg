@@ -1,0 +1,141 @@
+[gd_scene format=3 uid="uid://dvak2jm840ef7"]
+
+[ext_resource type="Script" uid="uid://ceowldtybmt7n" path="res://Scripts/Player_Movement.gd" id="1_v1gob"]
+[ext_resource type="PackedScene" uid="uid://c2fjbmberid1r" path="res://Models/CharacterMain.glb" id="2_jw32o"]
+[ext_resource type="Script" path="res://Scripts/TopBar.gd" id="3_50glp"]
+[ext_resource type="PackedScene" uid="uid://cljkfnkgprjv5" path="res://Scenes/Inventory/InventoryUI.tscn" id="4_50glp"]
+[ext_resource type="Script" uid="uid://cdlb6r28e8hn2" path="res://Scripts/spawner.gd" id="5_bmxlf"]
+[ext_resource type="PackedScene" uid="uid://pvyt60hf52lf" path="res://Scenes/Enemies/goblin.tscn" id="6_50glp"]
+[ext_resource type="PackedScene" uid="uid://dk8panud4bmy2" path="res://Scenes/Enemies/skeleton.tscn" id="7_vy5pj"]
+[ext_resource type="PackedScene" uid="uid://bln1yu00ph26s" path="res://Scenes/Enemies/troll.tscn" id="8_bmxlf"]
+[ext_resource type="PackedScene" uid="uid://pri5axdlbgb1" path="res://Scenes/NPCS/npc.tscn" id="9_vy5pj"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_7q7q3"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_vkdvt"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_7q7q3"]
+
+[node name="Node3D" type="Node3D" unique_id=982523905]
+
+[node name="Player" type="CharacterBody3D" parent="." unique_id=535201142]
+transform = Transform3D(-0.99840355, 0, 0.056483656, 0, 1, 0, -0.056483656, 0, -0.99840355, 0, -0.09027195, 0)
+script = ExtResource("1_v1gob")
+
+[node name="CharacterMain" parent="Player" unique_id=2011961617 instance=ExtResource("2_jw32o")]
+transform = Transform3D(-0.9971851, 0, -0.07497882, 0, 1, 0, 0.07497882, 0, -0.9971851, 0, 0, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Player" unique_id=1682304949]
+shape = SubResource("CapsuleShape3D_7q7q3")
+
+[node name="Camera3D" type="Camera3D" parent="Player" unique_id=1835483233]
+transform = Transform3D(0.9994864, 0.011633491, 0.029860593, -0.01478054, 0.99410224, 0.107434556, -0.028434642, -0.107820734, 0.9937636, 0, 1.8632631, 1.1881659)
+
+[node name="ui" type="CanvasLayer" parent="Player" unique_id=388261827]
+
+[node name="Control" type="Control" parent="Player/ui" unique_id=1037105504]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 149.0
+offset_bottom = 41.0
+script = ExtResource("3_50glp")
+
+[node name="Label (Name)" type="Label" parent="Player/ui/Control" unique_id=1722448169]
+top_level = true
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.010000001
+anchor_top = 0.052
+anchor_right = 0.177
+anchor_bottom = 0.106000006
+offset_left = -2.2000008
+offset_top = -0.15999985
+offset_right = -0.83999634
+offset_bottom = -0.30226898
+theme_override_font_sizes/font_size = 22
+vertical_alignment = 1
+
+[node name="ProgressBar(HP)" type="ProgressBar" parent="Player/ui/Control" unique_id=1840736778]
+modulate = Color(1, 0, 0, 1)
+self_modulate = Color(0.8627451, 0, 0, 1)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.126
+anchor_top = 3.2440002
+anchor_right = 2.289
+anchor_bottom = 5.0730004
+offset_left = -2.7740002
+offset_top = -0.0040130615
+offset_right = -0.06100464
+offset_bottom = -24.993011
+theme_override_colors/font_color = Color(0.95, 0.95, 0.95, 1)
+
+[node name="ProgressBar(Mana_Resurce)" type="ProgressBar" parent="Player/ui/Control" unique_id=1957906209]
+modulate = Color(0.24705882, 0.29411766, 1, 1)
+self_modulate = Color(0.16862746, 0.21960784, 1, 1)
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.10700001
+anchor_top = 5.366
+anchor_right = 2.289
+anchor_bottom = 7.195
+offset_left = 0.056999207
+offset_top = -0.006011963
+offset_right = -0.06100464
+offset_bottom = -24.994995
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="ProgressBar(XP)" type="ProgressBar" parent="Player/ui/Control" unique_id=649604747]
+modulate = Color(0.627451, 0.1254902, 0.9411765, 1)
+self_modulate = Color(0.627451, 0.1254902, 0.9411765, 1)
+layout_mode = 0
+offset_right = 4.0
+offset_bottom = 27.0
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+
+[node name="Panel" type="Panel" parent="Player/ui" unique_id=611296656]
+visible = false
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="VBoxContainer" type="VBoxContainer" parent="Player/ui/Panel" unique_id=1137422296]
+layout_mode = 0
+offset_right = 40.0
+offset_bottom = 40.0
+
+[node name="Inventory" type="Label" parent="Player/ui/Panel/VBoxContainer" unique_id=940875426]
+layout_mode = 2
+
+[node name="InventoryUI" parent="Player/ui" unique_id=1342373889 instance=ExtResource("4_50glp")]
+
+[node name="Pod" type="StaticBody3D" parent="." unique_id=1999260248]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.0193889, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Pod" unique_id=1245776485]
+transform = Transform3D(50, 0, 0, 0, 0.1, 0, 0, 0, 50, 0, 0, 0)
+mesh = SubResource("BoxMesh_vkdvt")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Pod" unique_id=931941509]
+transform = Transform3D(50, 0, 0, 0, 0.1, 0, 0, 0, 50, 0, 0, 0)
+shape = SubResource("BoxShape3D_7q7q3")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=75427475]
+transform = Transform3D(1, 0, 0, 0, -0.011501461, 0.9999339, 0, -0.9999339, -0.011501461, 0, 4.744325, 0)
+
+[node name="Spawner" type="Node3D" parent="." unique_id=838686253]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.119558334, 0.648829, -16.891348)
+script = ExtResource("5_bmxlf")
+goblin_scena = ExtResource("6_50glp")
+skeleton_scena = ExtResource("7_vy5pj")
+troll_scena = ExtResource("8_bmxlf")
+
+[node name="NPC" parent="." unique_id=1161211969 instance=ExtResource("9_vy5pj")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.4086237, 0.030610561, 16.379036)
+npc_name = "Quest Giver"
+interaction_type = 2
+quest_id = "goblin_killer"
+
+[node name="NPC2" parent="." unique_id=457399412 instance=ExtResource("9_vy5pj")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11.819816, 0.030610561, 16.379036)
+npc_name = "Merchant"
+interaction_type = 1

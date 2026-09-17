@@ -1,0 +1,26 @@
+[gd_scene format=3 uid="uid://pri5axdlbgb1"]
+
+[ext_resource type="Script" uid="uid://dvlmcbdkbeosq" path="res://Scripts/Npc/npc.gd" id="1_dmbe4"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_cay0r"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_dmbe4"]
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_xl0nw"]
+
+[node name="NPC" type="CharacterBody3D" unique_id=1161211969]
+script = ExtResource("1_dmbe4")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=356672423]
+mesh = SubResource("CapsuleMesh_cay0r")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=36705888]
+shape = SubResource("CapsuleShape3D_dmbe4")
+
+[node name="Area3D" type="Area3D" parent="." unique_id=1527726258]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Area3D" unique_id=1311062909]
+transform = Transform3D(2.2, 0, 0, 0, 2.2, 0, 0, 0, 2.2, 0, 0, 0)
+shape = SubResource("SphereShape3D_xl0nw")
+
+[node name="Label3D" type="Label3D" parent="." unique_id=972740889]
