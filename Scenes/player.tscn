@@ -6,16 +6,27 @@
 [ext_resource type="PackedScene" uid="uid://cljkfnkgprjv5" path="res://Scenes/Inventory/InventoryUI.tscn" id="4_3smsa"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_7q7q3"]
+margin = 0.0
+radius = 0.22
+height = 1.58
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_vgqql"]
+properties/0/path = NodePath(".:position")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+properties/1/path = NodePath(".:rotation")
+properties/1/spawn = true
+properties/1/replication_mode = 1
 
 [node name="Player" type="CharacterBody3D" unique_id=1441937363]
-transform = Transform3D(-0.99840355, 0, 0.056483656, 0, 1, 0, -0.056483656, 0, -0.99840355, 0, 0, 0)
 script = ExtResource("1_vgqql")
 
 [node name="CharacterMain" parent="." unique_id=2011961617 instance=ExtResource("2_fkybt")]
-transform = Transform3D(-0.9971851, 0, -0.07497882, 0, 1, 0, 0.07497882, 0, -0.9971851, 0, 0, 0)
+transform = Transform3D(-1, 0, -8.742278e-08, 0, 1, 0, 8.742278e-08, 0, -1, 0, 0, 0)
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=1760512229]
-transform = Transform3D(0.9999999, 0, 0, 0, 1, 0, 0, 0, 0.9999999, 0, 0.97684455, 0)
+transform = Transform3D(0.99997246, 0, -1.1660159e-06, 0, 1, 0, 1.1660159e-06, 0, 0.99997246, 0, 0.72526765, 0)
+top_level = true
 shape = SubResource("CapsuleShape3D_7q7q3")
 
 [node name="Camera3D" type="Camera3D" parent="." unique_id=1548796639]
@@ -97,3 +108,6 @@ offset_bottom = 40.0
 layout_mode = 2
 
 [node name="InventoryUI" parent="ui" unique_id=1342373889 instance=ExtResource("4_3smsa")]
+
+[node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="." unique_id=1105863601]
+replication_config = SubResource("SceneReplicationConfig_vgqql")

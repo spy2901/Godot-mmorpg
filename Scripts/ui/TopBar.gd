@@ -41,6 +41,10 @@ var _autosave_timer: float = 0.0
 var _saving: bool = false
 
 func _ready():
+	if not is_multiplayer_authority():
+		visible = false
+		set_process(false)
+		return
 	add_to_group("hud")
 	get_tree().auto_accept_quit = false
 

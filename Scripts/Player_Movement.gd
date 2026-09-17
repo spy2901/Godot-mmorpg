@@ -20,8 +20,15 @@ var max_zum = 2.0
 @onready var kamera = $Camera3D
 
 func _ready():
+	if not is_multiplayer_authority():
+		set_process_unhandled_input(false)
+		set_physics_process(false)
+		kamera.current = false
+		return
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	add_to_group("player")
+	kamera.current = true
+
 
 func napadni():
 	moze_napasti = false
@@ -38,6 +45,8 @@ func napadni():
 	moze_napasti = true
 
 func _input(event):
+	if not is_multiplayer_authority():
+		return
 	# Drzi desni klik da rotiras kameru
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_RIGHT:
@@ -70,6 +79,8 @@ func _input(event):
 		kamera.rotation.x = clamp(kamera.rotation.x, deg_to_rad(-60), deg_to_rad(60))
 
 func _physics_process(delta):
+	if not is_multiplayer_authority():
+		return
 	if not is_on_floor():
 		velocity.y += gravitacija * delta
 	# Skok sa Space
@@ -92,3 +103,4 @@ func _physics_process(delta):
 	velocity.z = smer.z * brzina
 	
 	move_and_slide()
+

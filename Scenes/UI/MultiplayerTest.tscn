@@ -1,8 +1,34 @@
 [gd_scene format=3 uid="uid://crhan17klim2v"]
 
 [ext_resource type="Script" uid="uid://g2oj230rn8cy" path="res://Scripts/ui/multiplayer_test_ui.gd" id="1_2srvm"]
+[ext_resource type="Script" uid="uid://mq4or082ic8s" path="res://Scripts/Multiplayer/world_spawner.gd" id="2_fs8mr"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_s82ny"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_fs8mr"]
 
 [node name="MultiplayerTest" type="Control" unique_id=1842320786]
 layout_mode = 3
 anchors_preset = 0
 script = ExtResource("1_2srvm")
+
+[node name="World" type="Node3D" parent="." unique_id=2112104597]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.444211, 0)
+script = ExtResource("2_fs8mr")
+
+[node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="World" unique_id=765111053]
+spawn_path = NodePath("..")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=231566872]
+transform = Transform3D(1, 0, 0, 0, -0.011501461, 0.9999339, 0, -0.9999339, -0.011501461, 0, 4.744325, 0)
+
+[node name="Pod" type="StaticBody3D" parent="." unique_id=432892430]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0460923, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Pod" unique_id=1664959211]
+transform = Transform3D(50, 0, 0, 0, 0.1, 0, 0, 0, 50, 0, 0, 0)
+shape = SubResource("BoxShape3D_s82ny")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Pod" unique_id=361310831]
+transform = Transform3D(50, 0, 0, 0, 1, 0, 0, 0, 50, 0, 0, 0)
+mesh = SubResource("BoxMesh_fs8mr")

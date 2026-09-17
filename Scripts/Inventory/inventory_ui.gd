@@ -34,6 +34,10 @@ func _init():
 		inventory_data[i] = {}
 
 func _ready():
+	if not is_multiplayer_authority():
+		visible = false
+		set_process(false)
+		return
 	add_to_group("inventory")
 	_napravi_ui()
 	visible = false

@@ -3,6 +3,8 @@ extends Control
 var _ip_input: LineEdit
 var _status_label: Label
 var _peers_label: Label
+var _host_btn: Button
+var _join_btn: Button
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -35,11 +37,16 @@ func _build() -> void:
 	title.add_theme_color_override("font_color", Color(1.0, 0.82, 0.25))
 	box.add_child(title)
 
-	var host_btn := Button.new()
-	host_btn.text = "Hostuj (port 7777)"
-	host_btn.custom_minimum_size = Vector2(0, 44)
-	host_btn.pressed.connect(func(): NetworkManager.hostuj())
-	box.add_child(host_btn)
+	_host_btn = Button.new()
+	_host_btn.text = "Hostuj (port 7777)"
+	_host_btn.custom_minimum_size = Vector2(0, 44)
+	_host_btn.pressed.connect(func():
+		_host_btn.disabled = true
+		_join_btn.disabled = true
+		NetworkManager.hostuj()
+		$World.pokreni_spawn_za_mene()
+	)
+	box.add_child(_host_btn)
 
 	var lbl := Label.new()
 	lbl.text = "IP servera"
@@ -50,11 +57,15 @@ func _build() -> void:
 	_ip_input.custom_minimum_size = Vector2(0, 40)
 	box.add_child(_ip_input)
 
-	var join_btn := Button.new()
-	join_btn.text = "Pridruži se"
-	join_btn.custom_minimum_size = Vector2(0, 44)
-	join_btn.pressed.connect(func(): NetworkManager.pridruzi_se(_ip_input.text))
-	box.add_child(join_btn)
+	_join_btn = Button.new()
+	_join_btn.text = "Pridruži se"
+	_join_btn.custom_minimum_size = Vector2(0, 44)
+	_join_btn.pressed.connect(func():
+		_host_btn.disabled = true
+		_join_btn.disabled = true
+		NetworkManager.pridruzi_se(_ip_input.text)
+	)
+	box.add_child(_join_btn)
 
 	_status_label = Label.new()
 	_status_label.text = "Nepovezan."
