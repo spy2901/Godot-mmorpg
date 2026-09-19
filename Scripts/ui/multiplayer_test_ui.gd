@@ -67,6 +67,12 @@ func _build() -> void:
 	)
 	box.add_child(_join_btn)
 
+	var goblin_btn := Button.new()
+	goblin_btn.text = "Spawnuj goblina (samo server)"
+	goblin_btn.custom_minimum_size = Vector2(0, 40)
+	goblin_btn.pressed.connect(func(): $World.spawn_goblin())
+	box.add_child(goblin_btn)
+
 	_status_label = Label.new()
 	_status_label.text = "Nepovezan."
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

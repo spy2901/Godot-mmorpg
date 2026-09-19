@@ -19,6 +19,9 @@ script = ExtResource("2_fs8mr")
 [node name="MultiplayerSpawner" type="MultiplayerSpawner" parent="World" unique_id=765111053]
 spawn_path = NodePath("..")
 
+[node name="GoblinSpawner" type="MultiplayerSpawner" parent="World" unique_id=1353383816]
+spawn_path = NodePath("..")
+
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=231566872]
 transform = Transform3D(1, 0, 0, 0, -0.011501461, 0.9999339, 0, -0.9999339, -0.011501461, 0, 4.744325, 0)
 

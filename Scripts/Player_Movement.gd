@@ -33,14 +33,16 @@ func _ready():
 func napadni():
 	moze_napasti = false
 	print("Napadaš za ", napad_damage, " damage!")
-    
-    # Nadji neprijatelja u blizini
+
 	var neprijatelji = get_tree().get_nodes_in_group("neprijatelj")
 	for neprijatelj in neprijatelji:
 		var distanca = global_position.distance_to(neprijatelj.global_position)
-		if distanca < 3.0:  # Range napada
-			neprijatelj.primi_damage(napad_damage)
-    
+		if distanca < 3.0:
+			if multiplayer.multiplayer_peer != null:
+				neprijatelj.zahtevaj_napad.rpc_id(1, napad_damage)
+			else:
+				neprijatelj.primi_damage(napad_damage)
+
 	await get_tree().create_timer(napad_cooldown).timeout
 	moze_napasti = true
 
