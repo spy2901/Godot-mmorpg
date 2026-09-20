@@ -46,5 +46,16 @@ func spawn_goblin() -> void:
 func _spawn_goblin(id: int) -> Node:
 	var goblin = GOBLIN_SCENE.instantiate()
 	goblin.name = "goblin_%d" % id
-	goblin.position = Vector3(randf_range(-3, 3), 2, randf_range(-3, 3))
+	goblin.position = Vector3(randf_range(6, 10), 2, randf_range(6, 10))
 	return goblin
+
+@rpc("call_local", "reliable")
+func despawn_goblin(goblin_name: String) -> void:
+	var g = get_node_or_null(goblin_name)
+	if g:
+		g.queue_free()
+
+func despawn_goblin_svima(goblin_name: String) -> void:
+	if not multiplayer.is_server():
+		return
+	despawn_goblin.rpc(goblin_name)

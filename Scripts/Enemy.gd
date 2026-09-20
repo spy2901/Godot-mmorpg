@@ -21,7 +21,8 @@ extends CharacterBody3D
 var hp = 100:
 	set(value):
 		hp = value
-		_osvezi_hp_label()
+		if is_instance_valid(hp_label):
+			_osvezi_hp_label()
 
 @onready var ime_label = $ImeLabel
 @onready var hp_label = $HpLabel
@@ -47,8 +48,6 @@ func _je_multiplayer_aktivan() -> bool:
 	return multiplayer.multiplayer_peer != null
 
 func _ja_sam_autoritet() -> bool:
-	# U singleplayer-u (bez multiplayer sesije) svako je "autoritet".
-	# U multiplayer-u, samo server sme da pokreće AI/damage.
 	if not _je_multiplayer_aktivan():
 		return true
 	return multiplayer.is_server()
@@ -62,6 +61,12 @@ func _nadji_najblizeg_igraca() -> Node3D:
 			min_dist = d
 			najblizi = p
 	return najblizi
+
+func _nadji_igraca_po_id(peer_id: int) -> Node:
+	for p in get_tree().get_nodes_in_group("player"):
+		if p.get_multiplayer_authority() == peer_id:
+			return p
+	return null
 
 func _osvezi_hp_label() -> void:
 	if hp_label:
@@ -106,57 +111,82 @@ func primi_damage(kolicina):
 	hp -= kolicina
 	hp = max(hp, 0)
 	if hp == 0:
+		if _je_multiplayer_aktivan():
+			_isplati_personal_loot()
+		else:
+			_drop_fizicki_loot()
+
+		var hud = get_tree().get_first_node_in_group("hud")
+		if hud:
+			hud.dodaj_xp(xp_nagrada)
+
+		if _je_multiplayer_aktivan():
+			var goblin_root = get_parent()  # Node3D wrapper
+			var world = goblin_root.get_parent() if goblin_root else null
+			if world and world.has_method("despawn_goblin_svima"):
+				world.despawn_goblin_svima(goblin_root.name)
+			elif goblin_root:
+				goblin_root.queue_free()
+		else:
+			queue_free()
+
+@rpc("call_local", "reliable")
+func _obavesti_smrt() -> void:
+	pass  # samo "reliable" okidač da se despawn sigurno propagira i pre nego što queue_free stigne
+	
+func _drop_fizicki_loot() -> void:
+	for loot in loot_tabela:
+		var roll = randi() % 100 + 1
+		if roll <= loot["sansa"]:
+			var item_scena = load("res://Scenes/Items/item.tscn")
+			var item = item_scena.instantiate()
+			item.ime_itema = loot["id"]
+			get_tree().root.add_child(item)
+			item.global_position = global_position + Vector3(
+				randf_range(-1.0, 1.0),
+				0.5,
+				randf_range(-1.0, 1.0)
+			)
+
+func _isplati_personal_loot() -> void:
+	if not multiplayer.is_server():
+		return
+	var peers: Array = multiplayer.get_peers()
+	if not peers.has(1):
+		peers.append(1)  # host igra i sam
+
+	for peer_id in peers:
+		var igrac = _nadji_igraca_po_id(peer_id)
+		if igrac == null or not igrac.has_method("primi_loot"):
+			continue
 		for loot in loot_tabela:
 			var roll = randi() % 100 + 1
 			if roll <= loot["sansa"]:
-				var item_scena = load("res://Scenes/Items/item.tscn")
-				var item = item_scena.instantiate()
-				item.ime_itema = loot["id"]
-				get_tree().root.add_child(item)
-				item.global_position = global_position + Vector3(
-					randf_range(-1.0, 1.0),
-					0.5,
-					randf_range(-1.0, 1.0)
-				)
-		var giver_id = str(player.name) if player else ""
-		var hud = _nadji_hud_za(giver_id)
-		if hud:
-			hud.dodaj_xp(xp_nagrada)
-		queue_free()
-
-func _nadji_hud_za(peer_ime: String) -> Node:
-	if not _je_multiplayer_aktivan():
-		return get_tree().get_first_node_in_group("hud")
-	if player == null:
-		return null
-	for hud in get_tree().get_nodes_in_group("hud"):
-		if hud.is_multiplayer_authority():
-			return hud
-	return null
+				if peer_id == multiplayer.get_unique_id():
+					igrac.primi_loot(loot["id"], 1)
+				else:
+					igrac.primi_loot.rpc_id(peer_id, loot["id"], 1)
 
 func napadni_igraca():
 	moze_napasti = false
-	if player and player.has_method("primi_damage_od_neprijatelja"):
-		player.primi_damage_od_neprijatelja(napad_damage)
-	else:
-		var hud = get_tree().get_first_node_in_group("hud")
-		if hud:
-			hud.primi_damage(napad_damage)
+	var hud = get_tree().get_first_node_in_group("hud")
+	if hud:
+		hud.primi_damage(napad_damage)
 
 	await get_tree().create_timer(napad_cooldown).timeout
 	moze_napasti = true
-
-# ---------------------------------------------------------------- RPC
 
 @rpc("any_peer")
 func zahtevaj_napad(damage: int) -> void:
 	if not multiplayer.is_server():
 		return
 	var napadac_id = multiplayer.get_remote_sender_id()
-	var napadac = get_parent().get_node_or_null(str(napadac_id))
+	var napadac = _nadji_igraca_po_id(napadac_id)
 	if napadac == null:
+		print("[DEBUG] Napadač nije pronađen, ID: ", napadac_id)
 		return
 	var distanca = global_position.distance_to(napadac.global_position)
+	print("[DEBUG] Napad primljen, distanca: ", distanca)
 	if distanca > 3.5:
 		return
 	primi_damage(damage)
