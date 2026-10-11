@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" uid="uid://ceowldtybmt7n" path="res://Scripts/Player_Movement.gd" id="1_vgqql"]
 [ext_resource type="PackedScene" uid="uid://c2fjbmberid1r" path="res://Models/CharacterMain.glb" id="2_fkybt"]
-[ext_resource type="Script" uid="uid://b5ch8pf68vvb7" path="res://Scripts/ui/TopBar.gd" id="3_x3wgy"]
+[ext_resource type="Script" uid="uid://b5ch8pf68vvb7" path="res://Scripts/UI/TopBar.gd" id="3_x3wgy"]
 [ext_resource type="PackedScene" uid="uid://cljkfnkgprjv5" path="res://Scenes/Inventory/InventoryUI.tscn" id="4_3smsa"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_7q7q3"]

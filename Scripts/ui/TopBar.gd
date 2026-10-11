@@ -195,12 +195,15 @@ func _ucitaj_igraca() -> void:
 	hp = clamp(int(p.get("hp", max_hp)), 1, max_hp)
 	mana = clamp(int(p.get("mana", max_mana)), 0, max_mana)
 
-	var player = get_tree().get_first_node_in_group("player")
+	# Lik ovog klijenta je roditelj HUD-a (TopBar → ui → Player), ne prvi igrač u grupi
+	var player = get_parent().get_parent()
 	if player:
 		player.napad_damage = int(p.get("napad_damage", 250))
 		var pos = Vector3(float(p.get("pos_x", 0)), float(p.get("pos_y", 0)), float(p.get("pos_z", 0)))
 		if pos != Vector3.ZERO:
 			player.global_position = pos
+		# server mora da zna statistike ovog lika (učitava ih iz baze)
+		player.posalji_lik_serveru(ime_igraca)
 
 	hp_bar.max_value = max_hp
 	mana_bar.max_value = max_mana
@@ -221,6 +224,7 @@ func _ucitaj_igraca() -> void:
 	_osvezi_quest_tracker()
 	_ucitano = true
 	print("[SAVE] Lik učitan: Lv.%d, %d gold" % [level, gold])
+
 
 func _notification(what):
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:

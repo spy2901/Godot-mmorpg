@@ -17,11 +17,12 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+Config="*uid://d271eoui3qm2n"
 ApiManager="*uid://t3dw6jiic3yp"
 NetworkManager="*uid://dphwybls24csg"
 GameState="*uid://cwnqbvtliavil"
-DialogueUI="*res://Scripts/ui/dialogue_ui.tscn"
-MerchantUI="*res://Scripts/ui/merchant_ui.tscn"
+DialogueUI="*res://Scripts/UI/dialogue_ui.tscn"
+MerchantUI="*res://Scripts/UI/merchant_ui.tscn"
 QuestManager="*uid://vor7ksgqk5dt"
 
 [display]

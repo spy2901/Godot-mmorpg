@@ -28,6 +28,11 @@ var hp = 100:
 @onready var hp_label = $HpLabel
 
 var player: Node3D = null
+var napadaci: Array = []  # peer ID-jevi koji su naneli damage (dobijaju XP)
+var _mrtav := false
+
+const RETARGET_INTERVAL := 0.5
+var _retarget_timer := 0.0
 
 func _ready():
 	add_to_group("neprijatelj")
@@ -76,13 +81,18 @@ func _physics_process(delta):
 	if not _ja_sam_autoritet():
 		return
 
+	_retarget_timer -= delta
+	if _retarget_timer <= 0.0:
+		_retarget_timer = RETARGET_INTERVAL
+		player = _nadji_najblizeg_igraca_u_aggro()
+
 	if player == null or not is_instance_valid(player):
-		if _je_multiplayer_aktivan():
-			player = _nadji_najblizeg_igraca()
-		else:
-			player = get_tree().get_first_node_in_group("player")
-		if player == null:
-			return
+		velocity.x = 0
+		velocity.z = 0
+		if not is_on_floor():
+			velocity.y -= 9.8 * delta
+		move_and_slide()
+		return
 
 	var distanca = global_position.distance_to(player.global_position)
 
@@ -105,22 +115,29 @@ func _physics_process(delta):
 
 	move_and_slide()
 
-func primi_damage(kolicina):
-	if not _ja_sam_autoritet():
+# Najbliži igrač unutar aggro_range, ili null
+func _nadji_najblizeg_igraca_u_aggro() -> Node3D:
+	var najblizi: Node3D = null
+	var min_dist = aggro_range
+	for p in get_tree().get_nodes_in_group("player"):
+		var d = global_position.distance_to(p.global_position)
+		if d <= min_dist:
+			min_dist = d
+			najblizi = p
+	return najblizi
+
+func primi_damage(kolicina, napadac_id: int = 0):
+	if not _ja_sam_autoritet() or _mrtav:
 		return
+	if napadac_id != 0 and not napadaci.has(napadac_id):
+		napadaci.append(napadac_id)
 	hp -= kolicina
 	hp = max(hp, 0)
 	if hp == 0:
+		_mrtav = true
 		if _je_multiplayer_aktivan():
 			_isplati_personal_loot()
-		else:
-			_drop_fizicki_loot()
-
-		var hud = get_tree().get_first_node_in_group("hud")
-		if hud:
-			hud.dodaj_xp(xp_nagrada)
-
-		if _je_multiplayer_aktivan():
+			_isplati_kill()
 			var goblin_root = get_parent()  # Node3D wrapper
 			var world = goblin_root.get_parent() if goblin_root else null
 			if world and world.has_method("despawn_goblin_svima"):
@@ -128,12 +145,17 @@ func primi_damage(kolicina):
 			elif goblin_root:
 				goblin_root.queue_free()
 		else:
+			_drop_fizicki_loot()
+			var hud = get_tree().get_first_node_in_group("hud")
+			if hud:
+				hud.dodaj_xp(xp_nagrada)
+			QuestManager.azuriraj_progres_kill(ime.to_lower())
 			queue_free()
 
 @rpc("call_local", "reliable")
 func _obavesti_smrt() -> void:
 	pass  # samo "reliable" okidač da se despawn sigurno propagira i pre nego što queue_free stigne
-	
+
 func _drop_fizicki_loot() -> void:
 	for loot in loot_tabela:
 		var roll = randi() % 100 + 1
@@ -162,22 +184,41 @@ func _isplati_personal_loot() -> void:
 		for loot in loot_tabela:
 			var roll = randi() % 100 + 1
 			if roll <= loot["sansa"]:
+				# server prvo zapisuje da lik poseduje predmet
+				igrac.dodaj_u_vlasnistvo(loot["id"], 1)
 				if peer_id == multiplayer.get_unique_id():
 					igrac.primi_loot(loot["id"], 1)
 				else:
 					igrac.primi_loot.rpc_id(peer_id, loot["id"], 1)
+# XP + kill progres za sve koji su naneli damage
+func _isplati_kill() -> void:
+	for peer_id in napadaci:
+		var igrac = _nadji_igraca_po_id(peer_id)
+		if igrac == null:
+			continue
+		if peer_id == multiplayer.get_unique_id():
+			igrac.primi_kill(ime.to_lower(), xp_nagrada)
+		else:
+			igrac.primi_kill.rpc_id(peer_id, ime.to_lower(), xp_nagrada)
 
 func napadni_igraca():
 	moze_napasti = false
-	var hud = get_tree().get_first_node_in_group("hud")
-	if hud:
-		hud.primi_damage(napad_damage)
+	if _je_multiplayer_aktivan():
+		var peer_id = player.get_multiplayer_authority()
+		if peer_id == multiplayer.get_unique_id():
+			player.primi_damage_od_neprijatelja(napad_damage)
+		else:
+			player.primi_damage_od_neprijatelja.rpc_id(peer_id, napad_damage)
+	else:
+		var hud = get_tree().get_first_node_in_group("hud")
+		if hud:
+			hud.primi_damage(napad_damage)
 
 	await get_tree().create_timer(napad_cooldown).timeout
 	moze_napasti = true
 
 @rpc("any_peer")
-func zahtevaj_napad(damage: int) -> void:
+func zahtevaj_napad() -> void:
 	if not multiplayer.is_server():
 		return
 	var napadac_id = multiplayer.get_remote_sender_id()
@@ -186,7 +227,7 @@ func zahtevaj_napad(damage: int) -> void:
 		print("[DEBUG] Napadač nije pronađen, ID: ", napadac_id)
 		return
 	var distanca = global_position.distance_to(napadac.global_position)
-	print("[DEBUG] Napad primljen, distanca: ", distanca)
 	if distanca > 3.5:
 		return
-	primi_damage(damage)
+	# damage računa server: baza lika + bonus oružja
+	primi_damage(napadac.izracunaj_damage(), napadac_id)

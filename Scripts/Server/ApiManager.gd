@@ -1,6 +1,5 @@
 extends Node
 
-const SERVER_URL = "http://localhost:8000"
 
 func _zahtev(path: String, method: int = HTTPClient.METHOD_GET, body: Dictionary = {}) -> Variant:
 	var http = HTTPRequest.new()
@@ -12,7 +11,7 @@ func _zahtev(path: String, method: int = HTTPClient.METHOD_GET, body: Dictionary
 		headers = ["Content-Type: application/json"]
 		body_str = JSON.stringify(body)
 
-	var err = http.request(SERVER_URL + path, headers, method, body_str)
+	var err = http.request(Config.SERVER_URL + path, headers, method, body_str)
 	if err != OK:
 		print("[API] HTTP greška: ", path)
 		http.queue_free()

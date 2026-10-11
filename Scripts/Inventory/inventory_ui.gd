@@ -380,6 +380,8 @@ func _opremi_item(inventory_index: int, eq_slot: String):
 	_prikazi_opremu(eq_slot, item)
 	osvezi_slot(inventory_index)
 	print("Opremio: ", item.get("ime", ""), " u slot: ", eq_slot)
+	if eq_slot == "weapon":
+		_posalji_oruzje(str(item.get("id", "")))
 	_oznaci_promenu()
 
 func _on_equipment_slot_input(event: InputEvent, eq_slot: String):
@@ -397,9 +399,21 @@ func _skini_opremu(eq_slot: String):
 			_prikazi_opremu(eq_slot, {})
 			osvezi_slot(i)
 			print("Skinuo: ", item.get("ime", ""))
+			if eq_slot == "weapon":
+				_posalji_oruzje("")
 			_oznaci_promenu()
 			return
 	print("Inventory je pun, ne mogu da skinem opremu!")
+
+# Javi serveru koje oružje je opremljeno (host ga postavlja direktno, klijent preko RPC-a)
+func _posalji_oruzje(item_id: String) -> void:
+	var player = get_parent().get_parent()
+	if player == null or not player.has_method("postavi_oruzje"):
+		return
+	if multiplayer.multiplayer_peer == null or multiplayer.is_server():
+		player.postavi_oruzje(item_id)
+	else:
+		player.postavi_oruzje.rpc_id(1, item_id)
 
 func _prikazi_opremu(eq_slot: String, item: Dictionary):
 	var slot_panel = equipment_slots[eq_slot]

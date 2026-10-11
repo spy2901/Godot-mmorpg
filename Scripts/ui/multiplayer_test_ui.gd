@@ -1,5 +1,6 @@
 extends Control
 
+var _menu: Control
 var _ip_input: LineEdit
 var _status_label: Label
 var _peers_label: Label
@@ -10,20 +11,53 @@ func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_build()
 	NetworkManager.server_started.connect(_osvezi)
+	NetworkManager.server_started.connect(_sakrij_meni)
 	NetworkManager.connected_to_server.connect(_osvezi)
-	NetworkManager.connection_failed.connect(func(): _status_label.text = "Konekcija neuspešna.")
+	NetworkManager.connected_to_server.connect(_sakrij_meni)
+	NetworkManager.connection_failed.connect(_on_konekcija_neuspesna)
 	NetworkManager.peer_connected.connect(func(_id): _osvezi())
 	NetworkManager.peer_disconnected.connect(func(_id): _osvezi())
 
+	if OS.has_feature("dedicated_server"):
+		_auto_host()
+
+func _auto_host() -> void:
+	print("[SERVER] Dedicated server build detektovan — auto-hostujem...")
+	_host_btn.disabled = true
+	_join_btn.disabled = true
+	if NetworkManager.hostuj():
+		print("[SERVER] Sluša na portu ", NetworkManager.DEFAULT_PORT)
+		$World.pokreni_spawn_tacke()
+	else:
+		print("[SERVER] Hostovanje nije uspelo!")
+
+func _sakrij_meni() -> void:
+	_menu.visible = false
+
+func _on_konekcija_neuspesna() -> void:
+	_status_label.text = "Konekcija neuspešna."
+	_host_btn.disabled = false
+	_join_btn.disabled = false
+	_menu.visible = true
+
+# F1 pokazuje/sakriva meni (npr. za dugme "Spawnuj goblina" na hostu)
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
+		_menu.visible = not _menu.visible
+
 func _build() -> void:
+	_menu = Control.new()
+	_menu.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_menu)
+
 	var bg := ColorRect.new()
 	bg.color = Color(0.05, 0.04, 0.04)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(bg)
+	_menu.add_child(bg)
 
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(center)
+	_menu.add_child(center)
 
 	var box := VBoxContainer.new()
 	box.custom_minimum_size = Vector2(360, 0)
@@ -45,6 +79,7 @@ func _build() -> void:
 		_join_btn.disabled = true
 		NetworkManager.hostuj()
 		$World.pokreni_spawn_za_mene()
+		$World.pokreni_spawn_tacke()
 	)
 	box.add_child(_host_btn)
 
@@ -53,7 +88,7 @@ func _build() -> void:
 	box.add_child(lbl)
 
 	_ip_input = LineEdit.new()
-	_ip_input.text = "127.0.0.1"
+	_ip_input.text = "100.79.170.67"
 	_ip_input.custom_minimum_size = Vector2(0, 40)
 	box.add_child(_ip_input)
 

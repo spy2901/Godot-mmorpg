@@ -1,22 +1,79 @@
 extends Node3D
 
 const PLAYER_SCENE = preload("res://Scenes/player.tscn")
-const GOBLIN_SCENE = preload("res://Scenes/Enemies/goblin.tscn")
+const ENEMY_SCENES := {
+	"goblin": preload("res://Scenes/Enemies/goblin.tscn"),
+	"skeleton": preload("res://Scenes/Enemies/skeleton.tscn"),
+	"troll": preload("res://Scenes/Enemies/troll.tscn"),
+}
+const RESPAWN_DELAY := 5.0
 
 @onready var spawner := $MultiplayerSpawner
-@onready var goblin_spawner := $GoblinSpawner
+@onready var goblin_spawner := $GoblinSpawner  # spawner za sve neprijatelje
 
-var _goblin_counter := 0
+var _enemy_counter := 0
+var _aktivno := false
+var _zivi := {}     # spawn_tacka -> Node neprijatelja koji je trenutno živ
+var _cekanje := {}  # spawn_tacka -> preostalo vreme do sledećeg spawna
 
 func _ready() -> void:
 	spawner.spawn_function = _spawn_player
-	goblin_spawner.spawn_function = _spawn_goblin
+	goblin_spawner.spawn_function = _spawn_enemy
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 
 func pokreni_spawn_za_mene() -> void:
 	if NetworkManager.je_server():
 		_spawn_za(1)
+
+# Server poziva ovo kad krene da sluša. Od tog trenutka tačke održavaju neprijatelje.
+func pokreni_spawn_tacke() -> void:
+	if NetworkManager.je_server():
+		_aktivno = true
+
+func _process(delta: float) -> void:
+	if not _aktivno:
+		return
+	for tacka in get_tree().get_nodes_in_group("spawn_tacka"):
+		var zivi = _zivi.get(tacka)
+		if is_instance_valid(zivi):
+			continue
+		if _zivi.has(tacka):  # bio je živ, sad je mrtav
+			_zivi.erase(tacka)
+			_cekanje[tacka] = RESPAWN_DELAY
+		if not _cekanje.has(tacka):
+			_cekanje[tacka] = 0.0  # prvi spawn odmah
+		_cekanje[tacka] -= delta
+		if _cekanje[tacka] <= 0.0:
+			_cekanje.erase(tacka)
+			var novi = _spawn_na_tacki(tacka)
+			if novi:
+				_zivi[tacka] = novi
+
+func _spawn_na_tacki(tacka: Node3D) -> Node:
+	var vrsta: String = tacka.vrsta
+	if not ENEMY_SCENES.has(vrsta):
+		print("[SPAWN] Nepoznata vrsta na tački: ", vrsta)
+		return null
+	_enemy_counter += 1
+	return goblin_spawner.spawn({"vrsta": vrsta, "id": _enemy_counter, "pos": tacka.position})
+
+# Ručni spawn goblina (dugme u test meniju)
+func spawn_goblin() -> void:
+	if not NetworkManager.je_server():
+		return
+	_enemy_counter += 1
+	goblin_spawner.spawn({
+		"vrsta": "goblin",
+		"id": _enemy_counter,
+		"pos": Vector3(randf_range(6, 10), 2, randf_range(6, 10)),
+	})
+
+func _spawn_enemy(data: Dictionary) -> Node:
+	var enemy = ENEMY_SCENES[data["vrsta"]].instantiate()
+	enemy.name = "%s_%d" % [data["vrsta"], data["id"]]
+	enemy.position = data["pos"]
+	return enemy
 
 func _on_peer_connected(id: int) -> void:
 	if NetworkManager.je_server():
@@ -36,18 +93,6 @@ func _spawn_player(id: int) -> Node:
 	player.set_multiplayer_authority(id)
 	player.position = Vector3(randf_range(-2, 2), 1, randf_range(-2, 2))
 	return player
-
-func spawn_goblin() -> void:
-	if not NetworkManager.je_server():
-		return
-	_goblin_counter += 1
-	goblin_spawner.spawn(_goblin_counter)
-
-func _spawn_goblin(id: int) -> Node:
-	var goblin = GOBLIN_SCENE.instantiate()
-	goblin.name = "goblin_%d" % id
-	goblin.position = Vector3(randf_range(6, 10), 2, randf_range(6, 10))
-	return goblin
 
 @rpc("call_local", "reliable")
 func despawn_goblin(goblin_name: String) -> void:

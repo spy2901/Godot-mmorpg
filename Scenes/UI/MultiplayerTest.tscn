@@ -1,7 +1,8 @@
 [gd_scene format=3 uid="uid://crhan17klim2v"]
 
-[ext_resource type="Script" uid="uid://g2oj230rn8cy" path="res://Scripts/ui/multiplayer_test_ui.gd" id="1_2srvm"]
+[ext_resource type="Script" uid="uid://g2oj230rn8cy" path="res://Scripts/UI/multiplayer_test_ui.gd" id="1_2srvm"]
 [ext_resource type="Script" uid="uid://mq4or082ic8s" path="res://Scripts/Multiplayer/world_spawner.gd" id="2_fs8mr"]
+[ext_resource type="Script" uid="uid://bmc5k05mq4i0x" path="res://Scripts/World/spawn_point.gd" id="3_s82ny"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_s82ny"]
 
@@ -21,6 +22,20 @@ spawn_path = NodePath("..")
 
 [node name="GoblinSpawner" type="MultiplayerSpawner" parent="World" unique_id=1353383816]
 spawn_path = NodePath("..")
+
+[node name="Tacka_Goblin1" type="Marker3D" parent="World" unique_id=1551551359]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -15.2096615, 2, 0)
+script = ExtResource("3_s82ny")
+
+[node name="Tacka_Skeleton1" type="Marker3D" parent="World" unique_id=846289483]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 2, 0)
+script = ExtResource("3_s82ny")
+vrsta = "skeleton"
+
+[node name="Tacka_Troll1" type="Marker3D" parent="World" unique_id=1126996650]
+transform = Transform3D(1, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 15)
+script = ExtResource("3_s82ny")
+vrsta = "troll"
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=231566872]
 transform = Transform3D(1, 0, 0, 0, -0.011501461, 0.9999339, 0, -0.9999339, -0.011501461, 0, 4.744325, 0)
