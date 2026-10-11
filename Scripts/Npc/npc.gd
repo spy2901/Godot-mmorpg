@@ -125,6 +125,10 @@ func _handle_quest_giver() -> void:
 			var quest = QuestManager.aktivni_quest
 			DialogueUI.open_quest_turnin(npc_name, quest, func():
 				var nagrada = await QuestManager.predaj_quest()
+				if nagrada.is_empty():
+					var poruka = QuestManager.zadnja_greska if QuestManager.zadnja_greska != "" else "Predaja nije uspela."
+					DialogueUI.open(npc_name, [poruka], portret)
+					return
 				_isplati_nagradu(nagrada)
 				await _ponudi_sledeci(nagrada)
 			, portret)
@@ -157,16 +161,11 @@ func _handle_quest_giver() -> void:
 		portret
 	)
 
+# Zlato i item isplaćuje QuestManager.predaj_quest (online preko servera)
 func _isplati_nagradu(quest: Dictionary) -> void:
 	var hud = get_tree().get_first_node_in_group("hud")
 	if hud:
-		hud.dodaj_gold(int(quest.get("nagrada_gold", 0)))
 		hud.dodaj_xp(int(quest.get("nagrada_xp", 0)))
-	var item_id = _safe_str(quest.get("nagrada_item"))
-	if item_id != "":
-		var inventory = get_tree().get_first_node_in_group("inventory")
-		if inventory:
-			inventory.dodaj_item_u_slot(item_id)
 
 func _ponudi_sledeci(zavrsen_quest: Dictionary) -> void:
 	var sledeci_id = _safe_str(zavrsen_quest.get("sledeci_quest"))

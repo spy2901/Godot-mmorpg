@@ -275,11 +275,18 @@ func _osvezi_quest_tracker() -> void:
 
 # ---------------------------------------------------------------- STATS
 
+# Online: zlato postavlja server (odgovor kupovine / predaje questa)
+func postavi_gold(novo: int) -> void:
+	gold = novo
+	_osvezi_gold()
+
+# samo za offline režim
 func dodaj_gold(kolicina: int) -> void:
 	gold += kolicina
 	_osvezi_gold()
 	oznaci_promenu()
 
+# samo za offline režim
 func potrosi_gold(kolicina: int) -> bool:
 	if gold < kolicina:
 		return false
@@ -403,3 +410,6 @@ func _process(delta):
 	if _autosave_timer >= AUTOSAVE_INTERVAL:
 		_autosave_timer = 0.0
 		sacuvaj_igraca()
+
+
+#  ------------------------------------------------------------------ GOLD

@@ -56,6 +56,7 @@ func _spawn_na_tacki(tacka: Node3D) -> Node:
 		print("[SPAWN] Nepoznata vrsta na tački: ", vrsta)
 		return null
 	_enemy_counter += 1
+	print("[SPAWN] ", vrsta, " na ", tacka.name, " (", tacka.position, ")")
 	return goblin_spawner.spawn({"vrsta": vrsta, "id": _enemy_counter, "pos": tacka.position})
 
 # Ručni spawn goblina (dugme u test meniju)

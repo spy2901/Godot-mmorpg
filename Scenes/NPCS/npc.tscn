@@ -4,6 +4,9 @@
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_cay0r"]
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_dmbe4"]
+albedo_color = Color(0, 0, 0, 1)
+
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_dmbe4"]
 
 [sub_resource type="SphereShape3D" id="SphereShape3D_xl0nw"]
@@ -13,6 +16,7 @@ script = ExtResource("1_dmbe4")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="." unique_id=356672423]
 mesh = SubResource("CapsuleMesh_cay0r")
+surface_material_override/0 = SubResource("StandardMaterial3D_dmbe4")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="." unique_id=36705888]
 shape = SubResource("CapsuleShape3D_dmbe4")

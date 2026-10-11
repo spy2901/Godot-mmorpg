@@ -120,6 +120,26 @@ func postavi_oruzje(item_id: String) -> void:
 func posjeduje(item_id: String) -> bool:
 	return vlasnistvo.get(item_id, 0) > 0
 
+func server_isplati_loot(item_ids: Array) -> void:
+	if not multiplayer.is_server():
+		return
+	if ime_lika == "":
+		print("[LOOT] Lik nije registrovan (ime_lika prazno), loot preskočen")
+		return
+	print("[LOOT] Isplata za ", ime_lika, ": ", item_ids)
+	for item_id in item_ids:
+		var r = await ApiManager.promeni_inventar(ime_lika, str(item_id), 1)
+		if r.get("status", "") != "ok":
+			print("[LOOT] Odbijeno za ", ime_lika, ": ", item_id, " (", r.get("error", "server nedostupan"), ")")
+			continue
+		dodaj_u_vlasnistvo(str(item_id), 1)
+		print("[LOOT] ", ime_lika, " +", item_id)
+		var vlasnik := get_multiplayer_authority()
+		if vlasnik == multiplayer.get_unique_id():
+			primi_loot(str(item_id), 1)
+		else:
+			primi_loot.rpc_id(vlasnik, str(item_id), 1)
+			
 # Server poziva ovo kad sam dodeli predmet (loot), pre slanja RPC-a klijentu
 func dodaj_u_vlasnistvo(item_id: String, kolicina: int = 1) -> void:
 	vlasnistvo[item_id] = vlasnistvo.get(item_id, 0) + kolicina
@@ -135,6 +155,193 @@ func _primeni_oruzje(item_id: String) -> void:
 		return
 	bonus_oruzja = int(item.get("damage", 0))
 	print("[SERVER] Oružje ", item_id, " bonus: ", bonus_oruzja)
+
+# ---------------------------------------------------------------- KUPOVINA I QUESTOVI KROZ SERVER
+
+signal kupovina_odgovor(odgovor: Dictionary)
+signal quest_prihvat_odgovor(odgovor: Dictionary)
+signal quest_predaja_odgovor(odgovor: Dictionary)
+
+const ZAHTEV_TIMEOUT_MS := 8000
+var _zahtevi_u_toku: Dictionary = {}  # klijent: tip -> true dok čeka odgovor
+var _server_zauzet: Dictionary = {}   # server: tip -> true dok se izvršava
+
+func skini_iz_vlasnistva(item_id: String, kolicina: int = 1) -> void:
+	var ostalo: int = vlasnistvo.get(item_id, 0) - kolicina
+	if ostalo <= 0:
+		vlasnistvo.erase(item_id)
+	else:
+		vlasnistvo[item_id] = ostalo
+
+# --- klijent (zovu UI-ji)
+
+func kupi_na_serveru(item_id: String) -> Dictionary:
+	return await _posalji_i_cekaj("kupovina", kupovina_odgovor, zatrazi_kupovinu, item_id)
+
+func prihvati_quest_na_serveru(quest_id: String) -> Dictionary:
+	return await _posalji_i_cekaj("prihvat", quest_prihvat_odgovor, zatrazi_prihvat_questa, quest_id)
+
+func predaj_quest_na_serveru(quest_id: String) -> Dictionary:
+	return await _posalji_i_cekaj("predaja", quest_predaja_odgovor, zatrazi_predaju_questa, quest_id)
+
+func odustani_quest_na_serveru() -> void:
+	if multiplayer.is_server():
+		zatrazi_odustajanje()
+	else:
+		zatrazi_odustajanje.rpc_id(1)
+
+# Pošalje zahtev serveru (host: direktan poziv) i čeka signal odgovora, najviše 8 s.
+# Kasni odgovor posle timeouta nema više slušaoca, pa se ignoriše.
+func _posalji_i_cekaj(tip: String, odgovor_signal: Signal, zahtev: Callable, arg: String) -> Dictionary:
+	if _zahtevi_u_toku.get(tip, false):
+		return {"ok": false, "poruka": "Zahtev je u toku"}
+	_zahtevi_u_toku[tip] = true
+	var stanje := {"odgovor": null}
+	var primi := func(d: Dictionary): stanje.odgovor = d
+	odgovor_signal.connect(primi)
+	if multiplayer.is_server():
+		zahtev.call(arg)
+	else:
+		zahtev.rpc_id(1, arg)
+	var rok := Time.get_ticks_msec() + ZAHTEV_TIMEOUT_MS
+	while stanje.odgovor == null and Time.get_ticks_msec() < rok:
+		await get_tree().process_frame
+	odgovor_signal.disconnect(primi)
+	_zahtevi_u_toku.erase(tip)
+	if stanje.odgovor == null:
+		return {"ok": false, "poruka": "Server ne odgovara"}
+	return stanje.odgovor
+
+# --- server
+
+func _posiljalac_je_vlasnik() -> bool:
+	var posiljalac := multiplayer.get_remote_sender_id()
+	return posiljalac == 0 or posiljalac == get_multiplayer_authority()
+
+# Odgovor vlasniku lika; ako je vlasnik sam server, poziv je lokalan (emituje signal).
+func _odgovori(odgovor: Callable, d: Dictionary) -> void:
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik == multiplayer.get_unique_id():
+		odgovor.call(d)
+	else:
+		odgovor.rpc_id(vlasnik, d)
+
+# Zajedničke provere za zahteve; vraća poruku greške ili "" ako sme da se izvrši.
+func _greska_zahteva(tip: String) -> String:
+	if ime_lika == "":
+		return "Lik nije registrovan"
+	if _server_zauzet.get(tip, false):
+		return "Zahtev je u toku"
+	return ""
+
+func _neuspeh(r: Dictionary) -> Dictionary:
+	return {"ok": false, "poruka": str(r.get("error", "Server nedostupan"))}
+
+@rpc("any_peer", "reliable")
+func zatrazi_kupovinu(item_id: String) -> void:
+	if not multiplayer.is_server():
+		return
+	if not _posiljalac_je_vlasnik():
+		return
+	var greska := _greska_zahteva("kupovina")
+	if greska != "":
+		_odgovori(odgovor_kupovina, {"ok": false, "poruka": greska})
+		return
+	_server_zauzet["kupovina"] = true
+	var r: Dictionary = await ApiManager.kupi_item(ime_lika, item_id)
+	_server_zauzet.erase("kupovina")
+	if r.get("status", "") != "ok":
+		print("[SHOP] Odbijeno za ", ime_lika, ": ", item_id, " (", r.get("error", "server nedostupan"), ")")
+		_odgovori(odgovor_kupovina, _neuspeh(r))
+		return
+	dodaj_u_vlasnistvo(item_id, 1)
+	print("[SHOP] ", ime_lika, " kupio ", item_id)
+	_odgovori(odgovor_kupovina, {"ok": true, "gold": r.get("gold", 0), "item_id": item_id})
+
+@rpc("any_peer", "reliable")
+func zatrazi_prihvat_questa(quest_id: String) -> void:
+	if not multiplayer.is_server():
+		return
+	if not _posiljalac_je_vlasnik():
+		return
+	var greska := _greska_zahteva("prihvat")
+	if greska != "":
+		_odgovori(odgovor_prihvat, {"ok": false, "poruka": greska})
+		return
+	_server_zauzet["prihvat"] = true
+	var r: Dictionary = await ApiManager.prihvati_quest_server(ime_lika, quest_id)
+	_server_zauzet.erase("prihvat")
+	var ok: bool = r.get("status", "") == "ok"
+	_odgovori(odgovor_prihvat, {
+		"ok": ok,
+		"quest": r.get("quest", {}),
+		"poruka": "" if ok else str(r.get("error", "Server nedostupan"))
+	})
+
+@rpc("any_peer", "reliable")
+func zatrazi_predaju_questa(quest_id: String) -> void:
+	if not multiplayer.is_server():
+		return
+	if not _posiljalac_je_vlasnik():
+		return
+	var greska := _greska_zahteva("predaja")
+	if greska != "":
+		_odgovori(odgovor_predaja, {"ok": false, "poruka": greska})
+		return
+	_server_zauzet["predaja"] = true
+	var r: Dictionary = await ApiManager.predaj_quest_server(ime_lika, quest_id)
+	_server_zauzet.erase("predaja")
+	if r.get("status", "") != "ok":
+		print("[QUEST] Predaja odbijena za ", ime_lika, ": ", quest_id, " (", r.get("error", "server nedostupan"), ")")
+		_odgovori(odgovor_predaja, _neuspeh(r))
+		return
+	var quest: Dictionary = r.get("quest", {})
+	var nagrada: Dictionary = r.get("nagrada", {})
+	if str(quest.get("tip", "")) == "fetch":
+		skini_iz_vlasnistva(str(quest.get("cilj", "")), int(quest.get("kolicina", 1)))
+	var nagrada_item = nagrada.get("item")
+	if nagrada_item != null and str(nagrada_item) != "":
+		dodaj_u_vlasnistvo(str(nagrada_item), 1)
+	print("[QUEST] ", ime_lika, " predao ", quest_id)
+	_odgovori(odgovor_predaja, {"ok": true, "nagrada": nagrada, "gold": r.get("gold", 0), "quest": quest})
+
+@rpc("any_peer", "reliable")
+func zatrazi_odustajanje() -> void:
+	if not multiplayer.is_server():
+		return
+	if not _posiljalac_je_vlasnik():
+		return
+	if _greska_zahteva("odustajanje") != "":
+		return
+	_server_zauzet["odustajanje"] = true
+	await ApiManager.odustani_quest_server(ime_lika)
+	_server_zauzet.erase("odustajanje")
+
+# Enemy poziva na serveru za svakog napadača kad neprijatelj umre
+func server_zabelezi_kill(tip: String) -> void:
+	if not multiplayer.is_server() or ime_lika == "":
+		return
+	await ApiManager.zabelezi_kill_server(ime_lika, tip)
+
+# --- odgovori ka klijentu
+
+@rpc("any_peer", "reliable")
+func odgovor_kupovina(d: Dictionary) -> void:
+	if not _poziv_od_servera():
+		return
+	kupovina_odgovor.emit(d)
+
+@rpc("any_peer", "reliable")
+func odgovor_prihvat(d: Dictionary) -> void:
+	if not _poziv_od_servera():
+		return
+	quest_prihvat_odgovor.emit(d)
+
+@rpc("any_peer", "reliable")
+func odgovor_predaja(d: Dictionary) -> void:
+	if not _poziv_od_servera():
+		return
+	quest_predaja_odgovor.emit(d)
 
 func _input(event):
 	if not is_multiplayer_authority():

@@ -5,6 +5,7 @@ var _list: VBoxContainer
 var _title: Label
 var _active: bool = false
 var _feedback_label: Label
+var _kupovina_u_toku: bool = false
 
 func _ready() -> void:
 	layer = 50
@@ -88,6 +89,9 @@ func open(npc_name: String) -> void:
 		_add_item_row(item)
 
 func _add_item_row(item: Dictionary) -> void:
+	# quest itemi i itemi bez cene se ne prodaju
+	if int(item.get("quest_item", 0)) == 1 or int(item.get("vrednost", 0)) <= 0:
+		return
 	var row := HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
@@ -113,7 +117,7 @@ func _add_item_row(item: Dictionary) -> void:
 	_list.add_child(row)
 
 func _on_buy(item: Dictionary) -> void:
-	var item_id = item.get("id", "")
+	var item_id = str(item.get("id", ""))
 	if item_id == "":
 		return
 
@@ -122,15 +126,29 @@ func _on_buy(item: Dictionary) -> void:
 	if hud == null:
 		return
 
+	# Online: server proverava zlato i upisuje kupovinu u bazu
+	if multiplayer.multiplayer_peer != null:
+		if _kupovina_u_toku:
+			return
+		var player = hud.get_parent().get_parent()
+		if player == null or not player.has_method("kupi_na_serveru"):
+			return
+		_kupovina_u_toku = true
+		var o: Dictionary = await player.kupi_na_serveru(item_id)
+		_kupovina_u_toku = false
+		if o.get("ok", false):
+			hud.postavi_gold(int(o.get("gold", hud.gold)))
+			hud.inventory_ui.dodaj_item_u_slot(item_id)
+			_pokazi_feedback("Kupljeno: %s" % item.get("ime", item_id), true)
+		else:
+			_pokazi_feedback(str(o.get("poruka", "Kupovina nije uspela.")), false)
+		return
+
+	# Offline: lokalno
 	if not hud.potrosi_gold(cijena):
 		_pokazi_feedback("Nedovoljno golda! Treba: %d 🪙" % cijena, false)
 		return
-
-	var inventory = get_tree().get_root().get_node("Node3D/Player/ui/InventoryUI")
-	if inventory == null:
-		return
-
-	inventory.dodaj_item_u_slot(item_id)
+	hud.inventory_ui.dodaj_item_u_slot(item_id)
 	_pokazi_feedback("Kupljeno: %s" % item.get("ime", item_id), true)
 
 func _pokazi_feedback(tekst: String, uspjeh: bool) -> void:

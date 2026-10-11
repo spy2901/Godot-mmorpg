@@ -3,6 +3,7 @@
 [ext_resource type="Script" uid="uid://g2oj230rn8cy" path="res://Scripts/UI/multiplayer_test_ui.gd" id="1_2srvm"]
 [ext_resource type="Script" uid="uid://mq4or082ic8s" path="res://Scripts/Multiplayer/world_spawner.gd" id="2_fs8mr"]
 [ext_resource type="Script" uid="uid://bmc5k05mq4i0x" path="res://Scripts/World/spawn_point.gd" id="3_s82ny"]
+[ext_resource type="PackedScene" uid="uid://pri5axdlbgb1" path="res://Scenes/NPCS/npc.tscn" id="4_h58xs"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_s82ny"]
 
@@ -50,3 +51,7 @@ shape = SubResource("BoxShape3D_s82ny")
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Pod" unique_id=361310831]
 transform = Transform3D(50, 0, 0, 0, 1, 0, 0, 0, 50, 0, 0, 0)
 mesh = SubResource("BoxMesh_fs8mr")
+
+[node name="NPC" parent="." unique_id=1161211969 instance=ExtResource("4_h58xs")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.8684697, -10)
+interaction_type = 1

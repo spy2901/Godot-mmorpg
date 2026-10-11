@@ -5,6 +5,7 @@ var progres: int = 0
 var quest_zavrsen: bool = false
 var zavrseni_questovi: Array = []
 var ime_igraca: String = ""
+var zadnja_greska := ""
 
 signal quest_prihvacen(quest: Dictionary)
 signal quest_progres_azuriran(trenutno: int, ukupno: int)
@@ -15,6 +16,16 @@ signal quest_odustao()
 func _inventory():
 	return get_tree().get_first_node_in_group("inventory")
 
+func _online() -> bool:
+	return multiplayer.multiplayer_peer != null
+
+# Lik ovog klijenta: TopBar (hud) → ui → Player
+func _igrac():
+	var hud = get_tree().get_first_node_in_group("hud")
+	if hud == null or hud.get_parent() == null:
+		return null
+	return hud.get_parent().get_parent()
+
 func _oznaci_promenu() -> void:
 	var hud = get_tree().get_first_node_in_group("hud")
 	if hud and hud.has_method("oznaci_promenu"):
@@ -23,9 +34,23 @@ func _oznaci_promenu() -> void:
 # ---------------------------------------------------------------- PRIHVATANJE
 
 func prihvati_quest(quest: Dictionary) -> void:
+	zadnja_greska = ""
 	if not aktivni_quest.is_empty():
 		print("[QUEST] Vec imas aktivan quest: %s" % aktivni_quest.get("naziv", ""))
 		return
+	if _online():
+		var igrac = _igrac()
+		var o: Dictionary = {"ok": false, "poruka": "Igrač nije pronađen"}
+		if igrac:
+			o = await igrac.prihvati_quest_na_serveru(str(quest.get("id", "")))
+		if not o.get("ok", false):
+			zadnja_greska = str(o.get("poruka", ""))
+			print("[QUEST] Prihvat odbijen: %s" % zadnja_greska)
+			DialogueUI.open("Zadatak", [zadnja_greska])
+			return
+	_lokalno_prihvati(quest)
+
+func _lokalno_prihvati(quest: Dictionary) -> void:
 	aktivni_quest = quest
 	progres = 0
 	quest_zavrsen = false
@@ -80,6 +105,7 @@ func azuriraj_progres_fetch(_item_id: String) -> void:
 # ---------------------------------------------------------------- PREDAJA
 
 func predaj_quest() -> Dictionary:
+	zadnja_greska = ""
 	if aktivni_quest.is_empty():
 		return {}
 	if not quest_zavrsen:
@@ -88,20 +114,43 @@ func predaj_quest() -> Dictionary:
 
 	var zavrsen = aktivni_quest.duplicate()
 	var quest_id = str(zavrsen.get("id", ""))
+	var inv = _inventory()
+	var hud = get_tree().get_first_node_in_group("hud")
 
-	# Fetch: oduzmi predate iteme iz inventorija
-	if zavrsen.get("tip", "") == "fetch":
-		var inv = _inventory()
-		var cilj = str(zavrsen.get("cilj", ""))
-		var kolicina = int(zavrsen.get("kolicina", 1))
-		if inv == null or not inv.ukloni_item(cilj, kolicina):
-			print("[QUEST] Nemaš dovoljno %s za predaju!" % cilj)
+	if _online():
+		# server proverava i isplaćuje; ovde je samo lokalno ogledalo
+		var igrac = _igrac()
+		var o: Dictionary = {"ok": false, "poruka": "Igrač nije pronađen"}
+		if igrac:
+			o = await igrac.predaj_quest_na_serveru(quest_id)
+		if not o.get("ok", false):
+			zadnja_greska = str(o.get("poruka", ""))
+			print("[QUEST] Predaja odbijena: %s" % zadnja_greska)
 			return {}
+		if zavrsen.get("tip", "") == "fetch" and inv:
+			inv.ukloni_item(str(zavrsen.get("cilj", "")), int(zavrsen.get("kolicina", 1)))
+		if hud:
+			hud.postavi_gold(int(o.get("gold", hud.gold)))
+		var nagrada: Dictionary = o.get("nagrada", {})
+		var item = nagrada.get("item")
+		if item != null and str(item) != "" and inv:
+			inv.dodaj_item_u_slot(str(item))
+	else:
+		# Offline: lokalno skidanje fetch itema i isplata nagrade
+		if zavrsen.get("tip", "") == "fetch":
+			var cilj = str(zavrsen.get("cilj", ""))
+			var kolicina = int(zavrsen.get("kolicina", 1))
+			if inv == null or not inv.ukloni_item(cilj, kolicina):
+				print("[QUEST] Nemaš dovoljno %s za predaju!" % cilj)
+				return {}
+		if hud:
+			hud.dodaj_gold(int(zavrsen.get("nagrada_gold", 0)))
+		var item = zavrsen.get("nagrada_item")
+		if item != null and str(item) != "" and inv:
+			inv.dodaj_item_u_slot(str(item))
 
-	if quest_id != "":
-		await ApiManager.complete_quest(ime_igraca, quest_id)
-		if not zavrseni_questovi.has(quest_id):
-			zavrseni_questovi.append(quest_id)
+	if quest_id != "" and not zavrseni_questovi.has(quest_id):
+		zavrseni_questovi.append(quest_id)
 
 	aktivni_quest = {}
 	progres = 0
@@ -114,6 +163,10 @@ func odustani_quest() -> void:
 	if aktivni_quest.is_empty():
 		return
 	print("[QUEST] Odustao od questa: %s" % aktivni_quest.get("naziv", ""))
+	if _online():
+		var igrac = _igrac()
+		if igrac:
+			igrac.odustani_quest_na_serveru()
 	aktivni_quest = {}
 	progres = 0
 	quest_zavrsen = false

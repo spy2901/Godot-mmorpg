@@ -133,8 +133,10 @@ func primi_damage(kolicina, napadac_id: int = 0):
 		napadaci.append(napadac_id)
 	hp -= kolicina
 	hp = max(hp, 0)
+	print("[HIT] ", ime, " -", kolicina, " -> hp ", hp)
 	if hp == 0:
 		_mrtav = true
+		print("[DEATH] ", ime)
 		if _je_multiplayer_aktivan():
 			_isplati_personal_loot()
 			_isplati_kill()
@@ -174,28 +176,30 @@ func _isplati_personal_loot() -> void:
 	if not multiplayer.is_server():
 		return
 	var peers: Array = multiplayer.get_peers()
-	if not peers.has(1):
+	if not peers.has(1) and not OS.has_feature("dedicated_server"):
 		peers.append(1)  # host igra i sam
+	print("[LOOT] ", ime, " umro, peers: ", peers)
 
 	for peer_id in peers:
 		var igrac = _nadji_igraca_po_id(peer_id)
-		if igrac == null or not igrac.has_method("primi_loot"):
+		if igrac == null or not igrac.has_method("server_isplati_loot"):
+			print("[LOOT] Nema igrača za peer ", peer_id)
 			continue
+		# bacanje kockica je sinhrono, a upis u bazu preuzima igrač
+		var dobijeno: Array = []
 		for loot in loot_tabela:
-			var roll = randi() % 100 + 1
-			if roll <= loot["sansa"]:
-				# server prvo zapisuje da lik poseduje predmet
-				igrac.dodaj_u_vlasnistvo(loot["id"], 1)
-				if peer_id == multiplayer.get_unique_id():
-					igrac.primi_loot(loot["id"], 1)
-				else:
-					igrac.primi_loot.rpc_id(peer_id, loot["id"], 1)
+			if randi() % 100 + 1 <= loot["sansa"]:
+				dobijeno.append(loot["id"])
+		if not dobijeno.is_empty():
+			igrac.server_isplati_loot(dobijeno)
+
 # XP + kill progres za sve koji su naneli damage
 func _isplati_kill() -> void:
 	for peer_id in napadaci:
 		var igrac = _nadji_igraca_po_id(peer_id)
 		if igrac == null:
 			continue
+		igrac.server_zabelezi_kill(ime.to_lower())
 		if peer_id == multiplayer.get_unique_id():
 			igrac.primi_kill(ime.to_lower(), xp_nagrada)
 		else:
@@ -224,10 +228,12 @@ func zahtevaj_napad() -> void:
 	var napadac_id = multiplayer.get_remote_sender_id()
 	var napadac = _nadji_igraca_po_id(napadac_id)
 	if napadac == null:
-		print("[DEBUG] Napadač nije pronađen, ID: ", napadac_id)
+		print("[HIT] Napadač nije pronađen, ID: ", napadac_id)
 		return
 	var distanca = global_position.distance_to(napadac.global_position)
+	print("[HIT] ", ime, " napadnut od ", napadac_id, ", distanca: ", snappedf(distanca, 0.01))
 	if distanca > 3.5:
+		print("[HIT] Predaleko, odbijeno")
 		return
 	# damage računa server: baza lika + bonus oružja
 	primi_damage(napadac.izracunaj_damage(), napadac_id)
