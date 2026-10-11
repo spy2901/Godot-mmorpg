@@ -140,6 +140,25 @@ func server_isplati_loot(item_ids: Array) -> void:
 		else:
 			primi_loot.rpc_id(vlasnik, str(item_id), 1)
 			
+# XP upisuje backend (/xp/change); server osvežava damage, klijent dobija nove statistike
+func server_isplati_xp(xp: int, razlog: String) -> void:
+	if not multiplayer.is_server():
+		return
+	if ime_lika == "":
+		print("[XP] Lik nije registrovan (ime_lika prazno), XP preskočen")
+		return
+	var r = await ApiManager.promeni_xp(ime_lika, xp, razlog)
+	if r.get("status", "") != "ok":
+		print("[XP] Odbijeno za ", ime_lika, ": +", xp, " (", r.get("error", "server nedostupan"), ")")
+		return
+	napad_damage = int(r.get("napad_damage", napad_damage))
+	print("[XP] ", ime_lika, " +", xp, " -> Lv.", r.get("level", "?"), ", damage: ", izracunaj_damage())
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik == multiplayer.get_unique_id():
+		primi_stats(r)
+	else:
+		primi_stats.rpc_id(vlasnik, r)
+
 # Server poziva ovo kad sam dodeli predmet (loot), pre slanja RPC-a klijentu
 func dodaj_u_vlasnistvo(item_id: String, kolicina: int = 1) -> void:
 	vlasnistvo[item_id] = vlasnistvo.get(item_id, 0) + kolicina
@@ -303,7 +322,10 @@ func zatrazi_predaju_questa(quest_id: String) -> void:
 	if nagrada_item != null and str(nagrada_item) != "":
 		dodaj_u_vlasnistvo(str(nagrada_item), 1)
 	print("[QUEST] ", ime_lika, " predao ", quest_id)
-	_odgovori(odgovor_predaja, {"ok": true, "nagrada": nagrada, "gold": r.get("gold", 0), "quest": quest})
+	var stats: Dictionary = r.get("stats", {})
+	if stats.has("napad_damage"):
+		napad_damage = int(stats["napad_damage"])
+	_odgovori(odgovor_predaja, {"ok": true, "nagrada": nagrada, "gold": r.get("gold", 0), "quest": quest, "stats": stats})
 
 @rpc("any_peer", "reliable")
 func zatrazi_odustajanje() -> void:
@@ -418,13 +440,20 @@ func primi_loot(item_id: String, kolicina: int = 1) -> void:
 		print("[LOOT] Ne mogu da nađem InventoryUI za item: ", item_id)
 
 @rpc("any_peer")
-func primi_kill(tip_neprijatelja: String, xp: int) -> void:
+func primi_kill(tip_neprijatelja: String, _xp: int) -> void:
+	if not _poziv_od_servera():
+		return
+	# XP stiže preko primi_stats (server ga upisuje u bazu)
+	QuestManager.azuriraj_progres_kill(tip_neprijatelja)
+
+# "any_peer" + provera pošiljaoca kao primi_loot: vlasnik ovog node-a je klijent, ne server
+@rpc("any_peer", "reliable")
+func primi_stats(stats: Dictionary) -> void:
 	if not _poziv_od_servera():
 		return
 	var hud = _hud()
 	if hud:
-		hud.dodaj_xp(xp)
-	QuestManager.azuriraj_progres_kill(tip_neprijatelja)
+		hud.primeni_stats(stats)
 
 @rpc("any_peer")
 func primi_damage_od_neprijatelja(kolicina: int) -> void:

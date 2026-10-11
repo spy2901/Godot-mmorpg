@@ -161,8 +161,10 @@ func _handle_quest_giver() -> void:
 		portret
 	)
 
-# Zlato i item isplaćuje QuestManager.predaj_quest (online preko servera)
+# Zlato i item isplaćuje QuestManager.predaj_quest; online i XP (stats iz turnin odgovora)
 func _isplati_nagradu(quest: Dictionary) -> void:
+	if multiplayer.multiplayer_peer != null:
+		return
 	var hud = get_tree().get_first_node_in_group("hud")
 	if hud:
 		hud.dodaj_xp(int(quest.get("nagrada_xp", 0)))

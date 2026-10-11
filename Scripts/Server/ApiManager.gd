@@ -99,6 +99,10 @@ func promeni_inventar(ime: String, item_id: String, delta: int) -> Dictionary:
 
 # ---------------------------------------------------------------- SERVER (zove samo game server, bez retry-a)
 
+func promeni_xp(ime: String, delta: int, razlog: String) -> Dictionary:
+	var r = await _zahtev("/players/" + ime + "/xp/change", HTTPClient.METHOD_POST, {"delta": delta, "razlog": razlog}, 1)
+	return r if r is Dictionary else {}
+
 func kupi_item(ime: String, item_id: String) -> Dictionary:
 	var r = await _zahtev("/players/" + ime + "/shop/buy", HTTPClient.METHOD_POST, {"item_id": item_id, "kolicina": 1}, 1)
 	return r if r is Dictionary else {}

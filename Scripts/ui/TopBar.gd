@@ -149,22 +149,15 @@ func oznaci_promenu() -> void:
 	_dirty_timer = 0.0
 
 func _prikupi_stanje() -> Dictionary:
+	# backend prihvata samo ova polja; level/xp/gold/statistike upisuje server
 	var player = get_tree().get_first_node_in_group("player")
 	var pos: Vector3 = player.global_position if player else Vector3.ZERO
-	var dmg: int = int(player.napad_damage) if player else 250
-	var q: Dictionary = QuestManager.serijalizuj()
 	var inv: Dictionary = inventory_ui.serijalizuj()
 	return {
-		"level": int(level), "xp": int(xp), "max_xp": int(max_xp),
-		"gold": int(gold),
-		"hp": int(hp), "max_hp": int(max_hp),
-		"mana": int(mana), "max_mana": int(max_mana),
-		"napad_damage": dmg,
+		"hp": int(hp), "mana": int(mana),
 		"pos_x": pos.x, "pos_y": pos.y, "pos_z": pos.z,
 		"inventory": inv.get("inventory", []),
-		"equipment": inv.get("equipment", {}),
-		"aktivni_quest_id": q.get("aktivni_quest_id", null),
-		"quest_progres": int(q.get("quest_progres", 0))
+		"equipment": inv.get("equipment", {})
 	}
 
 func sacuvaj_igraca() -> void:
@@ -295,7 +288,32 @@ func potrosi_gold(kolicina: int) -> bool:
 	oznaci_promenu()
 	return true
 
+# Online: statistike stižu sa servera (xp/change, quest turnin)
+func primeni_stats(s: Dictionary) -> void:
+	level = int(s.get("level", level))
+	xp = int(s.get("xp", xp))
+	max_xp = int(s.get("max_xp", max_xp))
+	max_hp = int(s.get("max_hp", max_hp))
+	max_mana = int(s.get("max_mana", max_mana))
+	var player = get_parent().get_parent()
+	if player and s.has("napad_damage"):
+		player.napad_damage = int(s["napad_damage"])
+	if s.get("level_up", false):
+		hp = max_hp
+		mana = max_mana
+		print("LEVEL UP! Lv.%d | Max HP: %d | Max Mana: %d" % [level, max_hp, max_mana])
+	hp = min(hp, max_hp)
+	mana = min(mana, max_mana)
+	hp_bar.max_value = max_hp
+	mana_bar.max_value = max_mana
+	xp_bar.max_value = max_xp
+	label_ime.text = ime_igraca + "  Lv." + str(level)
+	_osvezi_barove()
+
+# samo za offline režim (online XP dodaje server)
 func dodaj_xp(kolicina):
+	if multiplayer.multiplayer_peer != null:
+		return
 	xp += kolicina
 	print("XP: %d/%d" % [xp, max_xp])
 	_osvezi_barove()
@@ -303,7 +321,10 @@ func dodaj_xp(kolicina):
 		level_up()
 	oznaci_promenu()
 
+# samo za offline režim
 func level_up():
+	if multiplayer.multiplayer_peer != null:
+		return
 	level += 1
 	xp = 0
 	max_xp = int(max_xp * 1.5)

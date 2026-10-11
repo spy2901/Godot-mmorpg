@@ -200,6 +200,7 @@ func _isplati_kill() -> void:
 		if igrac == null:
 			continue
 		igrac.server_zabelezi_kill(ime.to_lower())
+		igrac.server_isplati_xp(xp_nagrada, "kill:" + ime.to_lower())
 		if peer_id == multiplayer.get_unique_id():
 			igrac.primi_kill(ime.to_lower(), xp_nagrada)
 		else:

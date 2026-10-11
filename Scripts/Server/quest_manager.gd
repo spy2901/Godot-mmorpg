@@ -131,6 +131,9 @@ func predaj_quest() -> Dictionary:
 			inv.ukloni_item(str(zavrsen.get("cilj", "")), int(zavrsen.get("kolicina", 1)))
 		if hud:
 			hud.postavi_gold(int(o.get("gold", hud.gold)))
+			var stats: Dictionary = o.get("stats", {})
+			if not stats.is_empty():
+				hud.primeni_stats(stats)  # XP je server već upisao, lokalno se ne dodaje
 		var nagrada: Dictionary = o.get("nagrada", {})
 		var item = nagrada.get("item")
 		if item != null and str(item) != "" and inv:
