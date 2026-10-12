@@ -20,6 +20,25 @@ var max_zum = 2.0
 
 var vlasnistvo: Dictionary = {}  # item_id -> količina (samo na serveru)
 
+#ZDRAVLJE (server je jedini izvor istine; klijent samo prikazuje preko primi_hp)
+const HP_REGEN := 2
+const MANA_REGEN := 3
+const RESPAWN_DELAY := 3.0
+const NEOSJETLJIVOST_MS := 2000
+const SLOTOVI_OKLOPA := ["head", "chest", "legs", "boots", "shield"]
+
+var hp := 100
+var max_hp := 100
+var mana := 100
+var max_mana := 100
+var mrtav := false # server: pravi status; klijent: ogledalo za blokiranje unosa
+var armor := 0 # samo na serveru: zbir oklopa iz opreme
+var _stanje_ucitano := false # samo na serveru: hp/mana učitani iz baze
+var _neosjetljiv_do_ms := 0 # samo na serveru
+var _regen_akum := 0.0 # samo na serveru
+var _oklop_kljuc := "" # samo na serveru: koja oprema je već uračunata
+var _oklop_verzija := 0 # samo na serveru
+
 @onready var kamera = $Camera3D
 
 func _ready():
@@ -37,6 +56,8 @@ func izracunaj_damage() -> int:
 	return napad_damage + bonus_oruzja
 
 func napadni():
+	if mrtav:
+		return
 	moze_napasti = false
 	print("Napadaš za ", izracunaj_damage(), " damage!")
 
@@ -136,19 +157,26 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 			vlasnistvo[id] = vlasnistvo.get(id, 0) + 1
 
 	await _primeni_oruzje(str(eq.get("weapon", "")))
+	await _primeni_oklop(eq)
 	var zavrseni: Array = await ApiManager.get_completed_quests(ime)
 	if ime_lika != ime:  # izbačen dok smo čekali backend
 		return
+
+	# HP i mana: od sada ih drži server
+	max_hp = int(p.get("max_hp", 100))
+	max_mana = int(p.get("max_mana", 100))
+	hp = clampi(int(p.get("hp", max_hp)), 1, max_hp)
+	mana = clampi(int(p.get("mana", max_mana)), 0, max_mana)
+	mrtav = false
+	_neosjetljiv_do_ms = 0
+	_stanje_ucitano = true
 	print("[SERVER] Lik ", ime, " registrovan, damage: ", izracunaj_damage(), ", predmeta: ", vlasnistvo.size())
 
-	_ucitano_stanje = {
-		"hp": int(p.get("hp", 100)), "mana": int(p.get("mana", 100)),
-		"inventory": p.get("inventory", []), "equipment": eq
-	}
+	_ucitano_stanje = {"inventory": p.get("inventory", []), "equipment": eq}
 	var podaci := {
 		"level": p.get("level", 1), "xp": p.get("xp", 0), "max_xp": p.get("max_xp", 100),
-		"hp": p.get("hp", 100), "max_hp": p.get("max_hp", 100),
-		"mana": p.get("mana", 100), "max_mana": p.get("max_mana", 100),
+		"hp": hp, "max_hp": max_hp,
+		"mana": mana, "max_mana": max_mana,
 		"gold": p.get("gold", 100), "napad_damage": napad_damage,
 		"inventory": p.get("inventory", []), "equipment": eq,
 		"aktivni_quest_id": p.get("aktivni_quest_id", null), "quest_progres": p.get("quest_progres", 0),
@@ -169,17 +197,18 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 # ---------------------------------------------------------------- SNIMANJE (server)
 
 const SAVE_RAZMAK_MS := 2000
-var _ucitano_stanje: Dictionary = {}    # hp/mana/inventory/equipment iz baze; prazno = lik nije učitan
-var _poslednje_stanje: Dictionary = {}  # poslednje stanje od klijenta
+var _ucitano_stanje: Dictionary = {}  # inventory/equipment iz baze; prazno = lik nije učitan
+var _poslednje_stanje: Dictionary = {}  # poslednji raspored inventara od klijenta
 var _poslednje_snimanje_ms := -SAVE_RAZMAK_MS
 var _snimanje_zakazano := false
 
-# Klijent (vlasnik) šalje hp/manu/raspored; poziciju server uzima sa svog node-a.
+# Klijent (vlasnik) šalje samo raspored inventara/opreme; hp/manu i poziciju server uzima sam.
 @rpc("any_peer", "reliable")
-func posalji_stanje(hp: int, mana: int, inventory: Array, equipment: Dictionary) -> void:
+func posalji_stanje(inventory: Array, equipment: Dictionary) -> void:
 	if not multiplayer.is_server() or not _posiljalac_je_vlasnik() or ime_lika == "":
 		return
-	_poslednje_stanje = {"hp": hp, "mana": mana, "inventory": inventory, "equipment": equipment}
+	_poslednje_stanje = {"inventory": inventory, "equipment": equipment}
+	_primeni_oklop(equipment)
 	_server_sacuvaj(false)
 
 func server_sacuvaj_konacno() -> void:
@@ -203,7 +232,7 @@ func _server_sacuvaj(konacno: bool) -> void:
 	var pos := global_position
 	var ime := ime_lika
 	var ok: bool = await ApiManager.save_player(ime, {
-		"hp": int(s["hp"]), "mana": int(s["mana"]),
+		"hp": hp, "mana": mana,
 		"pos_x": pos.x, "pos_y": pos.y, "pos_z": pos.z,
 		"inventory": s["inventory"], "equipment": s["equipment"]
 	})
@@ -255,7 +284,7 @@ func server_isplati_loot(item_ids: Array) -> void:
 			primi_loot(str(item_id), 1)
 		else:
 			primi_loot.rpc_id(vlasnik, str(item_id), 1)
-			
+
 # XP upisuje backend (/xp/change); server osvežava damage, klijent dobija nove statistike
 func server_isplati_xp(xp: int, razlog: String) -> void:
 	if not multiplayer.is_server():
@@ -267,7 +296,7 @@ func server_isplati_xp(xp: int, razlog: String) -> void:
 	if r.get("status", "") != "ok":
 		print("[XP] Odbijeno za ", ime_lika, ": +", xp, " (", r.get("error", "server nedostupan"), ")")
 		return
-	napad_damage = int(r.get("napad_damage", napad_damage))
+	server_primeni_stats(r)
 	print("[XP] ", ime_lika, " +", xp, " -> Lv.", r.get("level", "?"), ", damage: ", izracunaj_damage())
 	var vlasnik := get_multiplayer_authority()
 	if vlasnik == multiplayer.get_unique_id():
@@ -290,6 +319,107 @@ func _primeni_oruzje(item_id: String) -> void:
 		return
 	bonus_oruzja = int(item.get("damage", 0))
 	print("[SERVER] Oružje ", item_id, " bonus: ", bonus_oruzja)
+
+# ---------------------------------------------------------------- ZDRAVLJE (server)
+
+# Backend je izračunao nove statistike (xp/change, quest turnin); server ih preuzima.
+# Na level-up server sam puni hp i manu.
+func server_primeni_stats(st: Dictionary) -> void:
+	napad_damage = int(st.get("napad_damage", napad_damage))
+	max_hp = int(st.get("max_hp", max_hp))
+	max_mana = int(st.get("max_mana", max_mana))
+	if st.get("level_up", false):
+		hp = max_hp
+		mana = max_mana
+	hp = mini(hp, max_hp)
+	mana = mini(mana, max_mana)
+	_posalji_hp()
+
+# Regeneracija: 2 hp i 3 mane u sekundi, samo za žive i učitane igrače
+func _process(delta: float) -> void:
+	if not multiplayer.is_server() or not _stanje_ucitano or mrtav:
+		return
+	_regen_akum += delta
+	if _regen_akum < 1.0:
+		return
+	_regen_akum -= 1.0
+	if hp < max_hp or mana < max_mana:
+		hp = mini(hp + HP_REGEN, max_hp)
+		mana = mini(mana + MANA_REGEN, max_mana)
+		_posalji_hp()
+
+# Poziva Enemy na serveru. Šteta = max(1, šteta - oklop).
+func server_primi_damage(sirova_steta: int) -> void:
+	if not multiplayer.is_server() or not _stanje_ucitano or mrtav:
+		return
+	if Time.get_ticks_msec() < _neosjetljiv_do_ms:
+		return
+	var steta := maxi(1, sirova_steta - armor)
+	hp = maxi(hp - steta, 0)
+	print("[DMG] ", ime_lika, " -", steta, " (oklop ", armor, ") -> hp ", hp)
+	if hp == 0:
+		_server_umri()
+	_posalji_hp()
+
+func _server_umri() -> void:
+	mrtav = true
+	print("[DEATH] ", ime_lika, " je poginuo, respawn za ", RESPAWN_DELAY, " s")
+	await get_tree().create_timer(RESPAWN_DELAY).timeout
+	if not is_instance_valid(self) or not mrtav or ime_lika == "":
+		return # u međuvremenu se odjavio
+	_server_respawn()
+
+func _server_respawn() -> void:
+	var svet := get_parent()
+	var tacka := Vector3(0, 1, 0)
+	if svet and svet.has_method("spawn_pozicija"):
+		tacka = svet.spawn_pozicija()
+	hp = max_hp
+	mana = max_mana
+	mrtav = false
+	_neosjetljiv_do_ms = Time.get_ticks_msec() + NEOSJETLJIVOST_MS
+	global_position = tacka
+	_regen_akum = 0.0
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik == multiplayer.get_unique_id():
+		primi_teleport(tacka)
+	else:
+		primi_teleport.rpc_id(vlasnik, tacka)
+	_posalji_hp()
+	print("[RESPAWN] ", ime_lika, " -> ", tacka)
+
+# Javi vlasniku trenutno stanje (klijent ga samo prikazuje)
+func _posalji_hp() -> void:
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik == multiplayer.get_unique_id():
+		primi_hp(hp, max_hp, mana, max_mana, mrtav)
+	else:
+		primi_hp.rpc_id(vlasnik, hp, max_hp, mana, max_mana, mrtav)
+
+# Oklop = zbir `armor` kolone opremljenih komada koje lik zaista poseduje.
+# Računa se ponovo samo kad se promeni skup opremljenih komada.
+func _primeni_oklop(eq: Dictionary) -> void:
+	var ids: PackedStringArray = []
+	for slot in SLOTOVI_OKLOPA:
+		var id := str(eq.get(slot, ""))
+		if id != "" and posjeduje(id):
+			ids.append(id)
+	var kljuc := ",".join(ids)
+	if kljuc == _oklop_kljuc:
+		return
+	_oklop_kljuc = kljuc
+	_oklop_verzija += 1
+	var verzija := _oklop_verzija
+	var zbir := 0
+	for id in ids:
+		var item: Dictionary = await ApiManager.get_item(id)
+		if item.is_empty() or item.has("error") or str(item.get("tip", "")) != "armor":
+			continue
+		zbir += int(item.get("armor", 0))
+	if verzija != _oklop_verzija:
+		return # stigla je novija promena opreme
+	armor = zbir
+	print("[SERVER] Oklop ", ime_lika, ": ", armor)
 
 # ---------------------------------------------------------------- KUPOVINA I QUESTOVI KROZ SERVER
 
@@ -439,8 +569,8 @@ func zatrazi_predaju_questa(quest_id: String) -> void:
 		dodaj_u_vlasnistvo(str(nagrada_item), 1)
 	print("[QUEST] ", ime_lika, " predao ", quest_id)
 	var stats: Dictionary = r.get("stats", {})
-	if stats.has("napad_damage"):
-		napad_damage = int(stats["napad_damage"])
+	if not stats.is_empty():
+		server_primeni_stats(stats)
 	_odgovori(odgovor_predaja, {"ok": true, "nagrada": nagrada, "gold": r.get("gold", 0), "quest": quest, "stats": stats})
 
 @rpc("any_peer", "reliable")
@@ -503,7 +633,7 @@ func _input(event):
 				$CharacterMain.visible = true
 
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			if moze_napasti:
+			if moze_napasti and not mrtav:
 				napadni()
 
 	if event is InputEventMouseMotion and rotacija_misa:
@@ -516,6 +646,11 @@ func _physics_process(delta):
 		return
 	if not is_on_floor():
 		velocity.y += gravitacija * delta
+	if mrtav:
+		velocity.x = 0
+		velocity.z = 0
+		move_and_slide()
+		return
 	if Input.is_key_pressed(KEY_SPACE) and is_on_floor():
 		velocity.y = 5.0
 	var smer = Vector3.ZERO
@@ -579,10 +714,22 @@ func primi_lik(podaci: Dictionary) -> void:
 	if hud:
 		hud.primeni_lik(podaci)
 
-@rpc("any_peer")
-func primi_damage_od_neprijatelja(kolicina: int) -> void:
+# Server šalje stanje; klijent ga samo prikazuje i blokira unos dok je mrtav
+@rpc("any_peer", "reliable")
+func primi_hp(novi_hp: int, novi_max_hp: int, nova_mana: int, nova_max_mana: int, je_mrtav: bool) -> void:
 	if not _poziv_od_servera():
 		return
+	mrtav = je_mrtav
+	if mrtav:
+		velocity = Vector3.ZERO
 	var hud = _hud()
 	if hud:
-		hud.primi_damage(kolicina)
+		hud.primeni_hp(novi_hp, novi_max_hp, nova_mana, nova_max_mana, je_mrtav)
+
+# Kretanje je još klijentsko, pa server šalje RPC za teleport na respawn tačku
+@rpc("any_peer", "reliable")
+func primi_teleport(pozicija: Vector3) -> void:
+	if not _poziv_od_servera():
+		return
+	velocity = Vector3.ZERO
+	global_position = pozicija

@@ -61,6 +61,8 @@ func _nadji_najblizeg_igraca() -> Node3D:
 	var najblizi: Node3D = null
 	var min_dist = INF
 	for p in get_tree().get_nodes_in_group("player"):
+		if p.mrtav:
+			continue
 		var d = global_position.distance_to(p.global_position)
 		if d < min_dist:
 			min_dist = d
@@ -115,11 +117,13 @@ func _physics_process(delta):
 
 	move_and_slide()
 
-# Najbliži igrač unutar aggro_range, ili null
+# Najbliži živi igrač unutar aggro_range, ili null (mrtvi se ignorišu)
 func _nadji_najblizeg_igraca_u_aggro() -> Node3D:
 	var najblizi: Node3D = null
 	var min_dist = aggro_range
 	for p in get_tree().get_nodes_in_group("player"):
+		if p.mrtav:
+			continue
 		var d = global_position.distance_to(p.global_position)
 		if d <= min_dist:
 			min_dist = d
@@ -185,6 +189,8 @@ func _isplati_personal_loot() -> void:
 		if igrac == null or not igrac.has_method("server_isplati_loot"):
 			print("[LOOT] Nema igrača za peer ", peer_id)
 			continue
+		if igrac.mrtav:
+			continue  # mrtav igrač ne dobija loot
 		# bacanje kockica je sinhrono, a upis u bazu preuzima igrač
 		var dobijeno: Array = []
 		for loot in loot_tabela:
@@ -206,18 +212,15 @@ func _isplati_kill() -> void:
 		else:
 			igrac.primi_kill.rpc_id(peer_id, ime.to_lower(), xp_nagrada)
 
+# Samo na serveru: šteta ide direktno na Player node mete (oklop se računa u igraču)
 func napadni_igraca():
+	if player == null or not is_instance_valid(player) or player.mrtav:
+		return
+	# server proverava domet (mala tolerancija zbog kretanja između frejmova)
+	if global_position.distance_to(player.global_position) > napad_range + 0.5:
+		return
 	moze_napasti = false
-	if _je_multiplayer_aktivan():
-		var peer_id = player.get_multiplayer_authority()
-		if peer_id == multiplayer.get_unique_id():
-			player.primi_damage_od_neprijatelja(napad_damage)
-		else:
-			player.primi_damage_od_neprijatelja.rpc_id(peer_id, napad_damage)
-	else:
-		var hud = get_tree().get_first_node_in_group("hud")
-		if hud:
-			hud.primi_damage(napad_damage)
+	player.server_primi_damage(napad_damage)
 
 	await get_tree().create_timer(napad_cooldown).timeout
 	moze_napasti = true
@@ -231,6 +234,8 @@ func zahtevaj_napad() -> void:
 	if napadac == null:
 		print("[HIT] Napadač nije pronađen, ID: ", napadac_id)
 		return
+	if napadac.mrtav:
+		return  # mrtav igrač ne napada
 	var distanca = global_position.distance_to(napadac.global_position)
 	print("[HIT] ", ime, " napadnut od ", napadac_id, ", distanca: ", snappedf(distanca, 0.01))
 	if distanca > 3.5:

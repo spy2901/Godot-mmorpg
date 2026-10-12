@@ -11,8 +11,6 @@ var mana = 100
 var ime_igraca: String = GameState.ime_igraca
 var max_hp = 100
 var max_mana = 100
-var hp_regen = 2.0
-var mana_regen = 3.0
 var vreme = 0.0
 
 var xp = 0
@@ -26,10 +24,12 @@ var gold_label: Label
 var quest_tracker: Label
 var quest_abandon_btn: Button
 
-# Respawn
-var spawn_pozicija: Vector3 = Vector3.ZERO
+# Smrt (stanje stiže sa servera, ovde samo prikaz)
 var je_mrtav: bool = false
-var neosjetljiv: bool = false
+var smrt_ekran: ColorRect
+var smrt_label: Label
+var _smrt_pocetak_ms := 0
+const RESPAWN_DELAY := 3.0  # samo za odbrojavanje na ekranu; pravi respawn radi server
 
 # Save / load
 const AUTOSAVE_INTERVAL = 30.0
@@ -135,9 +135,7 @@ func _ready():
 	_osvezi_gold()
 	_osvezi_quest_tracker()
 
-	var player = get_tree().get_first_node_in_group("player")
-	if player:
-		spawn_pozicija = player.global_position
+	_napravi_smrt_ekran()
 
 	if ime_igraca == "":
 		print("[SAVE] Nema imena lika (nije prijavljen?), ne učitavam i ne čuvam.")
@@ -161,9 +159,9 @@ func sacuvaj_igraca() -> void:
 	var raspored: Array = inv.get("inventory", [])
 	var oprema: Dictionary = inv.get("equipment", {})
 	if multiplayer.is_server():
-		player.posalji_stanje(int(hp), int(mana), raspored, oprema)
+		player.posalji_stanje(raspored, oprema)
 	else:
-		player.posalji_stanje.rpc_id(1, int(hp), int(mana), raspored, oprema)
+		player.posalji_stanje.rpc_id(1, raspored, oprema)
 
 # Pošalji stanje i daj mu vremena da ode pre izlaska/odjave
 func sacuvaj_pre_izlaska() -> void:
@@ -181,6 +179,7 @@ func primeni_lik(p: Dictionary) -> void:
 	max_mana = int(p.get("max_mana", 100))
 	hp = clamp(int(p.get("hp", max_hp)), 1, max_hp)
 	mana = clamp(int(p.get("mana", max_mana)), 0, max_mana)
+	je_mrtav = false
 
 	# Lik ovog klijenta je roditelj HUD-a (TopBar → ui → Player), ne prvi igrač u grupi
 	var player = get_parent().get_parent()
@@ -288,11 +287,8 @@ func primeni_stats(s: Dictionary) -> void:
 	if player and s.has("napad_damage"):
 		player.napad_damage = int(s["napad_damage"])
 	if s.get("level_up", false):
-		hp = max_hp
-		mana = max_mana
 		print("LEVEL UP! Lv.%d | Max HP: %d | Max Mana: %d" % [level, max_hp, max_mana])
-	hp = min(hp, max_hp)
-	mana = min(mana, max_mana)
+	# hp i manu (uključujući punjenje na level-up) šalje server preko primeni_hp
 	hp_bar.max_value = max_hp
 	mana_bar.max_value = max_mana
 	xp_bar.max_value = max_xp
@@ -338,50 +334,46 @@ func level_up():
 	])
 	oznaci_promenu()
 
-func primi_damage(kolicina):
-	if neosjetljiv or je_mrtav:
-		return
-	hp -= kolicina
-	hp = max(hp, 0)
+# Server šalje hp/manu/status smrti (Player.primi_hp). Klijent samo prikazuje.
+func primeni_hp(novi_hp: int, novi_max_hp: int, nova_mana: int, nova_max_mana: int, mrtav: bool) -> void:
+	max_hp = novi_max_hp
+	max_mana = nova_max_mana
+	hp = clampi(novi_hp, 0, max_hp)
+	mana = clampi(nova_mana, 0, max_mana)
+	hp_bar.max_value = max_hp
+	mana_bar.max_value = max_mana
+	if mrtav and not je_mrtav:
+		_smrt_pocetak_ms = Time.get_ticks_msec()
+	je_mrtav = mrtav
 	_osvezi_barove()
-	if hp == 0:
-		_umri()
+	_osvezi_smrt_ekran()
 
-func _umri() -> void:
+func _napravi_smrt_ekran() -> void:
+	smrt_ekran = ColorRect.new()
+	smrt_ekran.color = Color(0.35, 0.0, 0.0, 0.45)
+	smrt_ekran.set_anchors_preset(Control.PRESET_FULL_RECT)
+	smrt_ekran.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	smrt_ekran.top_level = true  # preko celog ekrana, nezavisno od veličine HUD-a
+	smrt_ekran.visible = false
+	smrt_label = Label.new()
+	smrt_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	smrt_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	smrt_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	smrt_label.add_theme_font_size_override("font_size", 36)
+	smrt_label.add_theme_color_override("font_color", Color(1, 0.85, 0.85))
+	smrt_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	smrt_label.add_theme_constant_override("shadow_offset_x", 2)
+	smrt_label.add_theme_constant_override("shadow_offset_y", 2)
+	smrt_ekran.add_child(smrt_label)
+	add_child(smrt_ekran)
+
+func _osvezi_smrt_ekran() -> void:
+	if smrt_ekran == null:
+		return
+	smrt_ekran.visible = je_mrtav
 	if je_mrtav:
-		return
-	je_mrtav = true
-	print("Lik je mrtav! Respawn za 3 sekunde...")
-
-	var player = get_tree().get_first_node_in_group("player")
-	if player:
-		player.velocity = Vector3.ZERO
-
-	await get_tree().create_timer(3.0).timeout
-	_respawn()
-
-func _respawn() -> void:
-	je_mrtav = false
-
-	var player = get_tree().get_first_node_in_group("player")
-	if player:
-		player.global_position = spawn_pozicija
-
-	hp = max_hp
-	mana = max_mana
-	_osvezi_barove()
-
-	neosjetljiv = true
-	print("Respawn! Neosjetljiv 2 sekunde.")
-	await get_tree().create_timer(2.0).timeout
-	neosjetljiv = false
-	print("Neosjetljivost gotova.")
-	oznaci_promenu()
-
-func potrosi_manu(kolicina):
-	mana -= kolicina
-	mana = max(mana, 0)
-	_osvezi_barove()
+		var ostalo := maxf(RESPAWN_DELAY - (Time.get_ticks_msec() - _smrt_pocetak_ms) / 1000.0, 0.0)
+		smrt_label.text = "Poginuo si\nRespawn za %d s" % int(ceil(ostalo))
 
 func dodaj_item(ime):
 	inventory_ui.dodaj_item_u_slot(ime)
@@ -390,22 +382,14 @@ func dodaj_item(ime):
 # ---------------------------------------------------------------- PROCESS
 
 func _process(delta):
-	if Input.is_action_just_pressed("ui_inventory"):
+	if je_mrtav:
+		_osvezi_smrt_ekran()  # odbrojavanje
+	elif Input.is_action_just_pressed("ui_inventory"):
 		inventory_ui.toggle()
-
-	if Input.is_key_pressed(KEY_H):
-		primi_damage(1)
-	if Input.is_key_pressed(KEY_M):
-		potrosi_manu(1)
 
 	vreme += delta
 	if vreme >= 1.0:
 		vreme = 0.0
-		if hp < max_hp and not je_mrtav:
-			hp = min(hp + hp_regen, max_hp)
-		if mana < max_mana and not je_mrtav:
-			mana = min(mana + mana_regen, max_mana)
-		_osvezi_barove()
 		_osvezi_quest_tracker()
 
 	if not _ucitano:

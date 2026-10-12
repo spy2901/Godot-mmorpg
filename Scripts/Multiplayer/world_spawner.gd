@@ -95,11 +95,17 @@ func _on_peer_disconnected(id: int) -> void:
 func _spawn_za(id: int) -> void:
 	spawner.spawn(id)
 
+# Spawn tačka igrača (i respawn posle smrti): promeni IGRAC_SPAWN da pomeriš sve odjednom
+const IGRAC_SPAWN := Vector3(0, 1, 0)
+
+func spawn_pozicija() -> Vector3:
+	return IGRAC_SPAWN + Vector3(randf_range(-2, 2), 0, randf_range(-2, 2))
+
 func _spawn_player(id: int) -> Node:
 	var player = PLAYER_SCENE.instantiate()
 	player.name = str(id)
 	player.set_multiplayer_authority(id)
-	player.position = Vector3(randf_range(-2, 2), 1, randf_range(-2, 2))
+	player.position = spawn_pozicija()
 	return player
 
 @rpc("call_local", "reliable")
