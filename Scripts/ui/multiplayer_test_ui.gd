@@ -7,7 +7,13 @@ var _peers_label: Label
 var _host_btn: Button
 var _join_btn: Button
 
+const LOGIN_SCENE = "res://Scenes/UI/MainMenu.tscn"
+
 func _ready() -> void:
+	# Bez tokena nema povezivanja: klijent se vraća na login (server nema login)
+	if not OS.has_feature("dedicated_server") and GameState.token == "":
+		get_tree().change_scene_to_file.call_deferred(LOGIN_SCENE)
+		return
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_build()
 	NetworkManager.server_started.connect(_osvezi)
@@ -108,6 +114,12 @@ func _build() -> void:
 	goblin_btn.pressed.connect(func(): $World.spawn_goblin())
 	box.add_child(goblin_btn)
 
+	var odjava_btn := Button.new()
+	odjava_btn.text = "Odjava"
+	odjava_btn.custom_minimum_size = Vector2(0, 40)
+	odjava_btn.pressed.connect(_odjava)
+	box.add_child(odjava_btn)
+
 	_status_label = Label.new()
 	_status_label.text = "Nepovezan."
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -123,3 +135,11 @@ func _osvezi() -> void:
 	var uloga = "SERVER" if NetworkManager.je_server() else "KLIJENT"
 	_status_label.text = "Povezan kao %s (ID %d)" % [uloga, moj_id]
 	_peers_label.text = "Peers: %s" % str(multiplayer.get_peers())
+
+func _odjava() -> void:
+	var hud = get_tree().get_first_node_in_group("hud")
+	if hud:
+		await hud.sacuvaj_igraca()
+	GameState.odjava()
+	NetworkManager.prekini()
+	get_tree().change_scene_to_file(LOGIN_SCENE)

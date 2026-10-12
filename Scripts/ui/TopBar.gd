@@ -8,7 +8,7 @@ extends Control
 
 var hp = 100
 var mana = 100
-var ime_igraca: String = GameState.ime_igraca if GameState.ime_igraca != "" else "Spajko"
+var ime_igraca: String = GameState.ime_igraca
 var max_hp = 100
 var max_mana = 100
 var hp_regen = 2.0
@@ -174,6 +174,9 @@ func sacuvaj_igraca() -> void:
 		_dirty = true
 
 func _ucitaj_igraca() -> void:
+	if ime_igraca == "":
+		print("[SAVE] Nema imena lika (nije prijavljen?), ne učitavam i ne čuvam.")
+		return
 	var p: Dictionary = await ApiManager.get_player(ime_igraca)
 	if p.is_empty():
 		print("[SAVE] Server nedostupan, koristim default stanje (bez čuvanja).")
@@ -196,7 +199,7 @@ func _ucitaj_igraca() -> void:
 		if pos != Vector3.ZERO:
 			player.global_position = pos
 		# server mora da zna statistike ovog lika (učitava ih iz baze)
-		player.posalji_lik_serveru(ime_igraca)
+		player.posalji_lik_serveru(GameState.token)
 
 	hp_bar.max_value = max_hp
 	mana_bar.max_value = max_mana

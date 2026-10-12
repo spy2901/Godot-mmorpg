@@ -16,8 +16,7 @@ func hostuj(port: int = DEFAULT_PORT) -> bool:
 		print("[NET] Ne mogu da pokrenem server: ", err)
 		return false
 	multiplayer.multiplayer_peer = peer
-	multiplayer.peer_connected.connect(_on_peer_connected)
-	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	_povezi_signale()
 	print("[NET] Server pokrenut na portu ", port, " (moj ID: ", multiplayer.get_unique_id(), ")")
 	emit_signal("server_started")
 	return true
@@ -29,17 +28,31 @@ func pridruzi_se(ip: String, port: int = DEFAULT_PORT) -> bool:
 		print("[NET] Ne mogu da se povežem: ", err)
 		return false
 	multiplayer.multiplayer_peer = peer
-	multiplayer.connected_to_server.connect(func():
-		print("[NET] Povezan na server kao ID ", multiplayer.get_unique_id())
-		emit_signal("connected_to_server")
-	)
-	multiplayer.connection_failed.connect(func():
-		print("[NET] Konekcija neuspešna")
-		emit_signal("connection_failed")
-	)
+	_povezi_signale()
+	return true
+
+# Posle odjave se ponovo hostuje/pridružuje, pa signali smeju da se povežu samo jednom
+func _povezi_signale() -> void:
+	if multiplayer.peer_connected.is_connected(_on_peer_connected):
+		return
+	multiplayer.connected_to_server.connect(_on_connected_to_server)
+	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
-	return true
+
+func _on_connected_to_server() -> void:
+	print("[NET] Povezan na server kao ID ", multiplayer.get_unique_id())
+	emit_signal("connected_to_server")
+
+func _on_connection_failed() -> void:
+	print("[NET] Konekcija neuspešna")
+	emit_signal("connection_failed")
+
+# Server: diskonektuje peer-a posle kratke pauze (da reliable RPC stigne pre prekida)
+func izbaci_peer(id: int, pauza: float = 0.2) -> void:
+	await get_tree().create_timer(pauza).timeout
+	if multiplayer.multiplayer_peer and id in multiplayer.get_peers():
+		multiplayer.multiplayer_peer.disconnect_peer(id)
 
 func prekini() -> void:
 	if multiplayer.multiplayer_peer:

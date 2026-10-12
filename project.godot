@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="mmorpg"
-run/main_scene="uid://crhan17klim2v"
+run/main_scene="uid://bvlks5a04xi7y"
 config/features=PackedStringArray("4.6", "Forward Plus")
 config/icon="res://icon.svg"
 

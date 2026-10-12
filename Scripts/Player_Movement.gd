@@ -59,23 +59,62 @@ func napadni():
 
 # ---------------------------------------------------------------- LIK -> SERVER
 
-# Klijent (vlasnik lika) jednom pošalje ime lika, server učita statistike iz baze.
-func posalji_lik_serveru(ime: String) -> void:
+# Klijent (vlasnik lika) jednom pošalje token, server od /auth/verify dobije ime lika i učita statistike.
+func posalji_lik_serveru(token: String) -> void:
 	if multiplayer.is_server():
-		registruj_lik(ime)  # host: poziv je lokalan, nema RPC-a
+		registruj_lik(token)  # host: poziv je lokalan, nema RPC-a
 	else:
-		registruj_lik.rpc_id(1, ime)
+		registruj_lik.rpc_id(1, token)
+
+var _registracija_u_toku := false  # samo na serveru
 
 @rpc("any_peer", "reliable")
-func registruj_lik(ime: String) -> void:
+func registruj_lik(token: String) -> void:
 	if not multiplayer.is_server():
 		return
 	# Samo vlasnik lika sme da registruje svoj lik
 	var posiljalac := multiplayer.get_remote_sender_id()
 	if posiljalac != 0 and posiljalac != get_multiplayer_authority():
 		return
+	if ime_lika != "" or _registracija_u_toku:
+		return
+	_registracija_u_toku = true
+	var peer_id := get_multiplayer_authority()
+	var r: Dictionary = await ApiManager.verify_token(token)
+	_registracija_u_toku = false
+	var ime := str(r.get("ime_lika", ""))
+	if r.get("status", "") != "ok" or ime == "":
+		var razlog := str(r.get("error", "neispravan odgovor"))
+		print("[AUTH] Odbijen peer ", peer_id, ": ", razlog)
+		_odbij(peer_id, "Prijava odbijena: " + razlog)
+		return
+	# Isti lik već u igri -> starog izbaci
+	for p in get_tree().get_nodes_in_group("player"):
+		if p != self and p.ime_lika == ime:
+			print("[AUTH] ", ime, " je već prijavljen (peer ", p.get_multiplayer_authority(), "), izbacujem starog")
+			p.ime_lika = ""
+			p._odbij(p.get_multiplayer_authority(), "Prijavljen si sa drugog mesta")
 	ime_lika = ime
+	print("[AUTH] Peer ", peer_id, " -> ", ime)
 	_ucitaj_statistike_sa_servera(ime)
+
+# Server: javi peer-u razlog pa ga diskonektuj (host koji igra: lokalni poziv)
+func _odbij(peer_id: int, poruka: String) -> void:
+	if peer_id == multiplayer.get_unique_id():
+		registracija_odbijena(poruka)
+		return
+	registracija_odbijena.rpc_id(peer_id, poruka)
+	NetworkManager.izbaci_peer(peer_id)
+
+@rpc("any_peer", "reliable")
+func registracija_odbijena(poruka: String) -> void:
+	if not _poziv_od_servera():
+		return
+	print("[AUTH] ", poruka)
+	NetworkManager.prekini()
+	GameState.token = ""
+	GameState.poruka_logina = poruka
+	get_tree().change_scene_to_file("res://Scenes/UI/MainMenu.tscn")
 
 func _ucitaj_statistike_sa_servera(ime: String) -> void:
 	var p: Dictionary = await ApiManager.get_player(ime)

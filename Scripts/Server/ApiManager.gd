@@ -3,16 +3,16 @@ extends Node
 
 const MAX_POKUSAJA := 3
 
-func _zahtev(path: String, method: int = HTTPClient.METHOD_GET, body: Dictionary = {}, pokusaji: int = MAX_POKUSAJA) -> Variant:
+func _zahtev(path: String, method: int = HTTPClient.METHOD_GET, body: Dictionary = {}, pokusaji: int = MAX_POKUSAJA, dodatni_headeri: PackedStringArray = [], sa_kljucem: bool = true) -> Variant:
 	for pokusaj in pokusaji:
-		var r = await _jedan_zahtev(path, method, body)
+		var r = await _jedan_zahtev(path, method, body, dodatni_headeri, sa_kljucem)
 		if r != null:
 			return r
 		if pokusaj < pokusaji - 1:
 			await get_tree().create_timer(0.5 * (pokusaj + 1)).timeout
 	return null
 
-func _jedan_zahtev(path: String, method: int, body: Dictionary) -> Variant:
+func _jedan_zahtev(path: String, method: int, body: Dictionary, dodatni_headeri: PackedStringArray, sa_kljucem: bool) -> Variant:
 	var http = HTTPRequest.new()
 	http.timeout = 8.0
 	add_child(http)
@@ -22,8 +22,9 @@ func _jedan_zahtev(path: String, method: int, body: Dictionary) -> Variant:
 	if method == HTTPClient.METHOD_POST:
 		headers = ["Content-Type: application/json"]
 		body_str = JSON.stringify(body)
-	if Config.SERVER_KEY != "":
+	if sa_kljucem and Config.SERVER_KEY != "":
 		headers.append("X-Server-Key: " + Config.SERVER_KEY)
+	headers.append_array(dodatni_headeri)
 
 	var err = http.request(Config.SERVER_URL + path, headers, method, body_str)
 	if err != OK:
@@ -43,6 +44,27 @@ func _jedan_zahtev(path: String, method: int, body: Dictionary) -> Variant:
 		print("[API] Neispravan JSON: ", path)
 		return null
 	return json.get_data()
+
+# ---------------------------------------------------------------- AUTH
+# Javne rute bez server ključa i bez retry-a. Odgovor sa "error" se vraća kao Dictionary.
+
+func register(username: String, password: String) -> Dictionary:
+	var r = await _zahtev("/auth/register", HTTPClient.METHOD_POST, {"username": username, "password": password}, 1, [], false)
+	return r if r is Dictionary else {"error": "Server nedostupan"}
+
+func login(username: String, password: String) -> Dictionary:
+	var r = await _zahtev("/auth/login", HTTPClient.METHOD_POST, {"username": username, "password": password}, 1, [], false)
+	return r if r is Dictionary else {"error": "Server nedostupan"}
+
+func logout(token: String) -> Dictionary:
+	var r = await _zahtev("/auth/logout", HTTPClient.METHOD_POST, {}, 1, ["Authorization: Bearer " + token], false)
+	return r if r is Dictionary else {"error": "Server nedostupan"}
+
+# Zaštićeno (X-Server-Key): zove samo game server
+func verify_token(token: String) -> Dictionary:
+	var r = await _zahtev("/auth/verify", HTTPClient.METHOD_POST, {"token": token})
+	return r if r is Dictionary else {"error": "Auth server nedostupan"}
+
 # ---------------------------------------------------------------- ITEMS
 
 func get_item(item_id: String) -> Dictionary:
