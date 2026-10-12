@@ -89,17 +89,14 @@ func get_all_quests() -> Array:
 		return r.get("quests", [])
 	return []
 
-func complete_quest(ime: String, quest_id: String) -> Dictionary:
-	var r = await _zahtev("/quests/" + quest_id + "/complete/" + ime, HTTPClient.METHOD_POST)
-	return r if r is Dictionary else {}
-
+# Zaštićeno (X-Server-Key): zove samo game server
 func get_completed_quests(ime: String) -> Array:
 	var r = await _zahtev("/quests/completed/" + ime)
 	if r is Dictionary:
 		return r.get("completed", [])
 	return []
 
-# ---------------------------------------------------------------- PLAYERS
+# ---------------------------------------------------------------- PLAYERS (zove samo game server)
 
 func get_player(ime: String) -> Dictionary:
 	var r = await _zahtev("/players/" + ime)
@@ -109,11 +106,7 @@ func save_player(ime: String, data: Dictionary) -> bool:
 	var r = await _zahtev("/players/" + ime + "/save", HTTPClient.METHOD_POST, data)
 	return r is Dictionary and r.get("status", "") == "ok"
 
-# ---------------------------------------------------------------- ZLATO (bez retry-a)
-
-func promeni_gold(ime: String, delta: int) -> Dictionary:
-	var r = await _zahtev("/players/" + ime + "/gold/change", HTTPClient.METHOD_POST, {"delta": delta}, 1)
-	return r if r is Dictionary else {}
+# ---------------------------------------------------------------- INVENTAR (bez retry-a)
 
 func promeni_inventar(ime: String, item_id: String, delta: int) -> Dictionary:
 	var r = await _zahtev("/players/" + ime + "/inventory/change", HTTPClient.METHOD_POST, {"item_id": item_id, "delta": delta}, 1)

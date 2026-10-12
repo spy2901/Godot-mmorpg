@@ -139,7 +139,7 @@ func _osvezi() -> void:
 func _odjava() -> void:
 	var hud = get_tree().get_first_node_in_group("hud")
 	if hud:
-		await hud.sacuvaj_igraca()
+		await hud.sacuvaj_pre_izlaska()
 	GameState.odjava()
 	NetworkManager.prekini()
 	get_tree().change_scene_to_file(LOGIN_SCENE)

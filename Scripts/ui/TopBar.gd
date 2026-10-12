@@ -38,7 +38,6 @@ var _ucitano: bool = false
 var _dirty: bool = false
 var _dirty_timer: float = 0.0
 var _autosave_timer: float = 0.0
-var _saving: bool = false
 
 func _ready():
 	if not is_multiplayer_authority():
@@ -140,7 +139,11 @@ func _ready():
 	if player:
 		spawn_pozicija = player.global_position
 
-	await _ucitaj_igraca()
+	if ime_igraca == "":
+		print("[SAVE] Nema imena lika (nije prijavljen?), ne učitavam i ne čuvam.")
+		return
+	# server preko tokena dobija ime lika, učita ga iz baze i vrati primi_lik
+	get_parent().get_parent().posalji_lik_serveru(GameState.token)
 
 # ---------------------------------------------------------------- SAVE / LOAD
 
@@ -148,40 +151,28 @@ func oznaci_promenu() -> void:
 	_dirty = true
 	_dirty_timer = 0.0
 
-func _prikupi_stanje() -> Dictionary:
-	# backend prihvata samo ova polja; level/xp/gold/statistike upisuje server
-	var player = get_tree().get_first_node_in_group("player")
-	var pos: Vector3 = player.global_position if player else Vector3.ZERO
-	var inv: Dictionary = inventory_ui.serijalizuj()
-	return {
-		"hp": int(hp), "mana": int(mana),
-		"pos_x": pos.x, "pos_y": pos.y, "pos_z": pos.z,
-		"inventory": inv.get("inventory", []),
-		"equipment": inv.get("equipment", {})
-	}
-
+# Stanje ide game serveru (host: lokalni poziv); server ga snima u bazu.
 func sacuvaj_igraca() -> void:
-	if not _ucitano or _saving:
+	if not _ucitano:
 		return
-	_saving = true
 	_dirty = false
-	var ok = await ApiManager.save_player(ime_igraca, _prikupi_stanje())
-	_saving = false
-	if ok:
-		print("[SAVE] Sačuvano.")
+	var player = get_parent().get_parent()
+	var inv: Dictionary = inventory_ui.serijalizuj()
+	var raspored: Array = inv.get("inventory", [])
+	var oprema: Dictionary = inv.get("equipment", {})
+	if multiplayer.is_server():
+		player.posalji_stanje(int(hp), int(mana), raspored, oprema)
 	else:
-		print("[SAVE] Čuvanje nije uspelo (server?)")
-		_dirty = true
+		player.posalji_stanje.rpc_id(1, int(hp), int(mana), raspored, oprema)
 
-func _ucitaj_igraca() -> void:
-	if ime_igraca == "":
-		print("[SAVE] Nema imena lika (nije prijavljen?), ne učitavam i ne čuvam.")
-		return
-	var p: Dictionary = await ApiManager.get_player(ime_igraca)
-	if p.is_empty():
-		print("[SAVE] Server nedostupan, koristim default stanje (bez čuvanja).")
-		return
+# Pošalji stanje i daj mu vremena da ode pre izlaska/odjave
+func sacuvaj_pre_izlaska() -> void:
+	if _ucitano:
+		sacuvaj_igraca()
+		await get_tree().create_timer(0.3).timeout
 
+# Server šalje podatke lika iz baze (Player.primi_lik)
+func primeni_lik(p: Dictionary) -> void:
 	level = int(p.get("level", 1))
 	xp = int(p.get("xp", 0))
 	max_xp = int(p.get("max_xp", 100))
@@ -193,13 +184,9 @@ func _ucitaj_igraca() -> void:
 
 	# Lik ovog klijenta je roditelj HUD-a (TopBar → ui → Player), ne prvi igrač u grupi
 	var player = get_parent().get_parent()
-	if player:
-		player.napad_damage = int(p.get("napad_damage", 250))
-		var pos = Vector3(float(p.get("pos_x", 0)), float(p.get("pos_y", 0)), float(p.get("pos_z", 0)))
-		if pos != Vector3.ZERO:
-			player.global_position = pos
-		# server mora da zna statistike ovog lika (učitava ih iz baze)
-		player.posalji_lik_serveru(GameState.token)
+	player.napad_damage = int(p.get("napad_damage", 250))
+	if p.has("pos_x"):
+		player.global_position = Vector3(float(p["pos_x"]), float(p["pos_y"]), float(p["pos_z"]))
 
 	hp_bar.max_value = max_hp
 	mana_bar.max_value = max_mana
@@ -209,7 +196,7 @@ func _ucitaj_igraca() -> void:
 	await get_tree().process_frame
 	await inventory_ui.ucitaj(p.get("inventory", []), p.get("equipment", {}))
 
-	await QuestManager.ucitaj_zavrsene(ime_igraca)
+	QuestManager.ucitaj_zavrsene(ime_igraca, p.get("zavrseni_questovi", []))
 
 	var qid = p.get("aktivni_quest_id", null)
 	if qid != null and str(qid) != "":
@@ -224,8 +211,7 @@ func _ucitaj_igraca() -> void:
 
 func _notification(what):
 	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		if _ucitano:
-			await sacuvaj_igraca()
+		await sacuvaj_pre_izlaska()  # server ionako snima i na diskonekt
 		get_tree().quit()
 
 # ---------------------------------------------------------------- UI

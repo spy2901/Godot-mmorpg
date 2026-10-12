@@ -136,7 +136,84 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 			vlasnistvo[id] = vlasnistvo.get(id, 0) + 1
 
 	await _primeni_oruzje(str(eq.get("weapon", "")))
+	var zavrseni: Array = await ApiManager.get_completed_quests(ime)
+	if ime_lika != ime:  # izbačen dok smo čekali backend
+		return
 	print("[SERVER] Lik ", ime, " registrovan, damage: ", izracunaj_damage(), ", predmeta: ", vlasnistvo.size())
+
+	_ucitano_stanje = {
+		"hp": int(p.get("hp", 100)), "mana": int(p.get("mana", 100)),
+		"inventory": p.get("inventory", []), "equipment": eq
+	}
+	var podaci := {
+		"level": p.get("level", 1), "xp": p.get("xp", 0), "max_xp": p.get("max_xp", 100),
+		"hp": p.get("hp", 100), "max_hp": p.get("max_hp", 100),
+		"mana": p.get("mana", 100), "max_mana": p.get("max_mana", 100),
+		"gold": p.get("gold", 100), "napad_damage": napad_damage,
+		"inventory": p.get("inventory", []), "equipment": eq,
+		"aktivni_quest_id": p.get("aktivni_quest_id", null), "quest_progres": p.get("quest_progres", 0),
+		"zavrseni_questovi": zavrseni
+	}
+	var pos := Vector3(float(p.get("pos_x", 0)), float(p.get("pos_y", 0)), float(p.get("pos_z", 0)))
+	if pos != Vector3.ZERO:
+		global_position = pos
+		podaci["pos_x"] = pos.x
+		podaci["pos_y"] = pos.y
+		podaci["pos_z"] = pos.z
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik == multiplayer.get_unique_id():
+		primi_lik(podaci)
+	else:
+		primi_lik.rpc_id(vlasnik, podaci)
+
+# ---------------------------------------------------------------- SNIMANJE (server)
+
+const SAVE_RAZMAK_MS := 2000
+var _ucitano_stanje: Dictionary = {}    # hp/mana/inventory/equipment iz baze; prazno = lik nije učitan
+var _poslednje_stanje: Dictionary = {}  # poslednje stanje od klijenta
+var _poslednje_snimanje_ms := -SAVE_RAZMAK_MS
+var _snimanje_zakazano := false
+
+# Klijent (vlasnik) šalje hp/manu/raspored; poziciju server uzima sa svog node-a.
+@rpc("any_peer", "reliable")
+func posalji_stanje(hp: int, mana: int, inventory: Array, equipment: Dictionary) -> void:
+	if not multiplayer.is_server() or not _posiljalac_je_vlasnik() or ime_lika == "":
+		return
+	_poslednje_stanje = {"hp": hp, "mana": mana, "inventory": inventory, "equipment": equipment}
+	_server_sacuvaj(false)
+
+func server_sacuvaj_konacno() -> void:
+	if not multiplayer.is_server():
+		return
+	await _server_sacuvaj(true)
+
+func _server_sacuvaj(konacno: bool) -> void:
+	if ime_lika == "" or _ucitano_stanje.is_empty():
+		return
+	if not konacno:
+		var preostalo := _poslednje_snimanje_ms + SAVE_RAZMAK_MS - Time.get_ticks_msec()
+		if preostalo > 0:
+			if not _snimanje_zakazano:
+				_snimanje_zakazano = true
+				get_tree().create_timer(preostalo / 1000.0).timeout.connect(_zakazano_snimanje)
+			return
+	_snimanje_zakazano = false
+	_poslednje_snimanje_ms = Time.get_ticks_msec()
+	var s: Dictionary = _ucitano_stanje if _poslednje_stanje.is_empty() else _poslednje_stanje
+	var pos := global_position
+	var ime := ime_lika
+	var ok: bool = await ApiManager.save_player(ime, {
+		"hp": int(s["hp"]), "mana": int(s["mana"]),
+		"pos_x": pos.x, "pos_y": pos.y, "pos_z": pos.z,
+		"inventory": s["inventory"], "equipment": s["equipment"]
+	})
+	if not ok:
+		print("[SAVE] Snimanje nije uspelo za ", ime)
+
+func _zakazano_snimanje() -> void:
+	if _snimanje_zakazano:
+		_snimanje_zakazano = false
+		_server_sacuvaj(false)
 
 # ---------------------------------------------------------------- OPREMA -> SERVER
 
@@ -493,6 +570,14 @@ func primi_stats(stats: Dictionary) -> void:
 	var hud = _hud()
 	if hud:
 		hud.primeni_stats(stats)
+
+@rpc("any_peer", "reliable")
+func primi_lik(podaci: Dictionary) -> void:
+	if not _poziv_od_servera():
+		return
+	var hud = _hud()
+	if hud:
+		hud.primeni_lik(podaci)
 
 @rpc("any_peer")
 func primi_damage_od_neprijatelja(kolicina: int) -> void:

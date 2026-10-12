@@ -214,7 +214,7 @@ func ucitaj_stanje(quest_id: String, sacuvan_progres: int) -> void:
 	print("[QUEST] Učitan aktivan quest: %s (%d/%d)" % [quest.get("naziv", ""), progres, quest.get("kolicina", 1)])
 	emit_signal("quest_prihvacen", quest)
 
-func ucitaj_zavrsene(ime: String) -> void:
+func ucitaj_zavrsene(ime: String, lista: Array) -> void:
 	ime_igraca = ime
-	zavrseni_questovi = await ApiManager.get_completed_quests(ime)
+	zavrseni_questovi = lista
 	print("[QUEST] Učitano završenih questova: %d" % zavrseni_questovi.size())

@@ -82,7 +82,14 @@ func _on_peer_connected(id: int) -> void:
 
 func _on_peer_disconnected(id: int) -> void:
 	var p = get_node_or_null(str(id))
-	if p:
+	if p == null:
+		return
+	if p.has_method("server_sacuvaj_konacno"):
+		# van grupe i sakriven dok čekamo backend, da ga neprijatelji ne vide
+		p.remove_from_group("player")
+		p.hide()
+		await p.server_sacuvaj_konacno()
+	if is_instance_valid(p):
 		p.queue_free()
 
 func _spawn_za(id: int) -> void:
