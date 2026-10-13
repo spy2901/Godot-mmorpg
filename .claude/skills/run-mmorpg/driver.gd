@@ -244,7 +244,7 @@ func _observer(log: bool, d: float) -> bool:
 			if _yaw_t < 0: _yaw_t = t
 		# 1.5-3.5 s posle yaw faze mover miruje: šalji unos za TUĐI lik, server mora da ga ignoriše
 		if _yaw_t > 0 and t > _yaw_t + 1.5 and t < _yaw_t + 3.5:
-			o.posalji_unos.rpc_id(1, [[1 << 40, Vector2(1, 0), true, 0.0]])
+			o.posalji_unos.rpc_id(1, [[1 << 40, Vector2(1, 0), true, 0.0, o._reset_id_prim]])
 		if log: print("[O t=%.1f] tudji %s %s" % [t, o.name, _fmt(o)])
 	if (_video_drugog and o == null) or t > MAX_T:
 		_provera("observer_vidi_yaw", _video_yaw, "rotation.y = yaw_sync = PI/2 na tuđem liku")
@@ -266,7 +266,7 @@ func _mover(log: bool) -> bool:
 	if _t0 < 0: _t0 = t
 	var t := t - _t0 + 2.0  # vremenska osa od pojave lika (lik pada na pod ~1 s)
 	var w := (t > 4.0 and t < 6.0) or (t > 7.0 and t < 8.0) or (t > 14.0 and t < 18.0) \
-		or (t > 18.5 and t < 20.5) or (t > 24.0 and t < 27.0) or (t > 28.0 and t < 30.0)
+		or (t > 18.5 and t < 20.5) or (t > 24.0 and t < 27.0) or (t > 28.0 and t < 30.0) or (t > 40.6 and t < 41.6)
 	if w: Input.action_press("ui_up")
 	else: Input.action_release("ui_up")
 	if t > 4.0 and t < 6.0: p.rotation.y = PI  # ka +z: na -z (0, _, -10) stoji NPC i blokira put
@@ -274,7 +274,7 @@ func _mover(log: bool) -> bool:
 	if t > 18.5 and t < 20.5: p.rotation.y = -PI / 2 # ka +x, nazad
 	if t > 24.0 and t < 27.0: p.rotation.y = 0.0 # ka -z
 	if t > 28.0 and t < 30.0: p.rotation.y = PI
-	if t > 12.5 and t < 12.7: p.posalji_unos.rpc_id(1, [[p._seq + 1000, Vector2(NAN, 1), false, INF]])
+	if t > 12.5 and t < 12.7: p.posalji_unos.rpc_id(1, [[p._seq + 1000, Vector2(NAN, 1), false, INF, p._reset_id_prim]])
 	p.set_physics_process(not (t > 15.0 and t < 18.0)) # 15-18 s: prestaje da šalje unos dok "drži" W
 	p.test_ubrzanje = 3 if t > 24.0 and t < 27.0 else 1 # speed-hack: 3 unosa po tick-u
 	p.test_gubitak = 0.3 if t > 27.5 and t < 33.0 else 0.0
@@ -282,6 +282,11 @@ func _mover(log: bool) -> bool:
 	if t > 38.6 and t < 38.7 and not _cp.has("reset_hook"): # paket na putu u trenutku reset-a se izgubi
 		_cp["reset_hook"] = true
 		p.test_izgubi_posle_reseta = true
+		p.test_zakasni_reset = true # i sačuvaj kopiju reset stanja: ubacuje se ponovo pošto lik prohoda
+	if t > 41.9 and not _cp.has("zakasneli"): # duplikat reset-a pošto je lik hodao 40.6-41.6 s
+		_cp["zakasneli"] = [p.global_position, p.korekcije_glatke + p.korekcije_snap, p.test_ubaci_zakasneli_reset(), p._test_reset_kopija]
+	if t > 42.5 and not _cp.has("zakasneli_posle"):
+		_cp["zakasneli_posle"] = [p.global_position, p.korekcije_glatke + p.korekcije_snap]
 	var faza := "normal"
 	if t > 22.0 and t < 23.5: faza = "teleport"
 	elif t > 23.5 and t < 27.5: faza = "speedhack"
@@ -299,7 +304,12 @@ func _mover(log: bool) -> bool:
 			_cpp[k] = p.global_position  # predviđena
 			_kor[k] = p.korekcije_glatke + p.korekcije_snap
 	if log: print("[M t=%.1f] moj %s server=%s kor=%d/%d" % [t, _fmt(p), p.server_poz, p.korekcije_glatke, p.korekcije_snap])
-	if t > 41.0:
+	if t > 43.0:
+		var z: Array = _cp["zakasneli"]
+		var zp: Array = _cp["zakasneli_posle"]
+		var kopija = z[3]
+		_provera("zakasneli_reset_ignorisan", z[2] and zp[0].distance_to(z[0]) < 0.3 and zp[1] == z[1],
+			"ubačen=%s, pomeraj posle ubacivanja %.3f m (reset poz %s), korekcija posle %d" % [z[2], zp[0].distance_to(z[0]), kopija[1] if kopija != null else "-", zp[1] - z[1]])
 		_provera("reset_paket_izgubljen", p.test_izgubljen_paket, "hook je izgubio paket koji je bio na putu kad je stigao reset")
 		var c := _cp
 		var w1: Vector3 = c[6.5] - c[3.5]
@@ -355,6 +365,8 @@ func _mover_ceka_gasenje() -> bool:
 # ---------------------------------------------------------------- POTION (napitci preko stub API-ja)
 
 func _potion() -> bool:
+	if _moj() and not _moj().test_reset_izgubljen and not _potion_krenuo:
+		_moj().test_izgubi_reset_prijave = true # odbaci reset posle prijave (učitavanje iz baze)
 	if not _potion_krenuo and _moj() and _moj().has_node("ui/Control"):
 		_potion_krenuo = true
 		_potion_scenario()
@@ -388,6 +400,9 @@ func _potion_scenario() -> void:
 	var inv = p.get_node("ui/InventoryUI")
 	var api = root.get_node("ApiManager")
 	var ucitan: bool = await _cekaj(func(): return hud.hp == 50 and inv.prebroj_item("small_health_potion") == 3)
+	await _cekaj(func(): return p.test_reset_izgubljen and p._reset_id_prim >= 2, 3.0)
+	_provera("reset_prijave_bez_snapa", p.test_reset_izgubljen and p._reset_id_prim >= 2 and p.korekcije_snap == 0 and p.greska_max < 1.0,
+		"reset odbačen=%s, primenjen reset_id=%d, snap=%d, najveća greška %.3f m, server_poz=%s" % [p.test_reset_izgubljen, p._reset_id_prim, p.korekcije_snap, p.greska_max, p.server_poz])
 	_provera("potion_lik_ucitan", ucitan, "hp=%d small=%d" % [hud.hp, inv.prebroj_item("small_health_potion")])
 	if not ucitan:
 		_potion_kraj = true

@@ -25,7 +25,7 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 34 linije `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = sve 34 prošle (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 36 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 36 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -83,6 +83,12 @@ višak se odbacuje i broji), `reset_paket_izgubljen` + `reset_bez_rupa` (38.5–
 1 tick i izgubi onaj na putu kad server pošalje reset; klijent šalje iz zasebne istorije, pa 0 rupa).
 Debug: `MMORPG_DEBUG_SEQ=1` u env-u servera/klijenta → `[SEQ]` (rupe, RED, PAUZA), `[SEQ-K]`, `[SEQ-P]`;
 `analiza_rafala.py server.log` računa rafale i zaostatak; `repro_login.sh [N] [--opterecenje] [--aktivnost]`.
+
+Reset (spawn, učitavanje iz baze, respawn) nosi `reset_id`; server ga šalje u svakom stanju dok ne stigne
+unos sa tim id-om, a klijent duplikate ignoriše. `reset_prijave_bez_snapa` (potion: hook odbaci reset
+posle prijave → 0 snap-ova, greška < 1 m) i `zakasneli_reset_ignorisan` (mover 40.6–41.6 s hoda, pa se
+ubaci zakasneli duplikat reset-a → bez pomeraja i bez korekcije). `repro_login.sh --izgubi-reset` isto
+za kratke prijave. Oba testa padaju bez odgovarajuće popravke (provereno).
 
 Pokretanje procesa (`pokreni` u `run.sh`): klijenti se pokreću uz razmak (čeka se `[CONFIG]` + 0.3 s). Ako
 proces izađe pre prve linije našeg koda (`[CONFIG]`; npr. Godot pad u `RotatedFileLogger` pri istovremenom
