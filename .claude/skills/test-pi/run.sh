@@ -41,9 +41,13 @@ fi
 echo "== 2/4 deploy na $PI"
 "$G" --headless --path . --export-pack "Linux (server)" export/mmorpg-server.pck > "$OUT/export.log" 2>&1 \
   && [ -s export/mmorpg-server.pck ] || pad "deploy: export-pack (log: $OUT/export.log)"
-scp -q "$PI:$PI_DIR/mmorpg-server.pck" "$OUT/pi-prethodni.pck" || pad "deploy: ne mogu da preuzmem prethodni .pck (ssh?)"
+# scp do 3 pokušaja (pauza 3 s); Tailscale ume da izgubi par paketa
+scp3() { for i in 1 2 3; do scp -q "$@" && return 0; echo "   scp pokušaj $i/3 neuspešan"; [ $i -lt 3 ] && sleep 3; done; return 1; }
+scp3 "$PI:$PI_DIR/mmorpg-server.pck" "$OUT/pi-prethodni.pck" || pad "deploy: ne mogu da preuzmem prethodni .pck (3 pokušaja)"
 SINCE=$(ssh "$PI" 'date "+%Y-%m-%d %H:%M:%S"') || pad "deploy: ssh"
-scp -q export/mmorpg-server.pck "$PI:$PI_DIR/mmorpg-server.pck" || pad "deploy: scp"
+scp3 export/mmorpg-server.pck "$PI:$PI_DIR/mmorpg-server.pck" || pad "deploy: scp (3 pokušaja), servis NIJE restartovan"
+VEL=$(wc -c < export/mmorpg-server.pck | tr -d ' '); VEL_PI=$(ssh "$PI" "wc -c < $PI_DIR/mmorpg-server.pck")
+[ "$VEL" = "$VEL_PI" ] || pad "deploy: veličina .pck na Pi-ju $VEL_PI != lokalno $VEL, servis NIJE restartovan"
 ssh "$PI" 'sudo -n systemctl restart mmorpg-game' || pad "deploy: restart"
 sleep 3
 [ "$(ssh "$PI" 'systemctl is-active mmorpg-game')" = active ] || pad "deploy: servis nije active (rollback: $OUT/pi-prethodni.pck)"
