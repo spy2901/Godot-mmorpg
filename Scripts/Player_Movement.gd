@@ -85,6 +85,37 @@ var _regen_akum := 0.0 # samo na serveru
 var _oklop_kljuc := "" # samo na serveru: koja oprema je već uračunata
 var _oklop_verzija := 0 # samo na serveru
 
+#NAMEPLATE (ime + HP traka iznad tuđih igrača; samo na klijentima)
+const MAX_PRIKAZ_DALJINA := 40.0 # m od kamere lokalnog igrača
+const NAMEPLATE_VISINA := 1.65   # m iznad stopala (model igrača je ~1.35 m; 2.2 kao kod neprijatelja lebdi visoko)
+const NAMEPLATE_SIRINA := 0.9    # m, HP traka
+const NAMEPLATE_DEBLJINA := 0.1
+const BOJA_HP_VISOK := Color(0.2, 0.85, 0.2)   # > 50%
+const BOJA_HP_SREDNJI := Color(0.95, 0.8, 0.1) # 25-50%
+const BOJA_HP_NIZAK := Color(0.9, 0.15, 0.1)   # < 25%
+const BOJA_IME_MRTAV := Color(0.55, 0.55, 0.55)
+
+# server -> svi klijenti (MultiplayerSynchronizer, ON_CHANGE); postavlja ih samo _sync_nameplate()
+var hp_sync := 100:
+	set(v):
+		hp_sync = v
+		_osvezi_nameplate()
+var max_hp_sync := 100:
+	set(v):
+		max_hp_sync = v
+		_osvezi_nameplate()
+var mrtav_sync := false:
+	set(v):
+		mrtav_sync = v
+		_osvezi_nameplate()
+var ime_sync := "":
+	set(v):
+		ime_sync = v
+		_osvezi_nameplate()
+var _nameplate: Node3D
+var _ime_label: Label3D
+var _hp_traka: MeshInstance3D
+
 @onready var kamera = $Camera3D
 
 func _ready():
@@ -96,6 +127,8 @@ func _ready():
 	$MultiplayerSynchronizer.set_multiplayer_authority(1)
 	# Server je autoritet za sve likove; vlasnik predviđa svoj lik i šalje unose
 	set_physics_process(multiplayer.is_server() or is_multiplayer_authority())
+	if not multiplayer.is_server() and not is_multiplayer_authority():
+		_napravi_nameplate()
 	if not is_multiplayer_authority():
 		set_process_unhandled_input(false)
 		kamera.current = false
@@ -168,6 +201,7 @@ func registruj_lik(token: String) -> void:
 			p.ime_lika = ""
 			p._odbij(p.get_multiplayer_authority(), "Prijavljen si sa drugog mesta")
 	ime_lika = ime
+	_sync_nameplate()
 	print("[AUTH] Peer ", peer_id, " -> ", ime)
 	_ucitaj_statistike_sa_servera(ime)
 
@@ -222,6 +256,7 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 	mrtav = false
 	_neosjetljiv_do_ms = 0
 	_stanje_ucitano = true
+	_sync_nameplate()
 	print("[SERVER] Lik ", ime, " registrovan, damage: ", izracunaj_damage(), ", predmeta: ", vlasnistvo.size())
 
 	_ucitano_stanje = {"inventory": p.get("inventory", []), "equipment": eq}
@@ -396,6 +431,7 @@ func _process(delta: float) -> void:
 			_pomeri_vizuelno(delta)
 		else:
 			_interpoliraj(delta)
+			_proveri_daljinu_nameplate()
 	if not multiplayer.is_server() or not _stanje_ucitano or mrtav:
 		return
 	_regen_akum += delta
@@ -444,6 +480,7 @@ func _server_respawn() -> void:
 
 # Javi vlasniku trenutno stanje (klijent ga samo prikazuje)
 func _posalji_hp() -> void:
+	_sync_nameplate()
 	var vlasnik := get_multiplayer_authority()
 	if vlasnik == multiplayer.get_unique_id():
 		primi_hp(hp, max_hp, mana, max_mana, mrtav)
@@ -968,6 +1005,69 @@ func server_postavi_poziciju(poz: Vector3, reset: bool) -> void:
 	global_position = poz
 	velocity = Vector3.ZERO
 	_reset = _reset or reset
+
+# ---------------------------------------------------------------- NAMEPLATE
+
+# Server: jedino mesto gde se pune sync polja (zove ga _posalji_hp i prijava). Mana/oklop se ne šalju.
+func _sync_nameplate() -> void:
+	hp_sync = hp
+	max_hp_sync = max_hp
+	mrtav_sync = mrtav
+	ime_sync = ime_lika
+
+# Klijent, tuđi lik: Label3D + dve billboard trake (pozadina, punjenje). Bez SubViewport-a.
+func _napravi_nameplate() -> void:
+	_nameplate = Node3D.new()
+	_nameplate.name = "Nameplate"
+	_nameplate.position.y = NAMEPLATE_VISINA
+	add_child(_nameplate)
+	_ime_label = Label3D.new()
+	_ime_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_ime_label.position.y = 0.17
+	_ime_label.font_size = 40
+	_ime_label.outline_size = 10
+	_nameplate.add_child(_ime_label)
+	_nameplate.add_child(_napravi_traku("Pozadina", Color(0, 0, 0, 0.6), 0))
+	_hp_traka = _napravi_traku("HpTraka", BOJA_HP_VISOK, 1)
+	_nameplate.add_child(_hp_traka)
+	_osvezi_nameplate()
+
+# Providne trake ne pišu dubinu, pa punjenje (render_priority 1) uvek ide preko pozadine
+func _napravi_traku(ime: String, boja: Color, prioritet: int) -> MeshInstance3D:
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = boja
+	mat.render_priority = prioritet
+	var q := QuadMesh.new()
+	q.size = Vector2(NAMEPLATE_SIRINA, NAMEPLATE_DEBLJINA)
+	q.material = mat
+	var m := MeshInstance3D.new()
+	m.name = ime
+	m.mesh = q
+	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return m
+
+# Zove se samo iz settera sync polja (kad se vrednost promeni), ne svaki frame
+func _osvezi_nameplate() -> void:
+	if _nameplate == null:
+		return
+	_ime_label.text = ime_sync + (" (mrtav)" if mrtav_sync else "")
+	_ime_label.modulate = BOJA_IME_MRTAV if mrtav_sync else Color.WHITE
+	_hp_traka.visible = not mrtav_sync
+	_nameplate.get_node("Pozadina").visible = not mrtav_sync
+	var deo := clampf(float(hp_sync) / maxi(max_hp_sync, 1), 0.0, 1.0)
+	var q: QuadMesh = _hp_traka.mesh
+	q.size.x = NAMEPLATE_SIRINA * deo
+	q.center_offset.x = -NAMEPLATE_SIRINA * (1.0 - deo) / 2.0 # puni se sleva (u ravni billboard-a)
+	q.material.albedo_color = BOJA_HP_VISOK if deo > 0.5 else (BOJA_HP_SREDNJI if deo >= 0.25 else BOJA_HP_NIZAK)
+
+func _proveri_daljinu_nameplate() -> void:
+	var kam := get_viewport().get_camera_3d()
+	var vidljiv := kam == null or kam.global_position.distance_to(global_position) <= MAX_PRIKAZ_DALJINA
+	if _nameplate.visible != vidljiv:
+		_nameplate.visible = vidljiv
 
 # ---------------------------------------------------------------- SERVER -> IGRAC (RPC)
 

@@ -2,7 +2,7 @@ extends SceneTree
 # Drajver za mmorpg: jedan Godot proces = jedna uloga.
 #   godot --headless --path . --script res://.claude/skills/run-mmorpg/driver.gd -- server
 #   godot --headless --path . --script res://.claude/skills/run-mmorpg/driver.gd -- observer
-#   godot            --path . --script res://.claude/skills/run-mmorpg/driver.gd -- mover [shot=/abs/putanja.png]
+#   godot            --path . --script res://.claude/skills/run-mmorpg/driver.gd -- observer dir=/abs/out shot=/abs/out/nameplate
 #   server prima i stop=/abs/fajl: gasi se kad fajl postoji (run.sh ga pravi kad mover ispiše CEKAM_GASENJE)
 # Pokreće se preko run.sh (server -> observer -> mover). Ispisuje PASS/FAIL linije.
 # Backend nije potreban: klijent bez imena lika ne šalje token, pa ga server ne izbacuje.
@@ -25,6 +25,21 @@ var _obs_d := 0.0       # delta prethodnog frame-a
 var _potion_krenuo := false
 var _potion_kraj := false
 var _cmd_izvrsena := ""  # server: poslednja izvršena komanda iz dir/potion_cmd
+var _server_hp_upisan := ""
+var _nameplate_na_serveru := false
+# observer: nameplate provere (tuđi lik TestLik)
+var _spreman := false
+var _sync_poklapanja := 0
+var _server_hp_pre := ""
+var _cekana_steta := -1     # hp posle poslednje štete na serveru, čeka se u hp_sync
+var _steta_ms := 0
+var _stete := 0
+var _max_kasnjenje_ms := 0
+var _samo_tudji := false
+var _video_mrtvog := false
+var _video_respawn := false
+var _snimljeno := {}        # kategorija -> boja/stanje ok
+var _snimak_frame := -1
 var _ceka_gasenje := -1.0
 var _menu_t := -1.0       # mover: kad je MainMenu postao aktivan # mover: t kad je počeo da čeka gašenje servera
 var t := 0.0
@@ -114,6 +129,17 @@ func _server(log: bool) -> bool:
 		var m = _world().get_node(f[1])
 		m.server_postavi_poziciju(m.global_position + Vector3(3, 0, 0), false) # bez reset-a: odlučuje PRAG_SNAP
 		print("[S] teleport ", f[1], " +3 x")
+	if _world():
+		for p in _world().get_children():
+			if not p.is_in_group("player"): continue
+			if p.has_node("Nameplate"): _nameplate_na_serveru = true
+			if p.ime_lika == "TestLik" and dir != "":
+				var st := "%d %d %s" % [p.hp, p.max_hp, p.mrtav]
+				if st != _server_hp_upisan:
+					_server_hp_upisan = st
+					var fh := FileAccess.open(dir + "/server_hp", FileAccess.WRITE)
+					fh.store_string(st)
+					fh.close()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -127,11 +153,16 @@ func _server(log: bool) -> bool:
 	if stop != "" and FileAccess.file_exists(stop):
 		var bez: int = _faza_rupe.get("normal", 0) + _faza_rupe.get("teleport", 0)
 		_provera("seq_bez_rupa_bez_gubitka", bez == 0, "rupe po fazi %s" % _faza_rupe)
+		_provera("nameplate_nema_na_serveru", not _nameplate_na_serveru, "")
 		print("[S] gasim server (okidač)")
 		return true
 	return t > MAX_T
 
 func _observer(log: bool, d: float) -> bool:
+	if not _spreman and _moj():
+		_spreman = true
+		print("OBSERVER_SPREMAN") # run.sh tek tada pokreće movera i potion klijenta
+	_observer_nameplate()
 	var o = _drugi()
 	if o:
 		_video_drugog = true
@@ -155,6 +186,11 @@ func _observer(log: bool, d: float) -> bool:
 		if log: print("[O t=%.1f] tudji %s %s" % [t, o.name, _fmt(o)])
 	if (_video_drugog and o == null) or t > MAX_T:
 		_provera("observer_vidi_yaw", _video_yaw, "rotation.y = yaw_sync = PI/2 na tuđem liku")
+		_provera("nameplate_sync_poklapa", _sync_poklapanja > 0, "frame-ova sa ime/hp/max/mrtav = server: %d" % _sync_poklapanja)
+		_provera("hp_sync_prati_stetu", _stete >= 2 and _max_kasnjenje_ms <= 250, "šteta=%d, najveće kašnjenje %d ms" % [_stete, _max_kasnjenje_ms])
+		_provera("nameplate_samo_tudji", _samo_tudji, "tuđi ima vidljiv Nameplate, sopstveni nema")
+		_provera("mrtav_sync_i_respawn", _video_mrtvog and _video_respawn, "mrtav=%s respawn=%s" % [_video_mrtvog, _video_respawn])
+		_provera("nameplate_boje", _snimljeno.size() == 4 and not _snimljeno.values().has(false), "%s" % _snimljeno)
 		_provera("observer_korak_max_2x", _obs_kraci == 0, "prekoracenja=%d, max korak=%.2f x brzina*dt, snap-ova=%d" % [_obs_kraci, _obs_max, _obs_snap])
 		return true
 	return false
@@ -338,10 +374,98 @@ func _potion_scenario() -> void:
 	_provera("dva_istovremena_jedan_komad", odgovori.size() == 2 and okova == 1 and b == 2 and int(posle.get("item_use_br", 0)) - int(pre.get("item_use_br", 0)) == 1 and hud.hp == 100,
 		"odgovori=%s baza=%d backend_trosenja=%d hp=%d" % [odgovori, b, int(posle.get("item_use_br", 0)) - int(pre.get("item_use_br", 0)), hud.hp])
 
+	# nameplate stanja (observer snima): pun -> 40% -> <25%
+	await _snimak("zeleno")
+	_komanda("steta 60")
+	await _cekaj(func(): return hud.hp <= 50 and hud.hp >= 25, 3.0)
+	await _snimak("zuto")
+	_komanda("steta 25")
+	await _cekaj(func(): return hud.hp < 25, 3.0)
+	await _snimak("crveno")
+
 	# 8. mrtav ne može
 	_komanda("ubij")
 	await _cekaj(func(): return hud.je_mrtav, 3.0)
 	r = await p.koristi_item_na_serveru("apple")
 	b = await _baza("apple")
 	_provera("mrtav_ne_moze", hud.je_mrtav and r.get("poruka") == "Mrtav si" and b == 2, "mrtav=%s r=%s baza=%d" % [hud.je_mrtav, r, b])
+	await _snimak("mrtav")
+	# respawn (server, 3 s) pa sačekaj da ga observer vidi pre odjave
+	await _cekaj(func(): return not hud.je_mrtav, 6.0)
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/observer_respawn"), 5.0)
 	_potion_kraj = true
+
+# ---------------------------------------------------------------- NAMEPLATE (observer gleda TestLik-a)
+
+func _testlik():
+	if _world() == null: return null
+	for p in _world().get_children():
+		if p.is_in_group("player") and p.name != _id() and p.ime_sync == "TestLik": return p
+	return null
+
+func _kategorija(p) -> String:
+	if p.mrtav_sync: return "mrtav"
+	var deo := float(p.hp_sync) / maxi(p.max_hp_sync, 1)
+	return "zeleno" if deo > 0.5 else ("zuto" if deo >= 0.25 else "crveno")
+
+func _observer_nameplate() -> void:
+	var p = _testlik()
+	if p == null or dir == "": return
+	var np = p.get_node_or_null("Nameplate")
+	if np and np.visible and not _moj().has_node("Nameplate"): _samo_tudji = true
+	# poređenje sa serverom (server upisuje "hp max mrtav" u dir/server_hp)
+	var st := FileAccess.get_file_as_string(dir + "/server_hp")
+	var f := st.split(" ")
+	if f.size() == 3:
+		if st != _server_hp_pre:
+			var pre := _server_hp_pre.split(" ")
+			if pre.size() == 3 and int(f[0]) < int(pre[0]):
+				_cekana_steta = int(f[0])
+				_steta_ms = Time.get_ticks_msec()
+			elif _cekana_steta >= 0 and int(f[0]) != _cekana_steta:
+				_cekana_steta = -1 # regen/lečenje pre nego što je šteta stigla: ne meri se
+			_server_hp_pre = st
+		if p.hp_sync == int(f[0]) and p.max_hp_sync == int(f[1]) and str(p.mrtav_sync) == f[2]:
+			_sync_poklapanja += 1
+			if _cekana_steta >= 0:
+				_stete += 1
+				_max_kasnjenje_ms = maxi(_max_kasnjenje_ms, Time.get_ticks_msec() - _steta_ms)
+				_cekana_steta = -1
+	var traka: Node3D = np.get_node("HpTraka") if np else null
+	if p.mrtav_sync and traka and not traka.visible and np.get_node("Pozadina").visible == false \
+			and p._ime_label.modulate == p.BOJA_IME_MRTAV:
+		_video_mrtvog = true
+	if _video_mrtvog and not p.mrtav_sync and p.hp_sync == p.max_hp_sync and traka and traka.visible:
+		if not _video_respawn: _marker("observer_respawn")
+		_video_respawn = true
+	# snimak: potion traži kategoriju u dir/snimi; snima se kad je stanje tu, posle 10 frame-ova (render)
+	var trazi := FileAccess.get_file_as_string(dir + "/snimi")
+	if trazi == "" or _snimljeno.has(trazi) or _kategorija(p) != trazi:
+		_snimak_frame = -1
+		return
+	if _snimak_frame < 0: _snimak_frame = 0
+	_snimak_frame += 1
+	if _snimak_frame < 10: return
+	var ok: bool
+	if trazi == "mrtav":
+		ok = not traka.visible and p._ime_label.modulate == p.BOJA_IME_MRTAV
+	else:
+		var ocekivana: Color = {"zeleno": p.BOJA_HP_VISOK, "zuto": p.BOJA_HP_SREDNJI, "crveno": p.BOJA_HP_NIZAK}[trazi]
+		ok = traka.mesh.material.albedo_color == ocekivana and traka.visible
+	_snimljeno[trazi] = ok
+	if shot != "":
+		var putanja := "%s_%s.png" % [shot, trazi]
+		root.get_viewport().get_texture().get_image().save_png(putanja)
+		print("[O] screenshot %s hp=%d/%d -> %s" % [trazi, p.hp_sync, p.max_hp_sync, putanja])
+	_marker("snimljeno_" + trazi)
+
+func _marker(ime: String) -> void:
+	var f := FileAccess.open(dir + "/" + ime, FileAccess.WRITE)
+	f.close()
+
+# potion: traži snimak kategorije i čeka da ga observer napravi (stanje, ne sat)
+func _snimak(kat: String) -> bool:
+	var f := FileAccess.open(dir + "/snimi", FileAccess.WRITE)
+	f.store_string(kat)
+	f.close()
+	return await _cekaj(func(): return FileAccess.file_exists(dir + "/snimljeno_" + kat), 20.0)

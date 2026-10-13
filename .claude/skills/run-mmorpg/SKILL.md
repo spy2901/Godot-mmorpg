@@ -22,12 +22,13 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 
 ```bash
 .claude/skills/run-mmorpg/run.sh            # sve headless, ~20 s
-.claude/skills/run-mmorpg/run.sh --window   # mover u prozoru 1280x720 + $OUT/mover.png, ~30 s
+.claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 24 linije `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = sve 24 prošle. Logovi su u
+Izlaz: putanja do logova, 30 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 30 prošlo. `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+`OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`mover.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -53,6 +54,15 @@ Napitci (`potion` klijent, provere preko stanja: HUD hp, `prebroj_item`, količi
 `dva_istovremena_jedan_komad` (2 direktna RPC-a → 1 ok, backend trošio 1×), `mrtav_ne_moze`.
 Štetu i smrt zadaje server drajver na komandu iz `$OUT/potion_cmd` ("br steta N" / "br ubij").
 HP se regeneriše +2/s, pa se efekat proverava kao razlika uz toleranciju.
+
+Nameplate (observer gleda TestLik-a; server upisuje njegov "hp max mrtav" u `$OUT/server_hp`):
+`nameplate_sync_poklapa` (hp_sync/max_hp_sync/mrtav_sync/ime_sync = server), `hp_sync_prati_stetu`
+(kašnjenje od serverske štete do hp_sync, ≤ 250 ms), `nameplate_samo_tudji` (tuđi lik ima vidljiv
+`Nameplate`, sopstveni ga nema), `mrtav_sync_i_respawn` (traka sakrivena + sivo ime, pa nazad),
+`nameplate_boje` (zelena/žuta/crvena po HP-u, mrtav), server: `nameplate_nema_na_serveru`.
+Potion klijent posle testa napitaka vodi TestLik-a kroz 100 → 40 → ~15 HP → smrt → respawn i za svako
+stanje upiše kategoriju u `$OUT/snimi`; observer snima kad vidi to stanje (+10 frame-ova za render) i
+upiše `$OUT/snimljeno_<kat>` (headless: samo marker, bez slike).
 
 Stub (`stub_api.py`): `/auth/verify` (token `potion-token` → `TestLik`), `GET /players/{ime}`,
 `GET /items/{id}`, `/quests/completed/{ime}`, `POST /players/{ime}/save` (samo hp/mana/pozicija;
@@ -98,8 +108,8 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
 - **Prozorski klijent kasni ~8 s** (Metal/shaderi). Zato se uloge ne usklađuju po satu:
   server se gasi kad svi peer-ovi odu, observer kreće posle yaw faze movera, a mover meri
   vreme od pojave svog lika.
-- **Snimanje screenshot-a koči frame** (GPU readback). Ako se snima usred W faze, faza
-  traje kraće u stvarnom vremenu i `W_2s_napred` pada (-8 umesto -10). Snima se u mirovanju.
+- **Snimanje screenshot-a koči frame** (GPU readback). Zato prozor ima observer (ne mover): zastoj
+  u moveru bi skratio W fazu i `W_2s_napred` bi pao (-8 umesto -10).
 - **Headless ne može screenshot** (dummy renderer). Za sliku koristi `--window`.
 - **NPC stoji na (0, 2.7, -10)** (crna kapsula na screenshot-u) i blokira kretanje ka -z, pa se lik zaglavi zavisno od nasumičnog x spawna. Zato prva W faza ide ka +z.
 - **Spawn je nasumičan** (±2 oko (0,1,0)), pa lik ponekad zakači prepreku. Tolerancije

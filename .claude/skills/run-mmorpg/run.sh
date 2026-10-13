@@ -1,13 +1,13 @@
 #!/bin/bash
 # Pokreće server + observer (headless) + mover, gasi server dok su klijenti živi, ispisuje PASS/FAIL.
 # Upotreba (iz korena repoa): .claude/skills/run-mmorpg/run.sh [--window]
-#   --window: mover se pokreće u prozoru i snima screenshot u $OUT/mover.png
+#   --window: observer se pokreće u prozoru i snima nameplate u $OUT/nameplate_<stanje>.png
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
 G="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 D=res://.claude/skills/run-mmorpg/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/run-mmorpg}"
-mkdir -p "$OUT"; rm -f "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd
+mkdir -p "$OUT"; rm -f "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png
 PORT="${STUB_PORT:-18765}"
 API="--server-url=http://127.0.0.1:$PORT"
 
@@ -20,14 +20,15 @@ for _ in $(seq 20); do curl -s "127.0.0.1:$PORT/items/apple" > /dev/null && brea
 "$G" --headless --path . --script $D -- server "stop=$OUT/ugasi_server" "dir=$OUT" "$API" > "$OUT/server.log" 2>&1 &
 S=$!
 sleep 1.5
-"$G" --headless --path . --script $D -- observer "dir=$OUT" > "$OUT/observer.log" 2>&1 &
-O=$!
-sleep 0.5
-if [ "${1:-}" = "--window" ]; then
-  "$G" --path . --resolution 1280x720 --script $D -- mover "shot=$OUT/mover.png" "dir=$OUT" > "$OUT/mover.log" 2>&1 &
+if [ "${1:-}" = "--window" ]; then # observer u prozoru snima nameplate TestLik-a: $OUT/nameplate_<stanje>.png
+  "$G" --path . --resolution 1280x720 --script $D -- observer "dir=$OUT" "shot=$OUT/nameplate" > "$OUT/observer.log" 2>&1 &
 else
-  "$G" --headless --path . --script $D -- mover "dir=$OUT" > "$OUT/mover.log" 2>&1 &
+  "$G" --headless --path . --script $D -- observer "dir=$OUT" > "$OUT/observer.log" 2>&1 &
 fi
+O=$!
+# mover meri vreme od svog lika, a observer mora da ga vidi od početka: čekaj observer (prozor kasni ~8 s)
+for _ in $(seq 120); do grep -q OBSERVER_SPREMAN "$OUT/observer.log" 2>/dev/null && break; sleep 0.5; done
+"$G" --headless --path . --script $D -- mover "dir=$OUT" > "$OUT/mover.log" 2>&1 &
 M=$!
 "$G" --headless --path . --script $D -- potion "dir=$OUT" "$API" > "$OUT/potion.log" 2>&1 &
 P=$!
@@ -49,4 +50,4 @@ else
   echo "PASS nema_greske_neaktivnog_peera"
 fi | tee "$OUT/run.log"
 grep -h 'SCRIPT ERROR' "$OUT"/*.log | sort | uniq -c
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS' "$OUT"/*.log | paste -sd+ - | bc)" -eq 24 ]
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS' "$OUT"/*.log | paste -sd+ - | bc)" -eq 30 ]
