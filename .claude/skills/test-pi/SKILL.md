@@ -35,6 +35,8 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
    - `kretanje_server_authority` (igrac1): 1 s W → server pomeren ~5 m, predikcija = server posle stajanja.
    - `drugi_vidi_kretanje` (igrac2): tuđi lik se pomerio koliko je server javio.
    - screenshot `$OUT/pi_igrac1.png`: igrac1 se okrene ka drugom igraču pa snimi.
+   - `WARN igracN:greska_predikcije` kad je najveća greška predikcije > 1 m (`GRESKA_WARN_M`), npr. snap
+     pri prijavi kad se izgubi reset; WARN ne obara rezultat.
    Zatim: `pi_journal_bez_gresaka` (journal od restarta, bez linija sa "key") i `tajne_van_logova`
    (nijedna lozinka u `$OUT/**/*.log`).
 

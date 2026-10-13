@@ -15,6 +15,7 @@ var t := 0.0
 var _krenuo := false
 var _kraj := false
 const MAX_T := 120.0
+const GRESKA_WARN_M := 1.0 # najveća greška predikcije iznad ovoga = WARN
 
 func _initialize():
 	var args := OS.get_cmdline_user_args()
@@ -180,4 +181,7 @@ func _scenario() -> void:
 			await process_frame
 		root.get_viewport().get_texture().get_image().save_png(shot)
 		print("[%s] screenshot -> %s (drugi igrač na %.1f m)" % [uloga, shot, o.global_position.distance_to(p.global_position)])
+	# greška predikcije sopstvenog lika (npr. snap pri prijavi kad se izgubi reset): WARN, ne FAIL
+	if p.greska_max > GRESKA_WARN_M:
+		print("WARN %s:greska_predikcije  najveća %.3f m > %.1f m (korekcije glatke %d, snap %d)" % [uloga, p.greska_max, GRESKA_WARN_M, p.korekcije_glatke, p.korekcije_snap])
 	await _zavrsi()

@@ -75,7 +75,7 @@ P1=$!
 P2=$!
 wait $P1 $P2
 
-grep -h '^PASS\|^FAIL\|screenshot' "$OUT"/igrac1.log "$OUT"/igrac2.log
+grep -h '^PASS\|^FAIL\|^WARN\|screenshot' "$OUT"/igrac1.log "$OUT"/igrac2.log
 grep -h 'SCRIPT ERROR' "$OUT"/igrac*.log | sort | uniq -c
 F=$(grep -h '^FAIL' "$OUT"/igrac*.log | wc -l | tr -d ' ')
 # journal na Pi-ju od restarta (linije sa ključem se ne prikazuju)
@@ -93,5 +93,6 @@ else
 fi
 
 echo "logovi: $OUT"
-[ "$F" = 0 ] && echo "REZULTAT: sve prošlo" || echo "REZULTAT: $F FAIL"
+W=$(cat "$OUT"/igrac*.log | grep -c '^WARN')
+[ "$F" = 0 ] && echo "REZULTAT: sve prošlo$([ "$W" != 0 ] && echo ", $W WARN")" || echo "REZULTAT: $F FAIL$([ "$W" != 0 ] && echo ", $W WARN")"
 [ "$F" = 0 ]
