@@ -71,7 +71,9 @@ var _slikano := false
 var _video_yaw := false # observer: video tuđi yaw_sync ~ PI/2
 var _yaw_t := -1.0      # observer: kad je prvi put video yaw
 var _video_drugog := false
-var _t0 := -1.0         # mover: kad se pojavio sopstveni lik
+var _t0 := -1.0         # mover: početak vremenske ose (lik stao na pod)
+var _spawn = null       # mover: [vreme, pozicija] pojave lika (za ispis kad na_podu padne)
+const PODLOGA_TIMEOUT := 5.0
 const MAX_T := 120.0    # zaštita od zaglavljivanja
 var _max_t := MAX_T     # server u repro_login.sh radi duže (maxt=)
 var _aktivnost := false # prijava: reliable zahtevi za predmet dok traje sesija
@@ -263,8 +265,11 @@ func _mover(log: bool) -> bool:
 	var p = _moj()
 	if p == null:
 		return t > MAX_T
-	if _t0 < 0: _t0 = t
-	var t := t - _t0 + 2.0  # vremenska osa od pojave lika (lik pada na pod ~1 s)
+	if _spawn == null: _spawn = [t, p.global_position]
+	if _t0 < 0:
+		if not p.is_on_floor() and t - _spawn[0] < PODLOGA_TIMEOUT: return false
+		_t0 = t
+	var t := t - _t0 + 3.0  # vremenska osa od dodira poda (ranije: pojava + ~1 s pada)
 	var w := (t > 4.0 and t < 6.0) or (t > 7.0 and t < 8.0) or (t > 14.0 and t < 18.0) \
 		or (t > 18.5 and t < 20.5) or (t > 24.0 and t < 27.0) or (t > 28.0 and t < 30.0) or (t > 40.6 and t < 41.6)
 	if w: Input.action_press("ui_up")
@@ -303,6 +308,9 @@ func _mover(log: bool) -> bool:
 			_cp[k] = p.server_poz  # pozicija koju javlja server
 			_cpp[k] = p.global_position  # predviđena
 			_kor[k] = p.korekcije_glatke + p.korekcije_snap
+			if k == 3.5:
+				var sudar = p.get_last_slide_collision()
+				_cp["podloga"] = [p.is_on_floor(), sudar.get_collider().name if sudar and sudar.get_collider() else "-", sudar.get_position() if sudar else Vector3.ZERO]
 	if log: print("[M t=%.1f] moj %s server=%s kor=%d/%d" % [t, _fmt(p), p.server_poz, p.korekcije_glatke, p.korekcije_snap])
 	if t > 43.0:
 		var z: Array = _cp["zakasneli"]
@@ -314,7 +322,8 @@ func _mover(log: bool) -> bool:
 		var c := _cp
 		var w1: Vector3 = c[6.5] - c[3.5]
 		var w2: Vector3 = c[8.5] - c[6.5]
-		_provera("na_podu", absf(c[3.5].y - 1.16) < 0.1, "y=%.2f" % c[3.5].y)
+		var pod: Array = c["podloga"]
+		_provera("na_podu", absf(c[3.5].y - 1.16) < 0.1, "y=%.2f, spawn %s, is_on_floor=%s, podloga '%s' u %s, čekanje poda %.2f s" % [c[3.5].y, _spawn[1], pod[0], pod[1], pod[2], _t0 - _spawn[0]])
 		_provera("W_2s_napred", w1.z > 8.5 and w1.z < 11.5 and absf(w1.x) < 1.5, "delta=%s" % w1)
 		_provera("yaw_PI/2_ide_-x", w2.x < -4.0 and absf(w2.z) < 1.5, "delta=%s" % w2)
 		_provera("tudji_unos_ignorisan", c[12.0].distance_to(c[8.5]) < 0.05, "delta=%s" % (c[12.0] - c[8.5]))
