@@ -24,7 +24,7 @@ const UNOS_BURST := 10.0    # server: kapacitet kofe
 # događaj 28 uzastopnih odbijenih unosa -> 32 (~15% rezerve). Pun red odbacuje višak (speed-hack).
 const UNOS_RED_MAX := 32
 
-# unos = [seq: int, smer: Vector2, skok: bool, yaw: float]
+# unos = [seq: int, smer: Vector2, skok: bool, yaw: float, reset_id: int]
 var poz_sync := Vector3.ZERO # server -> ostali klijenti (MultiplayerSynchronizer); vlasnik je ne čita
 var tik_sync := 0            # server physics frame kome pripada poz_sync
 # klijent-vlasnik
@@ -52,6 +52,8 @@ var test_izgubi_posle_reseta := false # test: paketi kasne 1 tick, a onaj na put
 var test_izgubljen_paket := false     # test: hook je zaista izgubio paket
 var test_izgubi_reset_prijave := false # test: klijent odbaci prvo reset stanje posle inicijalizacije (učitavanje iz baze)
 var test_reset_izgubljen := false      # test: hook je zaista odbacio reset
+var test_zakasni_reset := false        # test: sačuvaj kopiju prvog reset stanja (za test_ubaci_zakasneli_reset)
+var _test_reset_kopija = null
 var _test_paket = null
 # server
 var _red: Array = []         # validni unosi čekaju token (najviše UNOS_RED_MAX)
@@ -65,7 +67,14 @@ var _poslednji_seq := 0
 var _tokeni := UNOS_BURST
 var _tokeni_ms := 0
 var _unos_ms := -UNOS_ISTEK_MS
-var _reset := true           # sledeće stanje vlasniku nosi reset (spawn, prijava, respawn)
+# reset (spawn, prijava, respawn): server ga šalje u SVAKOM stanju (isti reset_id i pozicija) dok ne stigne
+# unos sa tim reset_id-om; dotle drži lik na reset poziciji i odbacuje unose iz ranije epohe
+var _reset_id := 0           # server: id poslednjeg reset-a (rastući po peer-u)
+var _reset_ceka := false     # server: reset još nije potvrđen unosom
+var _reset_poz := Vector3.ZERO
+var reset_izdato := 0        # server: broj reset-a u sesiji ([SESIJA])
+var reset_paketa := 0        # server: broj stanja poslatih sa reset-om ([SESIJA])
+var _reset_id_prim := 0      # klijent: poslednji primenjeni reset_id (duplikati se ignorišu)
 var rupe_seq := 0            # preskočeni seq-ovi (izgubljeni ili odbijeni)
 # debug (server, MMORPG_DEBUG_SEQ=1): svaka rupa u seq obradi sa razlogom i vremenima
 var _debug_seq := OS.get_environment("MMORPG_DEBUG_SEQ") == "1"
@@ -152,6 +161,8 @@ func _ready():
 	add_to_group("player")
 	_spawn_ms = Time.get_ticks_msec()
 	_je_server = multiplayer.is_server()
+	if _je_server:
+		server_postavi_poziciju(global_position, true) # spawn je reset br. 1
 	_model_poz = $CharacterMain.position
 	_kamera_poz = kamera.position
 	# Node pripada vlasniku (RPC-ovi); poz_sync/yaw_sync šalje server ostalima.
@@ -880,7 +891,7 @@ func _novi_unos() -> Array:
 			smer.x += 1.0
 		skok = Input.is_key_pressed(KEY_SPACE)
 	_seq += 1
-	return [_seq, smer, skok, rotation.y]
+	return [_seq, smer, skok, rotation.y, _reset_id if multiplayer.is_server() else _reset_id_prim]
 
 # ---------------------------------------------------------------- KLIJENT: PREDIKCIJA
 
@@ -921,25 +932,42 @@ func _klijent_korak(dt: float) -> void:
 
 # Server -> vlasnik, svaki physics tick: stanje posle obrade unosa `seq`.
 @rpc("any_peer", "unreliable_ordered")
-func primi_stanje(seq: int, poz: Vector3, vel: Vector3, reset: bool) -> void:
+func primi_stanje(seq: int, poz: Vector3, vel: Vector3, reset_id: int) -> void:
 	if not _poziv_od_servera() or randf() < test_gubitak:
 		return
-	if test_izgubi_reset_prijave and reset and _inicijalizovan:
+	if test_izgubi_reset_prijave and reset_id >= 2: # prvo stanje sa reset-om posle prijave (učitavanje)
 		test_izgubi_reset_prijave = false
 		test_reset_izgubljen = true
 		if _debug_seq:
-			print("[SEQ-K] TEST: odbačen reset (seq %d, poz %s)" % [seq, poz])
+			print("[SEQ-K] TEST: odbačen reset id %d (seq %d, poz %s)" % [reset_id, seq, poz])
 		return
+	if test_zakasni_reset and reset_id > 0 and _test_reset_kopija == null:
+		_test_reset_kopija = [seq, poz, vel, reset_id] # test: ista kopija se kasnije ubacuje ponovo
+	if reset_id > 0 and reset_id <= _reset_id_prim:
+		return # duplikat već primenjenog reset-a (server ga ponavlja do potvrde, ili zakasni): ignoriše se
 	server_poz = poz
 	# više stanja u istom frame-u: važi poslednje, ali reset se ne gubi
-	_stanje = [seq, poz, vel, reset or (_stanje != null and _stanje[3])]
+	_stanje = [seq, poz, vel, maxi(reset_id, _stanje[3] if _stanje != null else 0)]
+
+# Test: zakasneli duplikat reset-a stiže pošto je klijent već hodao (mora da se ignoriše)
+func test_ubaci_zakasneli_reset() -> bool:
+	if _test_reset_kopija == null:
+		return false
+	var k: Array = _test_reset_kopija
+	primi_stanje(k[0], k[1], k[2], k[3])
+	# obradi odmah, sam (inače bi se spojio sa novijim stanjem iz istog frame-a i uzeo njegovu poziciju)
+	if _stanje != null and _stanje[3] == k[3]:
+		_uskladi(_stanje, 1.0 / Engine.physics_ticks_per_second)
+		_stanje = null
+	return true
 
 # Reconciliation: serversko stanje + ponovo odigrani nepotvrđeni unosi, pa poređenje sa predikcijom.
 func _uskladi(s: Array, dt: float) -> void:
 	var seq: int = s[0]
-	if s[3] or not _inicijalizovan:
+	if s[3] > _reset_id_prim or not _inicijalizovan:
 		if _debug_seq:
-			print("[SEQ-K] reset: ack=%d moj_seq=%d buffer=%d inicijalizovan=%s" % [seq, _seq, _buffer.size(), _inicijalizovan])
+			print("[SEQ-K] reset id %d: ack=%d moj_seq=%d buffer=%d inicijalizovan=%s" % [s[3], seq, _seq, _buffer.size(), _inicijalizovan])
+		_reset_id_prim = maxi(_reset_id_prim, s[3])
 		if test_izgubi_posle_reseta and _test_paket != null and _inicijalizovan:
 			_test_paket = null # paket koji je bio "na putu" kad je stigao reset: izgubljen
 			test_izgubi_posle_reseta = false
@@ -1042,7 +1070,14 @@ func posalji_unos(unosi: Array) -> void:
 	var zadnji: int = _red[-1][0] if not _red.is_empty() else _poslednji_seq
 	for sirov in unosi.slice(0, UNOSA_PO_PAKETU):
 		var u := _validan_unos(sirov)
-		if u.is_empty() or u[0] <= zadnji:
+		if u.is_empty() or u[4] != _reset_id:
+			continue # neispravan ili iz epohe pre poslednjeg reset-a (klijent ga još nije primenio): bez rupe
+		if _reset_ceka: # prvi unos posle reset-a: klijent je primenio reset, odavde se broji ispočetka
+			_reset_ceka = false
+			_red.clear()
+			_poslednji_seq = u[0] - 1
+			zadnji = u[0] - 1
+		if u[0] <= zadnji:
 			if _debug_seq and not u.is_empty() and _rupe_otvorene.has(u[0]):
 				_dbg_seq("KASNO seq=%d stigao %d ms posle rupe (van reda)" % [u[0], sad - _rupe_otvorene[u[0]]])
 				_rupe_otvorene.erase(u[0])
@@ -1077,17 +1112,21 @@ func _dbg_seq(tekst: String) -> void:
 	print("[SEQ] t=%d peer %s %s | od_konekcije=%d od_ucitavanja=%s od_reseta=%s" % [sad, name, tekst, sad - _spawn_ms,
 		str(sad - _ucitan_ms) if _ucitan_ms >= 0 else "-", str(sad - _reset_ms) if _reset_ms >= 0 else "-"])
 
-# [seq, smer, skok, yaw] sa proverom tipova; [] za neispravan unos
+# [seq, smer, skok, yaw, reset_id] sa proverom tipova; [] za neispravan unos
 func _validan_unos(u) -> Array:
-	if typeof(u) != TYPE_ARRAY or u.size() != 4 or typeof(u[0]) != TYPE_INT or typeof(u[1]) != TYPE_VECTOR2 \
-			or typeof(u[2]) != TYPE_BOOL or typeof(u[3]) != TYPE_FLOAT:
+	if typeof(u) != TYPE_ARRAY or u.size() != 5 or typeof(u[0]) != TYPE_INT or typeof(u[1]) != TYPE_VECTOR2 \
+			or typeof(u[2]) != TYPE_BOOL or typeof(u[3]) != TYPE_FLOAT or typeof(u[4]) != TYPE_INT:
 		return []
 	if not u[1].is_finite() or not is_finite(u[3]):
 		return []
-	return [u[0], u[1].limit_length(1.0), u[2], wrapf(u[3], -PI, PI)]
+	return [u[0], u[1].limit_length(1.0), u[2], wrapf(u[3], -PI, PI), u[4]]
 
 func _server_korak(dt: float) -> void:
-	if _red.is_empty() and Time.get_ticks_msec() - _unos_ms > UNOS_ISTEK_MS:
+	var ceka := _ceka_reset()
+	if ceka: # do potvrde reset-a lik stoji na reset poziciji (isto stanje kao kod klijenta posle reset-a)
+		global_position = _reset_poz
+		velocity = Vector3.ZERO
+	elif _red.is_empty() and Time.get_ticks_msec() - _unos_ms > UNOS_ISTEK_MS:
 		simuliraj_korak([0, Vector2.ZERO, false, rotation.y], dt) # vlasnik ćuti: bez unosa, samo gravitacija
 	# token bucket: ista stopa po stvarnom vremenu kao pre (UNOS_RATE * tps/s), ali se troši pri obradi
 	# iz reda, ne pri prijemu. Po tick-u bi preopterećen server (< 60 tick/s) dobijao manje tokena od
@@ -1096,7 +1135,7 @@ func _server_korak(dt: float) -> void:
 	_tokeni = minf(UNOS_BURST, _tokeni + (sad - _tokeni_ms) / 1000.0 * UNOS_RATE * Engine.physics_ticks_per_second)
 	_tokeni_ms = sad
 	red_max = maxi(red_max, _red.size())
-	while not _red.is_empty() and _tokeni >= 1.0:
+	while not ceka and not _red.is_empty() and _tokeni >= 1.0:
 		var u: Array = _red.pop_front()
 		_tokeni -= 1.0
 		if mrtav:
@@ -1109,16 +1148,22 @@ func _server_korak(dt: float) -> void:
 	yaw_sync = rotation.y
 	var vlasnik := get_multiplayer_authority()
 	if vlasnik != multiplayer.get_unique_id():
-		if _reset and _debug_seq:
-			_dbg_seq("RESET poslat (seq %d, poz %s)" % [_poslednji_seq, global_position])
-		primi_stanje.rpc_id(vlasnik, _poslednji_seq, global_position, velocity, _reset)
-	_reset = false
+		var rid := _reset_id if ceka else 0
+		if rid > 0:
+			reset_paketa += 1
+			if _debug_seq:
+				_dbg_seq("RESET poslat (id %d, seq %d, poz %s)" % [rid, _poslednji_seq, global_position])
+		primi_stanje.rpc_id(vlasnik, _poslednji_seq, global_position, velocity, rid)
+
+# Host koji igra nema mrežnu potvrdu (unosi mu nose _reset_id direktno): za njega se ne čeka
+func _ceka_reset() -> bool:
+	return _reset_ceka and get_multiplayer_authority() != multiplayer.get_unique_id()
 
 # Server, uvek (bez debug flag-a): jedna linija po sesiji kad se lik ukloni (odjava ili gašenje servera)
 func _exit_tree() -> void:
 	if _je_server and get_multiplayer_authority() != 1:
-		print("[SESIJA] peer %s lik '%s': trajanje %d s, max red %d, odbijeno_red_pun %d, rupe %d" % [
-			name, ime_lika, (Time.get_ticks_msec() - _spawn_ms) / 1000, red_max, odbijeno_red_pun, rupe_seq])
+		print("[SESIJA] peer %s lik '%s': trajanje %d s, max red %d, odbijeno_red_pun %d, rupe %d, reseta %d (paketa sa reset-om %d)" % [
+			name, ime_lika, (Time.get_ticks_msec() - _spawn_ms) / 1000, red_max, odbijeno_red_pun, rupe_seq, reset_izdato, reset_paketa])
 
 # Zaostatak = red koji ostaje posle obrade u tick-u (normalno 0). Debug: vrh i vreme pražnjenja.
 func _prati_red() -> void:
@@ -1141,8 +1186,12 @@ func _prati_red() -> void:
 func server_postavi_poziciju(poz: Vector3, reset: bool) -> void:
 	global_position = poz
 	velocity = Vector3.ZERO
-	_reset = _reset or reset
 	if reset:
+		_reset_id += 1
+		_reset_ceka = true
+		_reset_poz = poz
+		_red.clear()
+		reset_izdato += 1
 		_reset_ms = Time.get_ticks_msec()
 
 # ---------------------------------------------------------------- NAMEPLATE
