@@ -153,6 +153,8 @@ func _scenario() -> void:
 
 	# 5. kretanje: igrac1 hoda 1 s (server authority + predikcija), igrac2 gleda
 	if uloga == "igrac1":
+		# ka centru mape: pozicija se čuva u bazi, uvek isti smer bi lik svakim pokretanjem gurao ka ivici
+		p.rotation.y = atan2(p.global_position.x, p.global_position.z) # napred je -basis.z
 		await create_timer(0.5).timeout
 		var pre: Vector3 = p.server_poz
 		Input.action_press("ui_up")
