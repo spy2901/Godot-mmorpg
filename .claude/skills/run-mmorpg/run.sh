@@ -9,7 +9,7 @@ G="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 D=res://.claude/skills/run-mmorpg/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/run-mmorpg}"
 echo "load average: $(sysctl -n vm.loadavg 2>/dev/null || cut -d' ' -f1-3 /proc/loadavg)"
-mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png
+mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt
 PORT="${STUB_PORT:-18765}"
 API="--server-url=http://127.0.0.1:$PORT"
 
@@ -19,21 +19,42 @@ STUB=$!
 trap 'kill $STUB 2>/dev/null' EXIT
 for _ in $(seq 20); do curl -s "127.0.0.1:$PORT/items/apple" > /dev/null && break; sleep 0.2; done
 
-"$G" --headless --path . --script $D -- server "stop=$OUT/ugasi_server" "dir=$OUT" "$API" > "$OUT/server.log" 2>&1 &
-S=$!
+# Pokreće Godot proces u pozadini (PID u $PID). Ako izađe pre prve linije našeg koda ("[CONFIG]" iz
+# autoload-a Config; npr. pad u RotatedFileLogger kad se više procesa pokrene istovremeno), pokreće ga
+# još jednom. Proces koji i dalje radi (spor start prozora) se ne dira.
+pokreni() { # ime log komanda...
+  local ime=$1 log=$2 pokusaj
+  shift 2
+  for pokusaj in 1 2; do
+    "$@" > "$log" 2>&1 &
+    PID=$!
+    for _ in $(seq 150); do
+      grep -q '\[CONFIG\]' "$log" 2>/dev/null && return 0
+      kill -0 $PID 2>/dev/null || break
+      sleep 0.1
+    done
+    grep -q '\[CONFIG\]' "$log" 2>/dev/null && return 0
+    kill -0 $PID 2>/dev/null && return 0
+    echo "RESTART $ime: pao pre prve linije našeg koda (pokušaj $pokusaj)" | tee -a "$OUT/restart.txt"
+  done
+}
+
+pokreni server "$OUT/server.log" "$G" --headless --path . --script $D -- server "stop=$OUT/ugasi_server" "dir=$OUT" "$API"
+S=$PID
 sleep 1.5
 if [ "${1:-}" = "--window" ]; then # observer u prozoru snima nameplate TestLik-a: $OUT/nameplate_<stanje>.png
-  "$G" --path . --resolution 1280x720 --script $D -- observer "dir=$OUT" "shot=$OUT/nameplate" > "$OUT/observer.log" 2>&1 &
+  pokreni observer "$OUT/observer.log" "$G" --path . --resolution 1280x720 --script $D -- observer "dir=$OUT" "shot=$OUT/nameplate"
 else
-  "$G" --headless --path . --script $D -- observer "dir=$OUT" > "$OUT/observer.log" 2>&1 &
+  pokreni observer "$OUT/observer.log" "$G" --headless --path . --script $D -- observer "dir=$OUT"
 fi
-O=$!
+O=$PID
 # mover meri vreme od svog lika, a observer mora da ga vidi od početka: čekaj observer (prozor kasni ~8 s)
 for _ in $(seq 120); do grep -q OBSERVER_SPREMAN "$OUT/observer.log" 2>/dev/null && break; sleep 0.5; done
-"$G" --headless --path . --script $D -- mover "dir=$OUT" > "$OUT/mover.log" 2>&1 &
-M=$!
-"$G" --headless --path . --script $D -- potion "dir=$OUT" "$API" > "$OUT/potion.log" 2>&1 &
-P=$!
+pokreni mover "$OUT/mover.log" "$G" --headless --path . --script $D -- mover "dir=$OUT"
+M=$PID
+sleep 0.3 # razmak između klijenata (istovremeni start ume da sruši Godot u RotatedFileLogger)
+pokreni potion "$OUT/potion.log" "$G" --headless --path . --script $D -- potion "dir=$OUT" "$API"
+P=$PID
 
 # kad mover završi provere kretanja, ugasi server dok su klijenti još živi
 for _ in $(seq 240); do
