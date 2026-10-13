@@ -184,8 +184,6 @@ func primeni_lik(p: Dictionary) -> void:
 	# Lik ovog klijenta je roditelj HUD-a (TopBar → ui → Player), ne prvi igrač u grupi
 	var player = get_parent().get_parent()
 	player.napad_damage = int(p.get("napad_damage", 250))
-	if p.has("pos_x"):
-		player.global_position = Vector3(float(p["pos_x"]), float(p["pos_y"]), float(p["pos_z"]))
 
 	hp_bar.max_value = max_hp
 	mana_bar.max_value = max_mana

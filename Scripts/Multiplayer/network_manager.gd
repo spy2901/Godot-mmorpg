@@ -39,6 +39,7 @@ func _povezi_signale() -> void:
 	multiplayer.connection_failed.connect(_on_connection_failed)
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
+	multiplayer.server_disconnected.connect(_on_server_disconnected)
 
 func _on_connected_to_server() -> void:
 	print("[NET] Povezan na server kao ID ", multiplayer.get_unique_id())
@@ -61,6 +62,14 @@ func prekini() -> void:
 
 func je_server() -> bool:
 	return multiplayer.multiplayer_peer != null and multiplayer.is_server()
+
+# Klijent: server je otišao. Peer se odmah skida (null), da _process ne zove zatvoren peer.
+func _on_server_disconnected() -> void:
+	print("[NET] Veza sa serverom je prekinuta")
+	prekini()
+	GameState.token = ""
+	GameState.poruka_logina = "Veza sa serverom je prekinuta"
+	get_tree().change_scene_to_file("res://Scenes/UI/MainMenu.tscn")
 
 func _on_peer_connected(id: int) -> void:
 	print("[NET] Peer povezan: ", id)

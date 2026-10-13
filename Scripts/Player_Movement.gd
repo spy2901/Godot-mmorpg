@@ -5,6 +5,12 @@ var brzina = 5.0
 var gravitacija = -9.8
 var mouse_sensitivity = 0.3
 var rotacija_misa = false
+var yaw_sync := 0.0 # server -> ostali klijenti (MultiplayerSynchronizer); vlasnik koristi lokalni rotation.y
+const SKOK := 5.0
+const UNOS_ISTEK_MS := 500
+var _unos_smer := Vector2.ZERO # samo na serveru: poslednji unos vlasnika
+var _unos_skok := false
+var _unos_ms := -UNOS_ISTEK_MS
 
 #ATTACK
 var napad_damage = 25  # na serveru: učitano iz baze preko registruj_lik
@@ -43,9 +49,12 @@ var _oklop_verzija := 0 # samo na serveru
 
 func _ready():
 	add_to_group("player")
+	# Node pripada vlasniku (RPC-ovi), a poziciju šalje server svima, i vlasniku
+	$MultiplayerSynchronizer.set_multiplayer_authority(1)
+	# Server pomera sve likove; vlasnik u physics frame-u samo šalje unos
+	set_physics_process(multiplayer.is_server() or is_multiplayer_authority())
 	if not is_multiplayer_authority():
 		set_process_unhandled_input(false)
-		set_physics_process(false)
 		kamera.current = false
 		return
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
@@ -337,6 +346,10 @@ func server_primeni_stats(st: Dictionary) -> void:
 
 # Regeneracija: 2 hp i 3 mane u sekundi, samo za žive i učitane igrače
 func _process(delta: float) -> void:
+	if not multiplayer.has_multiplayer_peer(): # posle prekida veze, do promene scene
+		return
+	if not multiplayer.is_server() and not is_multiplayer_authority():
+		rotation.y = yaw_sync
 	if not multiplayer.is_server() or not _stanje_ucitano or mrtav:
 		return
 	_regen_akum += delta
@@ -378,13 +391,9 @@ func _server_respawn() -> void:
 	mana = max_mana
 	mrtav = false
 	_neosjetljiv_do_ms = Time.get_ticks_msec() + NEOSJETLJIVOST_MS
-	global_position = tacka
+	velocity = Vector3.ZERO
+	global_position = tacka # MultiplayerSynchronizer je javlja svima
 	_regen_akum = 0.0
-	var vlasnik := get_multiplayer_authority()
-	if vlasnik == multiplayer.get_unique_id():
-		primi_teleport(tacka)
-	else:
-		primi_teleport.rpc_id(vlasnik, tacka)
 	_posalji_hp()
 	print("[RESPAWN] ", ime_lika, " -> ", tacka)
 
@@ -642,33 +651,58 @@ func _input(event):
 		kamera.rotation.x = clamp(kamera.rotation.x, deg_to_rad(-60), deg_to_rad(60))
 
 func _physics_process(delta):
-	if not is_multiplayer_authority():
+	if not multiplayer.has_multiplayer_peer():
 		return
+	if is_multiplayer_authority():
+		_posalji_moj_unos()
+	if multiplayer.is_server():
+		_server_pomeri(delta)
+
+# Vlasnik: skupi unos i pošalji ga serveru (host: lokalni poziv). Lik se lokalno ne pomera.
+func _posalji_moj_unos() -> void:
+	var smer := Vector2.ZERO
+	var skok := false
+	if not mrtav:
+		if Input.is_action_pressed("ui_up") or Input.is_key_pressed(KEY_W):
+			smer.y += 1.0
+		if Input.is_action_pressed("ui_down") or Input.is_key_pressed(KEY_S):
+			smer.y -= 1.0
+		if Input.is_action_pressed("ui_left") or Input.is_key_pressed(KEY_A):
+			smer.x -= 1.0
+		if Input.is_action_pressed("ui_right") or Input.is_key_pressed(KEY_D):
+			smer.x += 1.0
+		skok = Input.is_key_pressed(KEY_SPACE)
+	if multiplayer.is_server():
+		posalji_unos(smer, skok, rotation.y)
+	else:
+		posalji_unos.rpc_id(1, smer, skok, rotation.y)
+
+# Server: smer.x = desno(+)/levo(-), smer.y = napred(+)/nazad(-), yaw = rotation.y lika.
+# Pozicija se nikad ne prima od klijenta.
+@rpc("any_peer", "unreliable_ordered")
+func posalji_unos(smer: Vector2, skok: bool, yaw: float) -> void:
+	if not multiplayer.is_server() or not _posiljalac_je_vlasnik():
+		return
+	if not smer.is_finite() or not is_finite(yaw):
+		return
+	_unos_smer = smer.limit_length(1.0)
+	_unos_skok = skok
+	_unos_ms = Time.get_ticks_msec()
+	rotation.y = wrapf(yaw, -PI, PI)
+
+func _server_pomeri(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y += gravitacija * delta
-	if mrtav:
-		velocity.x = 0
-		velocity.z = 0
-		move_and_slide()
-		return
-	if Input.is_key_pressed(KEY_SPACE) and is_on_floor():
-		velocity.y = 5.0
-	var smer = Vector3.ZERO
-
-	if Input.is_action_pressed("ui_up") or Input.is_key_pressed(KEY_W):
-		smer -= transform.basis.z
-	if Input.is_action_pressed("ui_down") or Input.is_key_pressed(KEY_S):
-		smer += transform.basis.z
-	if Input.is_action_pressed("ui_left") or Input.is_key_pressed(KEY_A):
-		smer -= transform.basis.x
-	if Input.is_action_pressed("ui_right") or Input.is_key_pressed(KEY_D):
-		smer += transform.basis.x
-
-	smer = smer.normalized()
-	velocity.x = smer.x * brzina
-	velocity.z = smer.z * brzina
-
+	var smer := Vector2.ZERO
+	if not mrtav and Time.get_ticks_msec() - _unos_ms <= UNOS_ISTEK_MS:
+		smer = _unos_smer
+		if _unos_skok and is_on_floor():
+			velocity.y = SKOK
+	var pravac := transform.basis.x * smer.x - transform.basis.z * smer.y
+	velocity.x = pravac.x * brzina
+	velocity.z = pravac.z * brzina
 	move_and_slide()
+	yaw_sync = rotation.y
 
 # ---------------------------------------------------------------- SERVER -> IGRAC (RPC)
 
@@ -725,11 +759,3 @@ func primi_hp(novi_hp: int, novi_max_hp: int, nova_mana: int, nova_max_mana: int
 	var hud = _hud()
 	if hud:
 		hud.primeni_hp(novi_hp, novi_max_hp, nova_mana, nova_max_mana, je_mrtav)
-
-# Kretanje je još klijentsko, pa server šalje RPC za teleport na respawn tačku
-@rpc("any_peer", "reliable")
-func primi_teleport(pozicija: Vector3) -> void:
-	if not _poziv_od_servera():
-		return
-	velocity = Vector3.ZERO
-	global_position = pozicija
