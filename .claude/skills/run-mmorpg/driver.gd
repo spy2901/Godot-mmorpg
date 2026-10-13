@@ -22,6 +22,8 @@ const RAFAL_PRAZNJENJE_MAX_MS := 2500
 var _rafal_vrh := 0
 var _rafal_ms := -1
 var _rafal_pre := []    # red_zaostatak na ulasku u fazu rafal
+var _reset_od := -1.0
+var _resetovan := false
 var _mover_red_max := 0
 var _mover_odbijeno := 0
 var _red_max_dozvoljen := 0
@@ -170,6 +172,12 @@ func _server(log: bool) -> bool:
 		_mover_red_max = m.red_max
 		_mover_odbijeno = m.odbijeno_red_pun
 		_red_max_dozvoljen = m.UNOS_RED_MAX
+	if faza == "reset" and _reset_od < 0: _reset_od = t
+	if faza == "reset" and not _resetovan and t - _reset_od > 0.3 and _world() and _world().has_node(f[1]):
+		_resetovan = true
+		var mr = _world().get_node(f[1])
+		mr.server_postavi_poziciju(mr.global_position, true)
+		print("[S] reset ", f[1], " (test redundanse posle reset-a)")
 	if faza == "teleport" and not _teleportovano and _world() and _world().has_node(f[1]):
 		_teleportovano = true
 		var m = _world().get_node(f[1])
@@ -202,6 +210,7 @@ func _server(log: bool) -> bool:
 		_provera("nameplate_nema_na_serveru", not _nameplate_na_serveru, "")
 		_provera("rafal_bez_rupa", _faza_rupe.get("rafal", 0) == 0 and _rafal_vrh > 10 and _rafal_ms >= 0 and _rafal_ms <= RAFAL_PRAZNJENJE_MAX_MS,
 			"rupe=%d, vrh reda %d, ispražnjen za %d ms (dozvoljeno %d)" % [_faza_rupe.get("rafal", 0), _rafal_vrh, _rafal_ms, RAFAL_PRAZNJENJE_MAX_MS])
+		_provera("reset_bez_rupa", _resetovan and _faza_rupe.get("reset", 0) == 0, "reset izveden=%s, rupe u fazi reset=%d" % [_resetovan, _faza_rupe.get("reset", 0)])
 		_provera("red_pun_odbacuje", _mover_odbijeno > 0 and _mover_red_max <= _red_max_dozvoljen,
 			"odbačeno (pun red) %d, najduži red %d / %d" % [_mover_odbijeno, _mover_red_max, _red_max_dozvoljen])
 		print("[S] gasim server (okidač)")
@@ -267,11 +276,15 @@ func _mover(log: bool) -> bool:
 	p.test_ubrzanje = 3 if t > 24.0 and t < 27.0 else 1 # speed-hack: 3 unosa po tick-u
 	p.test_gubitak = 0.3 if t > 27.5 and t < 33.0 else 0.0
 	p.test_zadrzi = t > 34.0 and t < 34.4 # ~24 unosa pa rafal: red mora da ih primi bez rupa
+	if t > 38.6 and t < 38.7 and not _cp.has("reset_hook"): # paket na putu u trenutku reset-a se izgubi
+		_cp["reset_hook"] = true
+		p.test_izgubi_posle_reseta = true
 	var faza := "normal"
 	if t > 22.0 and t < 23.5: faza = "teleport"
 	elif t > 23.5 and t < 27.5: faza = "speedhack"
 	elif t > 27.5 and t < 33.5: faza = "gubitak"
 	elif t > 33.8 and t < 38.0: faza = "rafal"
+	elif t > 38.5 and t < 40.5: faza = "reset"
 	_upisi_fazu(faza, p.name)
 	if shot != "" and not _slikano and t > 6.7: # u mirovanju: snimanje koči frame
 		_slikano = true
@@ -283,7 +296,8 @@ func _mover(log: bool) -> bool:
 			_cpp[k] = p.global_position  # predviđena
 			_kor[k] = p.korekcije_glatke + p.korekcije_snap
 	if log: print("[M t=%.1f] moj %s server=%s kor=%d/%d" % [t, _fmt(p), p.server_poz, p.korekcije_glatke, p.korekcije_snap])
-	if t > 38.5:
+	if t > 41.0:
+		_provera("reset_paket_izgubljen", p.test_izgubljen_paket, "hook je izgubio paket koji je bio na putu kad je stigao reset")
 		var c := _cp
 		var w1: Vector3 = c[6.5] - c[3.5]
 		var w2: Vector3 = c[8.5] - c[6.5]

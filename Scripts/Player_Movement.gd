@@ -46,6 +46,11 @@ var test_gubitak := 0.0 # test: deo paketa koji klijent odbacuje (oba smera)
 var test_ubrzanje := 1  # test: unosa po physics tick-u (speed-hack)
 var test_zadrzi := false # test: klijent pravi unose ali ih ne šalje; kad se pusti, šalje ih u rafalu
 var _poslato_do := 0     # klijent: najveći seq koji je otišao u nekom paketu
+var _za_slanje: Array = [] # klijent: poslednjih UNOSA_PO_PAKETU unosa za slanje; reset ga NE briše
+# (inače unosi koji su bili na putu u trenutku reset-a ostanu bez redundanse i jedan izgubljen paket = rupa)
+var test_izgubi_posle_reseta := false # test: paketi kasne 1 tick, a onaj na putu kad stigne reset se izgubi
+var test_izgubljen_paket := false     # test: hook je zaista izgubio paket
+var _test_paket = null
 # server
 var _red: Array = []         # validni unosi čekaju token (najviše UNOS_RED_MAX)
 var odbijeno_red_pun := 0    # server: unosi (različiti seq) odbačeni jer je red bio pun
@@ -885,6 +890,9 @@ func _klijent_korak(dt: float) -> void:
 		var u := _novi_unos()
 		simuliraj_korak(u, dt)
 		_buffer.append(u)
+		_za_slanje.append(u)
+	while _za_slanje.size() > UNOSA_PO_PAKETU:
+		_za_slanje.pop_front()
 	while _buffer.size() > MAX_BUFFER:
 		_buffer.pop_front()
 	if test_zadrzi:
@@ -894,11 +902,16 @@ func _klijent_korak(dt: float) -> void:
 		if _buffer[i][0] > _poslato_do and _buffer[i][0] < _seq:
 			posalji_unos.rpc_id(1, _buffer.slice(maxi(0, i - 2), i + 1))
 	_poslato_do = _seq
-	var paket := _buffer.slice(-UNOSA_PO_PAKETU)
+	var paket := _za_slanje.duplicate()
 	if _debug_seq and not paket.is_empty():
 		if paket[0][0] > _dbg_poslato + 1 and _dbg_poslato > 0:
 			print("[SEQ-K] klijent preskočio slanje: poslednji poslat %d, paket počinje %d (buffer %d)" % [_dbg_poslato, paket[0][0], _buffer.size()])
 		_dbg_poslato = paket[-1][0]
+	if test_izgubi_posle_reseta:
+		if _test_paket != null:
+			posalji_unos.rpc_id(1, _test_paket)
+		_test_paket = paket
+		return
 	if randf() >= test_gubitak:
 		posalji_unos.rpc_id(1, paket)
 
@@ -917,6 +930,10 @@ func _uskladi(s: Array, dt: float) -> void:
 	if s[3] or not _inicijalizovan:
 		if _debug_seq:
 			print("[SEQ-K] reset: ack=%d moj_seq=%d buffer=%d inicijalizovan=%s" % [seq, _seq, _buffer.size(), _inicijalizovan])
+		if test_izgubi_posle_reseta and _test_paket != null and _inicijalizovan:
+			_test_paket = null # paket koji je bio "na putu" kad je stigao reset: izgubljen
+			test_izgubi_posle_reseta = false
+			test_izgubljen_paket = true
 		_buffer.clear()
 		global_position = s[1]
 		velocity = s[2]
