@@ -61,6 +61,8 @@ var _yaw_t := -1.0      # observer: kad je prvi put video yaw
 var _video_drugog := false
 var _t0 := -1.0         # mover: kad se pojavio sopstveni lik
 const MAX_T := 120.0    # zaštita od zaglavljivanja
+var _max_t := MAX_T     # server u repro_login.sh radi duže (maxt=)
+var _aktivnost := false # prijava: reliable zahtevi za predmet dok traje sesija
 
 func _initialize():
 	var args := OS.get_cmdline_user_args()
@@ -72,6 +74,10 @@ func _initialize():
 			stop = a.substr(5)
 		if a.begins_with("dir="):
 			dir = a.substr(4)
+		if a.begins_with("maxt="):
+			_max_t = float(a.substr(5))
+		if a == "aktivnost=1":
+			_aktivnost = true
 
 func _nm(): return root.get_node("NetworkManager")
 func _world(): return current_scene.get_node_or_null("World") if current_scene else null
@@ -97,7 +103,7 @@ func _process(d):
 	if _faza == "":
 		if root.has_node("GameState"):
 			root.get_node("GameState").token = "x" # bez tokena MultiplayerTest vraća na login
-			if uloga == "potion": # pravi login preko stub API-ja (token -> TestLik)
+			if uloga == "potion" or uloga == "prijava": # pravi login preko stub API-ja (token -> TestLik)
 				root.get_node("GameState").token = "potion-token"
 				root.get_node("GameState").ime_igraca = "TestLik"
 			change_scene_to_file("res://Scenes/UI/MultiplayerTest.tscn")
@@ -117,6 +123,7 @@ func _process(d):
 		"observer": return _observer(log, d)
 		"mover": return _mover(log)
 		"potion": return _potion()
+		"prijava": return _prijava()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -170,7 +177,7 @@ func _server(log: bool) -> bool:
 		_provera("nameplate_nema_na_serveru", not _nameplate_na_serveru, "")
 		print("[S] gasim server (okidač)")
 		return true
-	return t > MAX_T
+	return t > _max_t
 
 func _observer(log: bool, d: float) -> bool:
 	if not _spreman and _moj():
@@ -542,3 +549,17 @@ func _proveri_rupe() -> void:
 		_provera("seq_bez_rupa_bez_gubitka", neopravdane.is_empty(), opis)
 	else:
 		print("WARN seq_bez_rupa_bez_gubitka  neodlučno (zastoj klijenta): ", opis)
+
+# ---------------------------------------------------------------- PRIJAVA (repro_login.sh: jedna kratka sesija)
+
+var _prijava_t := -1.0
+var _akt_t := 0.0
+func _prijava() -> bool:
+	var p = _moj()
+	if _prijava_t < 0 and p and p.get_node("ui/Control")._ucitano:
+		_prijava_t = t
+		print("PRIJAVA_UCITAN t=%.2f" % t)
+	if _aktivnost and _prijava_t >= 0 and t - _akt_t >= 0.2:
+		_akt_t = t
+		p.zatrazi_koriscenje_itema.rpc_id(1, "mana_potion") # reliable, ne menja stanje ("Nemaš taj predmet")
+	return (_prijava_t >= 0 and t - _prijava_t > 5.0) or t > 30.0

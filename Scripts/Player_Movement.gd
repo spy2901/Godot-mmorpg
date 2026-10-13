@@ -48,6 +48,15 @@ var _tokeni_ms := 0
 var _unos_ms := -UNOS_ISTEK_MS
 var _reset := true           # sledeće stanje vlasniku nosi reset (spawn, prijava, respawn)
 var rupe_seq := 0            # preskočeni seq-ovi (izgubljeni ili odbijeni)
+# debug (server, MMORPG_DEBUG_SEQ=1): svaka rupa u seq obradi sa razlogom i vremenima
+var _debug_seq := OS.get_environment("MMORPG_DEBUG_SEQ") == "1"
+var _spawn_ms := 0           # server: kad je lik napravljen (konekcija peer-a)
+var _ucitan_ms := -1         # server: kad je lik učitan iz baze
+var _reset_ms := -1          # server: poslednji server_postavi_poziciju(reset=true)
+var _odbijeni := {}          # seq -> razlog odbijanja (debug)
+var _rupe_otvorene := {}     # seq -> ms kad je rupa nastala (debug: da li stigne kasnije)
+var _dbg_poslato := 0        # klijent (debug): najveći poslati seq
+var _dbg_paket_ms := 0       # server (debug): kad je stigao prethodni paket unosa
 # posmatrač
 var _snimci: Array = []      # [tik, poz, yaw]
 var _sat_pomak := 0.0        # lokalno vreme - serversko vreme (usrednjeno)
@@ -120,6 +129,7 @@ var _hp_traka: MeshInstance3D
 
 func _ready():
 	add_to_group("player")
+	_spawn_ms = Time.get_ticks_msec()
 	_model_poz = $CharacterMain.position
 	_kamera_poz = kamera.position
 	# Node pripada vlasniku (RPC-ovi); poz_sync/yaw_sync šalje server ostalima.
@@ -256,6 +266,7 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 	mrtav = false
 	_neosjetljiv_do_ms = 0
 	_stanje_ucitano = true
+	_ucitan_ms = Time.get_ticks_msec()
 	_sync_nameplate()
 	print("[SERVER] Lik ", ime, " registrovan, damage: ", izracunaj_damage(), ", predmeta: ", vlasnistvo.size())
 
@@ -429,9 +440,13 @@ func _process(delta: float) -> void:
 	if not multiplayer.is_server():
 		if is_multiplayer_authority():
 			_pomeri_vizuelno(delta)
+			if _debug_seq and delta > 0.1:
+				print("[SEQ-K] dugačak frame %d ms (seq %d)" % [int(delta * 1000), _seq])
 		else:
 			_interpoliraj(delta)
 			_proveri_daljinu_nameplate()
+	if _debug_seq and multiplayer.is_server() and delta > 0.1 and _je_prvi_igrac():
+		print("[SEQ-S] t=%d dugačak server frame %d ms" % [Time.get_ticks_msec(), int(delta * 1000)])
 	if not multiplayer.is_server() or not _stanje_ucitano or mrtav:
 		return
 	_regen_akum += delta
@@ -859,8 +874,13 @@ func _klijent_korak(dt: float) -> void:
 		_buffer.append(u)
 	while _buffer.size() > MAX_BUFFER:
 		_buffer.pop_front()
+	var paket := _buffer.slice(-UNOSA_PO_PAKETU)
+	if _debug_seq and not paket.is_empty():
+		if paket[0][0] > _dbg_poslato + 1 and _dbg_poslato > 0:
+			print("[SEQ-K] klijent preskočio slanje: poslednji poslat %d, paket počinje %d (buffer %d)" % [_dbg_poslato, paket[0][0], _buffer.size()])
+		_dbg_poslato = paket[-1][0]
 	if randf() >= test_gubitak:
-		posalji_unos.rpc_id(1, _buffer.slice(-UNOSA_PO_PAKETU))
+		posalji_unos.rpc_id(1, paket)
 
 # Server -> vlasnik, svaki physics tick: stanje posle obrade unosa `seq`.
 @rpc("any_peer", "unreliable_ordered")
@@ -875,6 +895,8 @@ func primi_stanje(seq: int, poz: Vector3, vel: Vector3, reset: bool) -> void:
 func _uskladi(s: Array, dt: float) -> void:
 	var seq: int = s[0]
 	if s[3] or not _inicijalizovan:
+		if _debug_seq:
+			print("[SEQ-K] reset: ack=%d moj_seq=%d buffer=%d inicijalizovan=%s" % [seq, _seq, _buffer.size(), _inicijalizovan])
 		_buffer.clear()
 		global_position = s[1]
 		velocity = s[2]
@@ -959,20 +981,50 @@ func posalji_unos(unosi: Array) -> void:
 	if not multiplayer.is_server() or not _posiljalac_je_vlasnik():
 		return
 	var sad := Time.get_ticks_msec()
+	if _debug_seq and _dbg_paket_ms > 0 and sad - _dbg_paket_ms > 100 and not unosi.is_empty() and typeof(unosi[0]) == TYPE_ARRAY and unosi[0].size() > 0:
+		_dbg_seq("PAUZA %d ms pre paketa (prvi seq %s, zadnji obrađen %d)" % [sad - _dbg_paket_ms, str(unosi[0][0]), _poslednji_seq])
+	_dbg_paket_ms = sad
 	_tokeni = minf(UNOS_BURST, _tokeni + (sad - _tokeni_ms) / 1000.0 * UNOS_RATE * Engine.physics_ticks_per_second)
 	_tokeni_ms = sad
 	var zadnji: int = _red[-1][0] if not _red.is_empty() else _poslednji_seq
 	for sirov in unosi.slice(0, UNOSA_PO_PAKETU):
 		var u := _validan_unos(sirov)
 		if u.is_empty() or u[0] <= zadnji:
+			if _debug_seq and not u.is_empty() and _rupe_otvorene.has(u[0]):
+				_dbg_seq("KASNO seq=%d stigao %d ms posle rupe (van reda)" % [u[0], sad - _rupe_otvorene[u[0]]])
+				_rupe_otvorene.erase(u[0])
 			continue # neispravan, duplikat ili star
 		if _tokeni < 1.0:
+			if _debug_seq:
+				if not _odbijeni.has(u[0]):
+					_odbijeni[u[0]] = "tokeni=%.2f" % _tokeni
+					_dbg_seq("ODBIJEN seq=%d razlog=tokeni tokeni=%.2f" % [u[0], _tokeni])
+				for ostali in unosi: # ostatak paketa se ne pregleda (break): nije "nije stigao"
+					if typeof(ostali) == TYPE_ARRAY and ostali.size() > 0 and typeof(ostali[0]) == TYPE_INT and ostali[0] > u[0] and not _odbijeni.has(ostali[0]):
+						_odbijeni[ostali[0]] = "isti paket posle odbijanja"
 			break # previše unosa (speed-hack)
 		_tokeni -= 1.0
 		rupe_seq += u[0] - zadnji - 1
+		if _debug_seq:
+			for r in range(zadnji + 1, u[0]):
+				_rupe_otvorene[r] = sad
+				_dbg_seq("RUPA seq=%d (prihvaćen %d, zadnji %d) razlog=%s tokeni=%.2f" % [r, u[0], zadnji, _odbijeni.get(r, "nije stigao"), _tokeni])
 		zadnji = u[0]
 		_red.append(u)
 		_unos_ms = sad
+
+# debug: dugačak server frame se ispisuje samo jednom (prvi igrač u svetu), ne po igraču
+func _je_prvi_igrac() -> bool:
+	for c in get_parent().get_children():
+		if c.is_in_group("player"):
+			return c == self
+	return false
+
+# debug linija sa vremenima: od konekcije (spawn), od učitavanja lika, od poslednjeg reset-a
+func _dbg_seq(tekst: String) -> void:
+	var sad := Time.get_ticks_msec()
+	print("[SEQ] t=%d peer %s %s | od_konekcije=%d od_ucitavanja=%s od_reseta=%s" % [sad, name, tekst, sad - _spawn_ms,
+		str(sad - _ucitan_ms) if _ucitan_ms >= 0 else "-", str(sad - _reset_ms) if _reset_ms >= 0 else "-"])
 
 # [seq, smer, skok, yaw] sa proverom tipova; [] za neispravan unos
 func _validan_unos(u) -> Array:
@@ -1005,6 +1057,8 @@ func server_postavi_poziciju(poz: Vector3, reset: bool) -> void:
 	global_position = poz
 	velocity = Vector3.ZERO
 	_reset = _reset or reset
+	if reset:
+		_reset_ms = Time.get_ticks_msec()
 
 # ---------------------------------------------------------------- NAMEPLATE
 
