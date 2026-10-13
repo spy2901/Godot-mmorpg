@@ -399,8 +399,13 @@ func _potion_scenario() -> void:
 	_provera("napitak_leci", hud.hp - hp0 >= 30 and hud.hp - hp0 <= 34 and b == 2 and inv.prebroj_item("small_health_potion") == 2 and hud._poruka_label.text == "+30 HP",
 		"hp %d->%d baza=%d ui=%d poruka='%s'" % [hp0, hud.hp, b, inv.prebroj_item("small_health_potion"), hud._poruka_label.text])
 
+	# cooldown: drugi pokušaj odmah po potvrdi prvog (HP nije pun, pa je jedini razlog cooldown)
+	var r: Dictionary = await p.koristi_item_na_serveru("small_health_potion")
+	b = await _baza("small_health_potion")
+	_provera("cooldown_odbija", hud.hp < hud.max_hp and r.get("poruka") == "Još nije spremno" and b == 2, "hp=%d r=%s baza=%d" % [hud.hp, r, b])
+
 	# 2. +150 na 80/100 -> clamp na 100
-	var r: Dictionary = await p.koristi_item_na_serveru("large_health_potion")
+	r = await p.koristi_item_na_serveru("large_health_potion")
 	await _cekaj(func(): return hud.hp == 100, 3.0)
 	b = await _baza("large_health_potion")
 	_provera("napitak_clamp_max", r.get("ok", false) and hud.hp == 100 and b == 0, "r=%s hp=%d baza=%d" % [r, hud.hp, b])
@@ -410,12 +415,9 @@ func _potion_scenario() -> void:
 	b = await _baza("medium_health_potion")
 	_provera("pun_hp_odbija", not r.get("ok", true) and r.get("poruka") == "Već si pun" and b == 3, "r=%s baza=%d" % [r, b])
 
-	# 4. cooldown: ranjen, ali small je korišćen pre < 5 s
+	# 4. šteta: HP ispod maksimuma za test dva istovremena zahteva
 	_komanda("steta 40")
 	await _cekaj(func(): return hud.hp <= 64, 3.0)
-	r = await p.koristi_item_na_serveru("small_health_potion")
-	b = await _baza("small_health_potion")
-	_provera("cooldown_odbija", hud.hp < 70 and r.get("poruka") == "Još nije spremno" and b == 2, "hp=%d r=%s baza=%d" % [hud.hp, r, b])
 
 	# 5. predmet koji nema; 6. nepotrošni
 	r = await p.koristi_item_na_serveru("mana_potion")
