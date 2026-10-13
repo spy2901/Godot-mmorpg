@@ -68,6 +68,7 @@ var rupe_seq := 0            # preskočeni seq-ovi (izgubljeni ili odbijeni)
 # debug (server, MMORPG_DEBUG_SEQ=1): svaka rupa u seq obradi sa razlogom i vremenima
 var _debug_seq := OS.get_environment("MMORPG_DEBUG_SEQ") == "1"
 var _spawn_ms := 0           # server: kad je lik napravljen (konekcija peer-a)
+var _je_server := false      # zapamćeno u _ready: u _exit_tree peer može već biti zatvoren
 var _ucitan_ms := -1         # server: kad je lik učitan iz baze
 var _reset_ms := -1          # server: poslednji server_postavi_poziciju(reset=true)
 var _odbijeni := {}          # seq -> razlog odbijanja (debug)
@@ -148,6 +149,7 @@ var _hp_traka: MeshInstance3D
 func _ready():
 	add_to_group("player")
 	_spawn_ms = Time.get_ticks_msec()
+	_je_server = multiplayer.is_server()
 	_model_poz = $CharacterMain.position
 	_kamera_poz = kamera.position
 	# Node pripada vlasniku (RPC-ovi); poz_sync/yaw_sync šalje server ostalima.
@@ -1101,6 +1103,12 @@ func _server_korak(dt: float) -> void:
 	if vlasnik != multiplayer.get_unique_id():
 		primi_stanje.rpc_id(vlasnik, _poslednji_seq, global_position, velocity, _reset)
 	_reset = false
+
+# Server, uvek (bez debug flag-a): jedna linija po sesiji kad se lik ukloni (odjava ili gašenje servera)
+func _exit_tree() -> void:
+	if _je_server and get_multiplayer_authority() != 1:
+		print("[SESIJA] peer %s lik '%s': trajanje %d s, max red %d, odbijeno_red_pun %d, rupe %d" % [
+			name, ime_lika, (Time.get_ticks_msec() - _spawn_ms) / 1000, red_max, odbijeno_red_pun, rupe_seq])
 
 # Zaostatak = red koji ostaje posle obrade u tick-u (normalno 0). Debug: vrh i vreme pražnjenja.
 func _prati_red() -> void:
