@@ -19,6 +19,10 @@ const MAX_BUFFER := 120     # nepotvrđenih unosa na klijentu
 const UNOSA_PO_PAKETU := 3  # redundansa: svaki paket nosi poslednja 3 unosa
 const UNOS_RATE := 1.2      # server: najviše 1.2 * physics_ticks_per_second unosa/s (token bucket)
 const UNOS_BURST := 10.0    # server: kapacitet kofe
+# server: red unosa koji čekaju token. Rafal posle zastoja (servera ili klijenta) se zakasni umesto
+# da se odbaci. Izmereno pod opterećenjem (analiza_rafala.py): najduži zaostatak 12, najgori viđeni
+# događaj 28 uzastopnih odbijenih unosa -> 32 (~15% rezerve). Pun red odbacuje višak (speed-hack).
+const UNOS_RED_MAX := 32
 
 # unos = [seq: int, smer: Vector2, skok: bool, yaw: float]
 var poz_sync := Vector3.ZERO # server -> ostali klijenti (MultiplayerSynchronizer); vlasnik je ne čita
@@ -40,8 +44,16 @@ var greska_suma := 0.0
 var greska_n := 0
 var test_gubitak := 0.0 # test: deo paketa koji klijent odbacuje (oba smera)
 var test_ubrzanje := 1  # test: unosa po physics tick-u (speed-hack)
+var test_zadrzi := false # test: klijent pravi unose ali ih ne šalje; kad se pusti, šalje ih u rafalu
+var _poslato_do := 0     # klijent: najveći seq koji je otišao u nekom paketu
 # server
-var _red: Array = []         # validni unosi čekaju physics tick
+var _red: Array = []         # validni unosi čekaju token (najviše UNOS_RED_MAX)
+var odbijeno_red_pun := 0    # server: unosi (različiti seq) odbačeni jer je red bio pun
+var _odbijen_do := 0         # server: najveći seq već uračunat u odbijeno_red_pun
+var red_max := 0             # server: najveća dužina reda (testovi, debug)
+var _red_od_ms := -1         # server: kad je red počeo da zaostaje (debug: vreme pražnjenja)
+var _red_vrh := 0            # server: vrh reda u tekućem zaostatku
+var red_zaostatak := [0, 0]  # server: [vrh, ms] poslednjeg ispražnjenog zaostatka (testovi)
 var _poslednji_seq := 0
 var _tokeni := UNOS_BURST
 var _tokeni_ms := 0
@@ -57,6 +69,7 @@ var _odbijeni := {}          # seq -> razlog odbijanja (debug)
 var _rupe_otvorene := {}     # seq -> ms kad je rupa nastala (debug: da li stigne kasnije)
 var _dbg_poslato := 0        # klijent (debug): najveći poslati seq
 var _dbg_paket_ms := 0       # server (debug): kad je stigao prethodni paket unosa
+var _dbg_max_vidjen := 0     # server (debug): najveći seq viđen u bilo kom paketu (nezavisno od obrade)
 # posmatrač
 var _snimci: Array = []      # [tik, poz, yaw]
 var _sat_pomak := 0.0        # lokalno vreme - serversko vreme (usrednjeno)
@@ -874,6 +887,13 @@ func _klijent_korak(dt: float) -> void:
 		_buffer.append(u)
 	while _buffer.size() > MAX_BUFFER:
 		_buffer.pop_front()
+	if test_zadrzi:
+		return
+	# posle test_zadrzi: zaostali unosi odjednom, svaki u paketu sa svoja 2 prethodnika (kao pravi rafal)
+	for i in _buffer.size():
+		if _buffer[i][0] > _poslato_do and _buffer[i][0] < _seq:
+			posalji_unos.rpc_id(1, _buffer.slice(maxi(0, i - 2), i + 1))
+	_poslato_do = _seq
 	var paket := _buffer.slice(-UNOSA_PO_PAKETU)
 	if _debug_seq and not paket.is_empty():
 		if paket[0][0] > _dbg_poslato + 1 and _dbg_poslato > 0:
@@ -984,8 +1004,14 @@ func posalji_unos(unosi: Array) -> void:
 	if _debug_seq and _dbg_paket_ms > 0 and sad - _dbg_paket_ms > 100 and not unosi.is_empty() and typeof(unosi[0]) == TYPE_ARRAY and unosi[0].size() > 0:
 		_dbg_seq("PAUZA %d ms pre paketa (prvi seq %s, zadnji obrađen %d)" % [sad - _dbg_paket_ms, str(unosi[0][0]), _poslednji_seq])
 	_dbg_paket_ms = sad
-	_tokeni = minf(UNOS_BURST, _tokeni + (sad - _tokeni_ms) / 1000.0 * UNOS_RATE * Engine.physics_ticks_per_second)
-	_tokeni_ms = sad
+	if _debug_seq: # novi unosi klijenta po paketu (za analizu rafala: analiza_rafala.py)
+		var najveci := _dbg_max_vidjen
+		for x in unosi:
+			if typeof(x) == TYPE_ARRAY and x.size() > 0 and typeof(x[0]) == TYPE_INT and x[0] < _dbg_max_vidjen + 1000:
+				najveci = maxi(najveci, x[0])
+		if najveci > _dbg_max_vidjen:
+			print("[SEQ-P] t=%d peer %s novih=%d" % [sad, name, najveci - _dbg_max_vidjen])
+			_dbg_max_vidjen = najveci
 	var zadnji: int = _red[-1][0] if not _red.is_empty() else _poslednji_seq
 	for sirov in unosi.slice(0, UNOSA_PO_PAKETU):
 		var u := _validan_unos(sirov)
@@ -994,21 +1020,19 @@ func posalji_unos(unosi: Array) -> void:
 				_dbg_seq("KASNO seq=%d stigao %d ms posle rupe (van reda)" % [u[0], sad - _rupe_otvorene[u[0]]])
 				_rupe_otvorene.erase(u[0])
 			continue # neispravan, duplikat ili star
-		if _tokeni < 1.0:
-			if _debug_seq:
-				if not _odbijeni.has(u[0]):
-					_odbijeni[u[0]] = "tokeni=%.2f" % _tokeni
-					_dbg_seq("ODBIJEN seq=%d razlog=tokeni tokeni=%.2f" % [u[0], _tokeni])
-				for ostali in unosi: # ostatak paketa se ne pregleda (break): nije "nije stigao"
-					if typeof(ostali) == TYPE_ARRAY and ostali.size() > 0 and typeof(ostali[0]) == TYPE_INT and ostali[0] > u[0] and not _odbijeni.has(ostali[0]):
-						_odbijeni[ostali[0]] = "isti paket posle odbijanja"
-			break # previše unosa (speed-hack)
-		_tokeni -= 1.0
+		if _red.size() >= UNOS_RED_MAX:
+			if u[0] > _odbijen_do: # redundantne kopije istog seq-a se ne broje ponovo
+				odbijeno_red_pun += 1
+				_odbijen_do = u[0]
+			if _debug_seq and not _odbijeni.has(u[0]):
+				_odbijeni[u[0]] = "red pun"
+				_dbg_seq("ODBIJEN seq=%d razlog=red pun (%d)" % [u[0], _red.size()])
+			continue # redundantna kopija u sledećem paketu može da uđe kad se red isprazni
 		rupe_seq += u[0] - zadnji - 1
 		if _debug_seq:
 			for r in range(zadnji + 1, u[0]):
 				_rupe_otvorene[r] = sad
-				_dbg_seq("RUPA seq=%d (prihvaćen %d, zadnji %d) razlog=%s tokeni=%.2f" % [r, u[0], zadnji, _odbijeni.get(r, "nije stigao"), _tokeni])
+				_dbg_seq("RUPA seq=%d (primljen %d, zadnji %d) razlog=%s red=%d" % [r, u[0], zadnji, _odbijeni.get(r, "nije stigao"), _red.size()])
 		zadnji = u[0]
 		_red.append(u)
 		_unos_ms = sad
@@ -1038,12 +1062,21 @@ func _validan_unos(u) -> Array:
 func _server_korak(dt: float) -> void:
 	if _red.is_empty() and Time.get_ticks_msec() - _unos_ms > UNOS_ISTEK_MS:
 		simuliraj_korak([0, Vector2.ZERO, false, rotation.y], dt) # vlasnik ćuti: bez unosa, samo gravitacija
-	for u in _red:
+	# token bucket: ista stopa po stvarnom vremenu kao pre (UNOS_RATE * tps/s), ali se troši pri obradi
+	# iz reda, ne pri prijemu. Po tick-u bi preopterećen server (< 60 tick/s) dobijao manje tokena od
+	# klijentovih 60 unosa/s i red bi rastao.
+	var sad := Time.get_ticks_msec()
+	_tokeni = minf(UNOS_BURST, _tokeni + (sad - _tokeni_ms) / 1000.0 * UNOS_RATE * Engine.physics_ticks_per_second)
+	_tokeni_ms = sad
+	red_max = maxi(red_max, _red.size())
+	while not _red.is_empty() and _tokeni >= 1.0:
+		var u: Array = _red.pop_front()
+		_tokeni -= 1.0
 		if mrtav:
 			u = [u[0], Vector2.ZERO, false, u[3]]
 		simuliraj_korak(u, dt)
 		_poslednji_seq = u[0]
-	_red.clear()
+	_prati_red()
 	poz_sync = global_position
 	tik_sync = Engine.get_physics_frames()
 	yaw_sync = rotation.y
@@ -1051,6 +1084,23 @@ func _server_korak(dt: float) -> void:
 	if vlasnik != multiplayer.get_unique_id():
 		primi_stanje.rpc_id(vlasnik, _poslednji_seq, global_position, velocity, _reset)
 	_reset = false
+
+# Zaostatak = red koji ostaje posle obrade u tick-u (normalno 0). Debug: vrh i vreme pražnjenja.
+func _prati_red() -> void:
+	if _red.is_empty():
+		if _red_od_ms >= 0:
+			red_zaostatak = [_red_vrh, Time.get_ticks_msec() - _red_od_ms]
+			if _debug_seq:
+				_dbg_seq("RED ispražnjen za %d ms (vrh %d)" % [red_zaostatak[1], _red_vrh])
+		_red_od_ms = -1
+		_red_vrh = 0
+		return
+	if _red_od_ms < 0:
+		_red_od_ms = Time.get_ticks_msec()
+	if _red.size() > _red_vrh:
+		_red_vrh = _red.size()
+		if _debug_seq:
+			_dbg_seq("RED zaostaje: %d unosa" % _red.size())
 
 # Server: premesti lik. reset=true (prijava, respawn) briše vlasnikov buffer; inače odlučuje PRAG_SNAP.
 func server_postavi_poziciju(poz: Vector3, reset: bool) -> void:

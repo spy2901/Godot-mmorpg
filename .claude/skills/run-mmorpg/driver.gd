@@ -15,6 +15,16 @@ var _cpp := {}          # mover: checkpoint -> predviđena (lokalna) pozicija
 var _kor := {}          # mover: checkpoint -> [glatke, snap]
 var _faza_rupe := {}    # server: faza -> preskočeni seq-ovi
 var _teleportovano := false
+var _poslednja_faza := ""
+# test rafala: mover zadrži ~24 unosa (0.4 s) pa ih pošalje odjednom; red mora da ih primi i isprazni.
+# Višak od ~14 preko kofe se prazni brzinom 1.2*60 - 60 = 12/s -> ~1.2 s; granica sa rezervom:
+const RAFAL_PRAZNJENJE_MAX_MS := 2500
+var _rafal_vrh := 0
+var _rafal_ms := -1
+var _rafal_pre := []    # red_zaostatak na ulasku u fazu rafal
+var _mover_red_max := 0
+var _mover_odbijeno := 0
+var _red_max_dozvoljen := 0
 var _obs_pre = null     # observer: pozicija tuđeg lika u prošlom frame-u
 var _obs_od := -1.0
 var _obs_kraci := 0     # koraka većih od brzina*dt*2 (a manjih od PRAG_SNAP)
@@ -135,6 +145,9 @@ func _server(log: bool) -> bool:
 	# faza od movera: "ime peer_id"; rupe u seq obradi se broje po fazi
 	var f := FileAccess.get_file_as_string(dir + "/faza").split(" ") if dir != "" else PackedStringArray()
 	var faza := f[0] if f.size() == 2 else "normal"
+	if faza != _poslednja_faza: # za analizu rafala (vreme u ms kao [SEQ] linije)
+		_poslednja_faza = faza
+		print("[S-FAZA] t=%d %s" % [Time.get_ticks_msec(), faza])
 	# rupe po igraču (lik koji se odjavio ne sme da "vrati" svoje rupe iz zbira)
 	if _world():
 		for p in _world().get_children():
@@ -145,6 +158,18 @@ func _server(log: bool) -> bool:
 				_faza_rupe[faza] = _faza_rupe.get(faza, 0) + n
 				if faza == "normal" or faza == "teleport":
 					print("[S t=%.2f] rupa %d u fazi %s, peer %s" % [t, n, faza, p.name])
+	if f.size() == 2 and _world() and _world().has_node(f[1]):
+		var m = _world().get_node(f[1])
+		# zaostatak = red posle obrade u tick-u; Player pamti [vrh, ms] poslednjeg ispražnjenog.
+		# Računa se samo zaostatak ispražnjen TOKOM faze rafal (ne ostatak speed-hack-a od ranije).
+		if faza == "rafal":
+			if _rafal_pre.is_empty(): _rafal_pre = m.red_zaostatak.duplicate()
+			if m.red_zaostatak != _rafal_pre and m.red_zaostatak[0] > _rafal_vrh:
+				_rafal_vrh = m.red_zaostatak[0]
+				_rafal_ms = m.red_zaostatak[1]
+		_mover_red_max = m.red_max
+		_mover_odbijeno = m.odbijeno_red_pun
+		_red_max_dozvoljen = m.UNOS_RED_MAX
 	if faza == "teleport" and not _teleportovano and _world() and _world().has_node(f[1]):
 		_teleportovano = true
 		var m = _world().get_node(f[1])
@@ -175,6 +200,10 @@ func _server(log: bool) -> bool:
 		var bez: int = _faza_rupe.get("normal", 0) + _faza_rupe.get("teleport", 0)
 		_proveri_rupe()
 		_provera("nameplate_nema_na_serveru", not _nameplate_na_serveru, "")
+		_provera("rafal_bez_rupa", _faza_rupe.get("rafal", 0) == 0 and _rafal_vrh > 10 and _rafal_ms >= 0 and _rafal_ms <= RAFAL_PRAZNJENJE_MAX_MS,
+			"rupe=%d, vrh reda %d, ispražnjen za %d ms (dozvoljeno %d)" % [_faza_rupe.get("rafal", 0), _rafal_vrh, _rafal_ms, RAFAL_PRAZNJENJE_MAX_MS])
+		_provera("red_pun_odbacuje", _mover_odbijeno > 0 and _mover_red_max <= _red_max_dozvoljen,
+			"odbačeno (pun red) %d, najduži red %d / %d" % [_mover_odbijeno, _mover_red_max, _red_max_dozvoljen])
 		print("[S] gasim server (okidač)")
 		return true
 	return t > _max_t
@@ -237,10 +266,12 @@ func _mover(log: bool) -> bool:
 	p.set_physics_process(not (t > 15.0 and t < 18.0)) # 15-18 s: prestaje da šalje unos dok "drži" W
 	p.test_ubrzanje = 3 if t > 24.0 and t < 27.0 else 1 # speed-hack: 3 unosa po tick-u
 	p.test_gubitak = 0.3 if t > 27.5 and t < 33.0 else 0.0
+	p.test_zadrzi = t > 34.0 and t < 34.4 # ~24 unosa pa rafal: red mora da ih primi bez rupa
 	var faza := "normal"
 	if t > 22.0 and t < 23.5: faza = "teleport"
 	elif t > 23.5 and t < 27.5: faza = "speedhack"
 	elif t > 27.5 and t < 33.5: faza = "gubitak"
+	elif t > 33.8 and t < 38.0: faza = "rafal"
 	_upisi_fazu(faza, p.name)
 	if shot != "" and not _slikano and t > 6.7: # u mirovanju: snimanje koči frame
 		_slikano = true
@@ -252,7 +283,7 @@ func _mover(log: bool) -> bool:
 			_cpp[k] = p.global_position  # predviđena
 			_kor[k] = p.korekcije_glatke + p.korekcije_snap
 	if log: print("[M t=%.1f] moj %s server=%s kor=%d/%d" % [t, _fmt(p), p.server_poz, p.korekcije_glatke, p.korekcije_snap])
-	if t > 33.5:
+	if t > 38.5:
 		var c := _cp
 		var w1: Vector3 = c[6.5] - c[3.5]
 		var w2: Vector3 = c[8.5] - c[6.5]
