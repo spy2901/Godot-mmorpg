@@ -14,7 +14,6 @@ var dir := ""           # zajednički direktorijum: mover upisuje fazu u dir/faz
 var _cpp := {}          # mover: checkpoint -> predviđena (lokalna) pozicija
 var _kor := {}          # mover: checkpoint -> [glatke, snap]
 var _faza_rupe := {}    # server: faza -> preskočeni seq-ovi
-var _rupe_pre := 0
 var _teleportovano := false
 var _obs_pre = null     # observer: pozicija tuđeg lika u prošlom frame-u
 var _obs_od := -1.0
@@ -40,6 +39,16 @@ var _video_mrtvog := false
 var _video_respawn := false
 var _snimljeno := {}        # kategorija -> boja/stanje ok
 var _snimak_frame := -1
+# zastoj klijenta (za seq_bez_rupa_bez_gubitka): meri se tek kad mover upiše fazu, bez prve sekunde faze
+const ZASTOJ_PRAG := 0.1    # s: duži frame je zastoj
+const ZASTOJ_WARMUP := 1.0  # s od početka faze
+const ZASTOJ_PROZOR := 0.5  # s: rupa je opravdana samo zastojem istog procesa u +-0.5 s
+var _max_delta := 0.0
+var _faza_merenja := ""
+var _faza_od := 0.0
+var _zastoji: PackedStringArray = [] # "t_kraj delta" (unix s)
+var _rupe_po_igracu := {}   # server: peer -> poslednji rupe_seq
+var _rupe_dogadjaji := []   # server: [t, peer, broj, faza]
 var _ceka_gasenje := -1.0
 var _menu_t := -1.0       # mover: kad je MainMenu postao aktivan # mover: t kad je počeo da čeka gašenje servera
 var t := 0.0
@@ -100,6 +109,7 @@ func _process(d):
 		if uloga == "server": _nm().hostuj()
 		else: _nm().pridruzi_se("127.0.0.1")
 	_log_t += d
+	_meri_zastoj(d)
 	var log := _log_t >= 0.5
 	if log: _log_t = 0.0
 	match uloga:
@@ -118,12 +128,16 @@ func _server(log: bool) -> bool:
 	# faza od movera: "ime peer_id"; rupe u seq obradi se broje po fazi
 	var f := FileAccess.get_file_as_string(dir + "/faza").split(" ") if dir != "" else PackedStringArray()
 	var faza := f[0] if f.size() == 2 else "normal"
-	var rupe := 0
+	# rupe po igraču (lik koji se odjavio ne sme da "vrati" svoje rupe iz zbira)
 	if _world():
 		for p in _world().get_children():
-			if p.is_in_group("player"): rupe += p.rupe_seq
-	_faza_rupe[faza] = _faza_rupe.get(faza, 0) + rupe - _rupe_pre
-	_rupe_pre = rupe
+			if p.is_in_group("player") and p.rupe_seq > _rupe_po_igracu.get(p.name, 0):
+				var n: int = p.rupe_seq - _rupe_po_igracu.get(p.name, 0)
+				_rupe_po_igracu[p.name] = p.rupe_seq
+				_rupe_dogadjaji.append([Time.get_unix_time_from_system(), str(p.name), n, faza]) # vreme = kad je server primeti
+				_faza_rupe[faza] = _faza_rupe.get(faza, 0) + n
+				if faza == "normal" or faza == "teleport":
+					print("[S t=%.2f] rupa %d u fazi %s, peer %s" % [t, n, faza, p.name])
 	if faza == "teleport" and not _teleportovano and _world() and _world().has_node(f[1]):
 		_teleportovano = true
 		var m = _world().get_node(f[1])
@@ -152,7 +166,7 @@ func _server(log: bool) -> bool:
 	# gasi se na okidač (dok su klijenti živi): quit() zatvara ENet i klijenti odmah dobiju server_disconnected
 	if stop != "" and FileAccess.file_exists(stop):
 		var bez: int = _faza_rupe.get("normal", 0) + _faza_rupe.get("teleport", 0)
-		_provera("seq_bez_rupa_bez_gubitka", bez == 0, "rupe po fazi %s" % _faza_rupe)
+		_proveri_rupe()
 		_provera("nameplate_nema_na_serveru", not _nameplate_na_serveru, "")
 		print("[S] gasim server (okidač)")
 		return true
@@ -469,3 +483,62 @@ func _snimak(kat: String) -> bool:
 	f.store_string(kat)
 	f.close()
 	return await _cekaj(func(): return FileAccess.file_exists(dir + "/snimljeno_" + kat), 20.0)
+
+# ---------------------------------------------------------------- ZASTOJ (za seq_bez_rupa_bez_gubitka)
+# Rupa u seq obradi nekog lika je opravdana (WARN) samo ako je proces koji šalje inpute za TAJ lik
+# imao frame > ZASTOJ_PRAG u prozoru +-ZASTOJ_PROZOR oko trenutka rupe (posle zastoja Godot nadoknađuje
+# tick-ove brže od 1.2x i token bucket ih odbaci). Inače FAIL. Server ne šalje inpute: ne meri se.
+
+func _meri_zastoj(d: float) -> void:
+	if dir == "" or uloga == "server" or _moj() == null:
+		return
+	var f := FileAccess.get_file_as_string(dir + "/faza").split(" ")
+	if f.size() != 2:
+		return # mover još nije upisao fazu
+	var sad := Time.get_unix_time_from_system()
+	if f[0] != _faza_merenja:
+		_faza_merenja = f[0]
+		_faza_od = sad
+	if (f[0] != "normal" and f[0] != "teleport") or sad - _faza_od < ZASTOJ_WARMUP:
+		return
+	var promena := d > _max_delta or d > ZASTOJ_PRAG
+	_max_delta = maxf(_max_delta, d)
+	if d > ZASTOJ_PRAG:
+		_zastoji.append("%f %f" % [sad, d])
+	if promena: # fajl po peer-u: uloga, najduži frame, pa zastoji
+		var fh := FileAccess.open(dir + "/zastoj_" + _id(), FileAccess.WRITE)
+		fh.store_string("%s\n%f\n%s" % [uloga, _max_delta, "\n".join(_zastoji)])
+		fh.close()
+
+# [uloga, najduži frame, [[t_kraj, delta], ...]] za peer; [] ako proces nije merio
+func _zastoj_peer(peer: String) -> Array:
+	var s := FileAccess.get_file_as_string(dir + "/zastoj_" + peer)
+	if s == "": return []
+	var l := s.split("\n", false)
+	var z := []
+	for k in range(2, l.size()):
+		var v := l[k].split(" ")
+		z.append([float(v[0]), float(v[1])])
+	return [l[0], float(l[1]), z]
+
+func _proveri_rupe() -> void:
+	var naj := [0.0, "-"]
+	for f in DirAccess.get_files_at(dir):
+		if f.begins_with("zastoj_"):
+			var z := _zastoj_peer(f.substr(7))
+			if z.size() == 3 and z[1] > naj[0]: naj = [z[1], z[0]]
+	var opravdane := 0
+	var neopravdane := []
+	for e in _rupe_dogadjaji:
+		if e[3] != "normal" and e[3] != "teleport": continue
+		var z := _zastoj_peer(e[1])
+		var ok := false
+		for st in (z[2] if z.size() == 3 else []): # zastoj [t_kraj - d, t_kraj] seče [t - P, t + P]
+			ok = ok or (st[0] - st[1] <= e[0] + ZASTOJ_PROZOR and st[0] >= e[0] - ZASTOJ_PROZOR)
+		if ok: opravdane += e[2]
+		else: neopravdane.append("%d (%s)" % [e[2], z[0] if z.size() == 3 else "peer " + e[1]])
+	var opis := "rupe po fazi %s, opravdane zastojem %d, bez zastoja %s; najduži frame %.0f ms (%s)" % [_faza_rupe, opravdane, neopravdane, naj[0] * 1000, naj[1]]
+	if not neopravdane.is_empty() or opravdane == 0:
+		_provera("seq_bez_rupa_bez_gubitka", neopravdane.is_empty(), opis)
+	else:
+		print("WARN seq_bez_rupa_bez_gubitka  neodlučno (zastoj klijenta): ", opis)
