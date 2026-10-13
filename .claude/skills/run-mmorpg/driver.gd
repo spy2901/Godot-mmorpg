@@ -75,6 +75,7 @@ var _t0 := -1.0         # mover: kad se pojavio sopstveni lik
 const MAX_T := 120.0    # zaštita od zaglavljivanja
 var _max_t := MAX_T     # server u repro_login.sh radi duže (maxt=)
 var _aktivnost := false # prijava: reliable zahtevi za predmet dok traje sesija
+var _izgubi_reset := false # prijava: klijent odbaci reset posle prijave (test hook)
 
 func _initialize():
 	var args := OS.get_cmdline_user_args()
@@ -90,6 +91,8 @@ func _initialize():
 			_max_t = float(a.substr(5))
 		if a == "aktivnost=1":
 			_aktivnost = true
+		if a == "izgubi_reset=1":
+			_izgubi_reset = true
 
 func _nm(): return root.get_node("NetworkManager")
 func _world(): return current_scene.get_node_or_null("World") if current_scene else null
@@ -603,10 +606,15 @@ var _prijava_t := -1.0
 var _akt_t := 0.0
 func _prijava() -> bool:
 	var p = _moj()
+	if p and _izgubi_reset and not p.test_izgubi_reset_prijave and not p.test_reset_izgubljen:
+		p.test_izgubi_reset_prijave = true
 	if _prijava_t < 0 and p and p.get_node("ui/Control")._ucitano:
 		_prijava_t = t
 		print("PRIJAVA_UCITAN t=%.2f" % t)
 	if _aktivnost and _prijava_t >= 0 and t - _akt_t >= 0.2:
 		_akt_t = t
 		p.zatrazi_koriscenje_itema.rpc_id(1, "mana_potion") # reliable, ne menja stanje ("Nemaš taj predmet")
-	return (_prijava_t >= 0 and t - _prijava_t > 5.0) or t > 30.0
+	if _prijava_t >= 0 and t - _prijava_t > 5.0:
+		print("PRIJAVA_KRAJ snap=%d glatke=%d greska_max=%.3f reset_izgubljen=%s server_poz=%s" % [p.korekcije_snap, p.korekcije_glatke, p.greska_max, p.test_reset_izgubljen, p.server_poz])
+		return true
+	return t > 30.0

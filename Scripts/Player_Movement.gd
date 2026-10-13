@@ -50,6 +50,8 @@ var _za_slanje: Array = [] # klijent: poslednjih UNOSA_PO_PAKETU unosa za slanje
 # (inače unosi koji su bili na putu u trenutku reset-a ostanu bez redundanse i jedan izgubljen paket = rupa)
 var test_izgubi_posle_reseta := false # test: paketi kasne 1 tick, a onaj na putu kad stigne reset se izgubi
 var test_izgubljen_paket := false     # test: hook je zaista izgubio paket
+var test_izgubi_reset_prijave := false # test: klijent odbaci prvo reset stanje posle inicijalizacije (učitavanje iz baze)
+var test_reset_izgubljen := false      # test: hook je zaista odbacio reset
 var _test_paket = null
 # server
 var _red: Array = []         # validni unosi čekaju token (najviše UNOS_RED_MAX)
@@ -922,6 +924,12 @@ func _klijent_korak(dt: float) -> void:
 func primi_stanje(seq: int, poz: Vector3, vel: Vector3, reset: bool) -> void:
 	if not _poziv_od_servera() or randf() < test_gubitak:
 		return
+	if test_izgubi_reset_prijave and reset and _inicijalizovan:
+		test_izgubi_reset_prijave = false
+		test_reset_izgubljen = true
+		if _debug_seq:
+			print("[SEQ-K] TEST: odbačen reset (seq %d, poz %s)" % [seq, poz])
+		return
 	server_poz = poz
 	# više stanja u istom frame-u: važi poslednje, ali reset se ne gubi
 	_stanje = [seq, poz, vel, reset or (_stanje != null and _stanje[3])]
@@ -1101,6 +1109,8 @@ func _server_korak(dt: float) -> void:
 	yaw_sync = rotation.y
 	var vlasnik := get_multiplayer_authority()
 	if vlasnik != multiplayer.get_unique_id():
+		if _reset and _debug_seq:
+			_dbg_seq("RESET poslat (seq %d, poz %s)" % [_poslednji_seq, global_position])
 		primi_stanje.rpc_id(vlasnik, _poslednji_seq, global_position, velocity, _reset)
 	_reset = false
 

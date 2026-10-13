@@ -4,6 +4,7 @@
 # Upotreba (iz korena repoa): .claude/skills/run-mmorpg/repro_login.sh [N=30] [--opterecenje] [--aktivnost]
 #   --opterecenje: 4 procesa `yes > /dev/null` za vreme petlje (gase se na kraju)
 #   --aktivnost:   klijent svakih 0.2 s šalje reliable zahtev za predmet (kao potion test)
+#   --izgubi-reset: klijent odbaci reset posle prijave (učitavanje pozicije iz baze), test hook
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
 G="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
@@ -19,7 +20,8 @@ PIDS="$!"
 trap 'kill $PIDS 2>/dev/null' EXIT
 for _ in $(seq 20); do curl -s "127.0.0.1:$PORT/items/apple" > /dev/null && break; sleep 0.2; done
 OPT=0; AKT=""
-for a in "$@"; do case "$a" in --opterecenje) OPT=1;; --aktivnost) AKT="aktivnost=1";; esac; done
+IZG=""
+for a in "$@"; do case "$a" in --opterecenje) OPT=1;; --aktivnost) AKT="aktivnost=1";; --izgubi-reset) IZG="izgubi_reset=1";; esac; done
 if [ $OPT = 1 ]; then
   for _ in 1 2 3 4; do yes > /dev/null & PIDS="$PIDS $!"; done
 fi
@@ -29,7 +31,7 @@ MMORPG_DEBUG_SEQ=1 "$G" --headless --path . --script $D -- server "stop=$OUT/uga
 S=$!
 sleep 1.5
 for i in $(seq "$N"); do
-  MMORPG_DEBUG_SEQ=1 "$G" --headless --path . --script $D -- prijava "dir=$OUT" "$API" $AKT > "$OUT/prijava_$i.log" 2>&1
+  MMORPG_DEBUG_SEQ=1 "$G" --headless --path . --script $D -- prijava "dir=$OUT" "$API" $AKT $IZG > "$OUT/prijava_$i.log" 2>&1
   sleep 0.5 # server snimi i ukloni lik pre sledeće prijave (isti TestLik)
 done
 touch "$OUT/ugasi_server"; wait $S
@@ -45,5 +47,6 @@ for peer in $(grep -o 'Peer [0-9]* -> TestLik' "$OUT/server.log" | awk '{print $
 done
 echo "ukupno rupa: $(grep -c '^\[SEQ\] peer [0-9]* RUPA' "$OUT/server.log"), prijava sa rupama: $(grep '^\[SEQ\] peer [0-9]* RUPA' "$OUT/server.log" | awk '{print $3}' | sort -u | wc -l | tr -d ' ')/$N"
 echo "klijent preskočio slanje: $(cat "$OUT"/prijava_*.log | grep -c 'preskočio slanje'), kasno stigli (van reda): $(grep -c 'KASNO' "$OUT/server.log")"
+echo "snap-ova: $(cat "$OUT"/prijava_*.log | grep -o 'PRIJAVA_KRAJ snap=[0-9]*' | cut -d= -f2 | paste -sd+ - | bc), najveća greška: $(cat "$OUT"/prijava_*.log | grep -o 'greska_max=[0-9.]*' | cut -d= -f2 | sort -n | tail -1) m"
 echo "prijava koje je server video: $(grep -c -- '-> TestLik' "$OUT/server.log")/$N, SCRIPT ERROR: $(cat "$OUT"/*.log | grep -c 'SCRIPT ERROR')"
 echo "logovi: $OUT"
