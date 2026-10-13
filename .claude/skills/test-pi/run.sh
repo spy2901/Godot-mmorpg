@@ -65,6 +65,10 @@ ok=0; for _ in $(seq 30); do
 done
 [ $ok = 1 ] && echo "PASS game_server_slusa  $TEST_GAME_HOST:$TEST_GAME_PORT" || pad "game_server_slusa"
 
+# ---------------------------------------------------------------- 3b. fiksna početna pozicija (pre prijave)
+python3 .claude/skills/test-pi/reset_pozicija.py || pad "reset_pozicije"
+echo "PASS reset_pozicije"
+
 # ---------------------------------------------------------------- 4. dva prava klijenta
 echo "== 4/4 dva klijenta protiv Pi-ja"
 ARG=("dir=$OUT" "host=$TEST_GAME_HOST" "port=$TEST_GAME_PORT" "--server-url=$TEST_API_URL")
