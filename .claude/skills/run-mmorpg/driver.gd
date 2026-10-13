@@ -10,6 +10,18 @@ extends SceneTree
 var uloga := ""
 var shot := ""
 var stop := ""
+var dir := ""           # zajednički direktorijum: mover upisuje fazu u dir/faza, server je čita
+var _cpp := {}          # mover: checkpoint -> predviđena (lokalna) pozicija
+var _kor := {}          # mover: checkpoint -> [glatke, snap]
+var _faza_rupe := {}    # server: faza -> preskočeni seq-ovi
+var _rupe_pre := 0
+var _teleportovano := false
+var _obs_pre = null     # observer: pozicija tuđeg lika u prošlom frame-u
+var _obs_od := -1.0
+var _obs_kraci := 0     # koraka većih od brzina*dt*2 (a manjih od PRAG_SNAP)
+var _obs_snap := 0
+var _obs_max := 0.0     # najveći korak / (brzina*dt)
+var _obs_d := 0.0       # delta prethodnog frame-a
 var _ceka_gasenje := -1.0
 var _menu_t := -1.0       # mover: kad je MainMenu postao aktivan # mover: t kad je počeo da čeka gašenje servera
 var t := 0.0
@@ -31,6 +43,8 @@ func _initialize():
 			shot = a.substr(5)
 		if a.begins_with("stop="):
 			stop = a.substr(5)
+		if a.begins_with("dir="):
+			dir = a.substr(4)
 
 func _nm(): return root.get_node("NetworkManager")
 func _world(): return current_scene.get_node_or_null("World") if current_scene else null
@@ -68,7 +82,7 @@ func _process(d):
 	if log: _log_t = 0.0
 	match uloga:
 		"server": return _server(log)
-		"observer": return _observer(log)
+		"observer": return _observer(log, d)
 		"mover": return _mover(log)
 	push_error("uloga mora biti server|observer|mover")
 	return true
@@ -78,25 +92,53 @@ func _server(log: bool) -> bool:
 		for p in _world().get_children():
 			if p.is_in_group("player"):
 				print("[S t=%.1f] %s %s on_floor=%s" % [t, p.name, _fmt(p), p.is_on_floor()])
+	# faza od movera: "ime peer_id"; rupe u seq obradi se broje po fazi
+	var f := FileAccess.get_file_as_string(dir + "/faza").split(" ") if dir != "" else PackedStringArray()
+	var faza := f[0] if f.size() == 2 else "normal"
+	var rupe := 0
+	if _world():
+		for p in _world().get_children():
+			if p.is_in_group("player"): rupe += p.rupe_seq
+	_faza_rupe[faza] = _faza_rupe.get(faza, 0) + rupe - _rupe_pre
+	_rupe_pre = rupe
+	if faza == "teleport" and not _teleportovano and _world() and _world().has_node(f[1]):
+		_teleportovano = true
+		var m = _world().get_node(f[1])
+		m.server_postavi_poziciju(m.global_position + Vector3(3, 0, 0), false) # bez reset-a: odlučuje PRAG_SNAP
+		print("[S] teleport ", f[1], " +3 x")
 	# gasi se na okidač (dok su klijenti živi): quit() zatvara ENet i klijenti odmah dobiju server_disconnected
 	if stop != "" and FileAccess.file_exists(stop):
+		var bez: int = _faza_rupe.get("normal", 0) + _faza_rupe.get("teleport", 0)
+		_provera("seq_bez_rupa_bez_gubitka", bez == 0, "rupe po fazi %s" % _faza_rupe)
 		print("[S] gasim server (okidač)")
 		return true
 	return t > MAX_T
 
-func _observer(log: bool) -> bool:
+func _observer(log: bool, d: float) -> bool:
 	var o = _drugi()
 	if o:
 		_video_drugog = true
+		if _obs_od < 0: _obs_od = t
+		# korak tuđeg lika po frame-u (posle 1 s, kad stignu prvi snimci). SceneTree _process ide pre
+		# _process čvora, pa je izmereni korak napravljen sa delta-om PRETHODNOG frame-a.
+		if _obs_pre != null and t - _obs_od > 1.0 and _obs_d > 0:
+			var korak: float = o.global_position.distance_to(_obs_pre)
+			if korak > o.PRAG_SNAP: _obs_snap += 1
+			else:
+				_obs_max = maxf(_obs_max, korak / (o.brzina * _obs_d))
+				if korak > o.brzina * _obs_d * 2 * 1.001: _obs_kraci += 1
+		_obs_d = d
+		_obs_pre = o.global_position
 		if absf(o.yaw_sync - PI / 2) < 0.05 and absf(o.rotation.y - o.yaw_sync) < 0.01:
 			_video_yaw = true
 			if _yaw_t < 0: _yaw_t = t
 		# 1.5-3.5 s posle yaw faze mover miruje: šalji unos za TUĐI lik, server mora da ga ignoriše
 		if _yaw_t > 0 and t > _yaw_t + 1.5 and t < _yaw_t + 3.5:
-			o.posalji_unos.rpc_id(1, Vector2(1, 0), true, 0.0)
+			o.posalji_unos.rpc_id(1, [[1 << 40, Vector2(1, 0), true, 0.0]])
 		if log: print("[O t=%.1f] tudji %s %s" % [t, o.name, _fmt(o)])
 	if (_video_drugog and o == null) or t > MAX_T:
 		_provera("observer_vidi_yaw", _video_yaw, "rotation.y = yaw_sync = PI/2 na tuđem liku")
+		_provera("observer_korak_max_2x", _obs_kraci == 0, "prekoracenja=%d, max korak=%.2f x brzina*dt, snap-ova=%d" % [_obs_kraci, _obs_max, _obs_snap])
 		return true
 	return false
 
@@ -108,22 +150,35 @@ func _mover(log: bool) -> bool:
 		return t > MAX_T
 	if _t0 < 0: _t0 = t
 	var t := t - _t0 + 2.0  # vremenska osa od pojave lika (lik pada na pod ~1 s)
-	var w := (t > 4.0 and t < 6.0) or (t > 7.0 and t < 8.0) or t > 14.0
+	var w := (t > 4.0 and t < 6.0) or (t > 7.0 and t < 8.0) or (t > 14.0 and t < 18.0) \
+		or (t > 18.5 and t < 20.5) or (t > 24.0 and t < 27.0) or (t > 28.0 and t < 30.0)
 	if w: Input.action_press("ui_up")
 	else: Input.action_release("ui_up")
 	if t > 4.0 and t < 6.0: p.rotation.y = PI  # ka +z: na -z (0, _, -10) stoji NPC i blokira put
 	if t > 7.0 and t < 8.0: p.rotation.y = PI / 2
-	if t > 12.5 and t < 12.7: p.posalji_unos.rpc_id(1, Vector2(NAN, 1), false, INF)
-	if t > 15.0: p.set_physics_process(false) # prestaje da šalje unos dok "drži" W
+	if t > 18.5 and t < 20.5: p.rotation.y = -PI / 2 # ka +x, nazad
+	if t > 24.0 and t < 27.0: p.rotation.y = 0.0 # ka -z
+	if t > 28.0 and t < 30.0: p.rotation.y = PI
+	if t > 12.5 and t < 12.7: p.posalji_unos.rpc_id(1, [[p._seq + 1000, Vector2(NAN, 1), false, INF]])
+	p.set_physics_process(not (t > 15.0 and t < 18.0)) # 15-18 s: prestaje da šalje unos dok "drži" W
+	p.test_ubrzanje = 3 if t > 24.0 and t < 27.0 else 1 # speed-hack: 3 unosa po tick-u
+	p.test_gubitak = 0.3 if t > 27.5 and t < 33.0 else 0.0
+	var faza := "normal"
+	if t > 22.0 and t < 23.5: faza = "teleport"
+	elif t > 23.5 and t < 27.5: faza = "speedhack"
+	elif t > 27.5 and t < 33.5: faza = "gubitak"
+	_upisi_fazu(faza, p.name)
 	if shot != "" and not _slikano and t > 6.7: # u mirovanju: snimanje koči frame
 		_slikano = true
 		root.get_viewport().get_texture().get_image().save_png(shot)
 		print("[M] screenshot -> ", shot)
-	for k in [3.5, 6.5, 8.5, 12.0, 13.5, 15.0, 16.5, 17.5]:
+	for k in [3.5, 6.5, 8.5, 12.0, 13.5, 15.0, 16.5, 17.5, 18.5, 21.5, 22.0, 23.3, 24.5, 26.5, 28.0, 33.0]:
 		if t >= k and not _cp.has(k):
-			_cp[k] = p.global_position
-	if log: print("[M t=%.1f] moj %s" % [t, _fmt(p)])
-	if t > 18.0:
+			_cp[k] = p.server_poz  # pozicija koju javlja server
+			_cpp[k] = p.global_position  # predviđena
+			_kor[k] = p.korekcije_glatke + p.korekcije_snap
+	if log: print("[M t=%.1f] moj %s server=%s kor=%d/%d" % [t, _fmt(p), p.server_poz, p.korekcije_glatke, p.korekcije_snap])
+	if t > 33.5:
 		var c := _cp
 		var w1: Vector3 = c[6.5] - c[3.5]
 		var w2: Vector3 = c[8.5] - c[6.5]
@@ -134,10 +189,29 @@ func _mover(log: bool) -> bool:
 		_provera("NaN_odbacen", c[13.5].distance_to(c[12.0]) < 0.05, "delta=%s" % (c[13.5] - c[12.0]))
 		var posle: float = c[16.5].distance_to(c[15.0])
 		_provera("istek_unosa_0.5s", posle < 4.5 and c[17.5].distance_to(c[16.5]) < 0.05, "posle prekida %.2f, zatim %.2f" % [posle, c[17.5].distance_to(c[16.5])])
+		var hod: float = c[21.5].distance_to(c[18.5])
+		_provera("mirno_0_korekcija", _kor[21.5] == _kor[18.5] and hod > 8.0 and _cpp[21.5].distance_to(c[21.5]) < 0.05,
+			"korekcija=%d hod=%.2f razlika posle zaustavljanja=%.3f" % [_kor[21.5] - _kor[18.5], hod, _cpp[21.5].distance_to(c[21.5])])
+		_provera("teleport_snap", _kor[23.3] > _kor[22.0] and c[23.3].distance_to(c[22.0]) > 2.5 and _cpp[23.3].distance_to(c[23.3]) < 0.05,
+			"server pomeren %.2f, korekcija=%d, razlika=%.3f" % [c[23.3].distance_to(c[22.0]), _kor[23.3] - _kor[22.0], _cpp[23.3].distance_to(c[23.3])])
+		var hack: float = c[26.5].distance_to(c[24.5]) / (2.0 * p.brzina)
+		_provera("speedhack_max_1.2x", hack > 0.5 and hack < 1.25, "server brzina %.2fx normalne" % hack)
+		_provera("gubitak_30%_konvergira", c[33.0].distance_to(c[28.0]) > 7.0 and _cpp[33.0].distance_to(c[33.0]) < 0.05,
+			"hod=%.2f razlika=%.3f" % [c[33.0].distance_to(c[28.0]), _cpp[33.0].distance_to(c[33.0])])
+		print("[M] korekcije glatke=%d snap=%d, greska predikcije prosek=%.4f max=%.3f m (n=%d)" % [p.korekcije_glatke, p.korekcije_snap, p.greska_suma / maxi(p.greska_n, 1), p.greska_max, p.greska_n])
 		Input.action_release("ui_up")
+		_upisi_fazu("kraj", p.name)
 		_ceka_gasenje = self.t  # globalno vreme (lokalni t je pomeren)
 		print("CEKAM_GASENJE")
 	return false
+
+var _upisana_faza := ""
+func _upisi_fazu(faza: String, id: String) -> void:
+	if dir == "" or faza == _upisana_faza: return
+	_upisana_faza = faza
+	var f := FileAccess.open(dir + "/faza", FileAccess.WRITE)
+	f.store_string(faza + " " + id)
+	f.close()
 
 # Server se gasi dok je klijent živ: klijent mora da se vrati na login sa porukom
 func _mover_ceka_gasenje() -> bool:

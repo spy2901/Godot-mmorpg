@@ -11,12 +11,15 @@ radius = 0.22
 height = 1.58
 
 [sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_vgqql"]
-properties/0/path = NodePath(".:position")
+properties/0/path = NodePath(".:poz_sync")
 properties/0/spawn = true
 properties/0/replication_mode = 1
 properties/1/path = NodePath(".:yaw_sync")
 properties/1/spawn = true
 properties/1/replication_mode = 1
+properties/2/path = NodePath(".:tik_sync")
+properties/2/spawn = true
+properties/2/replication_mode = 1
 
 [node name="Player" type="CharacterBody3D" unique_id=1441937363]
 script = ExtResource("1_vgqql")

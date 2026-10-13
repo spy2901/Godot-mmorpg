@@ -7,10 +7,50 @@ var mouse_sensitivity = 0.3
 var rotacija_misa = false
 var yaw_sync := 0.0 # server -> ostali klijenti (MultiplayerSynchronizer); vlasnik koristi lokalni rotation.y
 const SKOK := 5.0
-const UNOS_ISTEK_MS := 500
-var _unos_smer := Vector2.ZERO # samo na serveru: poslednji unos vlasnika
-var _unos_skok := false
+const UNOS_ISTEK_MS := 500 # server: posle ovoliko bez unosa sam simulira lik bez unosa (gravitacija)
+
+#PREDIKCIJA I RECONCILIATION (podešavanje)
+const PRAG_IGNORISI := 0.05 # m: manja greška predikcije se ignoriše
+const PRAG_SNAP := 1.5      # m: veća greška = snap; između = glatko preko CharacterMain
+const SMOOTH_TIME := 0.1    # s: trajanje glatke korekcije modela i kamere
+const INTERP_DELAY := 0.1   # s: tuđi likovi se crtaju ovoliko u prošlosti
+const MAX_EKSTRAPOLACIJA := 0.25 # s: posle poslednjeg snimka tuđi lik staje
+const MAX_BUFFER := 120     # nepotvrđenih unosa na klijentu
+const UNOSA_PO_PAKETU := 3  # redundansa: svaki paket nosi poslednja 3 unosa
+const UNOS_RATE := 1.2      # server: najviše 1.2 * physics_ticks_per_second unosa/s (token bucket)
+const UNOS_BURST := 10.0    # server: kapacitet kofe
+
+# unos = [seq: int, smer: Vector2, skok: bool, yaw: float]
+var poz_sync := Vector3.ZERO # server -> ostali klijenti (MultiplayerSynchronizer); vlasnik je ne čita
+var tik_sync := 0            # server physics frame kome pripada poz_sync
+# klijent-vlasnik
+var _seq := 0
+var _buffer: Array = []      # nepotvrđeni unosi
+var _stanje = null           # poslednje stanje od servera, primenjuje se u physics tick-u
+var _inicijalizovan := false
+var _vizuelni_offset := Vector3.ZERO
+var _offset_brzina := 0.0
+var _model_poz := Vector3.ZERO
+var _kamera_poz := Vector3.ZERO
+var server_poz := Vector3.ZERO # poslednja pozicija od servera (testovi)
+var korekcije_glatke := 0
+var korekcije_snap := 0
+var greska_max := 0.0
+var greska_suma := 0.0
+var greska_n := 0
+var test_gubitak := 0.0 # test: deo paketa koji klijent odbacuje (oba smera)
+var test_ubrzanje := 1  # test: unosa po physics tick-u (speed-hack)
+# server
+var _red: Array = []         # validni unosi čekaju physics tick
+var _poslednji_seq := 0
+var _tokeni := UNOS_BURST
+var _tokeni_ms := 0
 var _unos_ms := -UNOS_ISTEK_MS
+var _reset := true           # sledeće stanje vlasniku nosi reset (spawn, prijava, respawn)
+var rupe_seq := 0            # preskočeni seq-ovi (izgubljeni ili odbijeni)
+# posmatrač
+var _snimci: Array = []      # [tik, poz, yaw]
+var _sat_pomak := 0.0        # lokalno vreme - serversko vreme (usrednjeno)
 
 #ATTACK
 var napad_damage = 25  # na serveru: učitano iz baze preko registruj_lik
@@ -49,9 +89,12 @@ var _oklop_verzija := 0 # samo na serveru
 
 func _ready():
 	add_to_group("player")
-	# Node pripada vlasniku (RPC-ovi), a poziciju šalje server svima, i vlasniku
+	_model_poz = $CharacterMain.position
+	_kamera_poz = kamera.position
+	# Node pripada vlasniku (RPC-ovi); poz_sync/yaw_sync šalje server ostalima.
+	# position se NE replicira: vlasnikovu poziciju menjaju samo predikcija i reconciliation.
 	$MultiplayerSynchronizer.set_multiplayer_authority(1)
-	# Server pomera sve likove; vlasnik u physics frame-u samo šalje unos
+	# Server je autoritet za sve likove; vlasnik predviđa svoj lik i šalje unose
 	set_physics_process(multiplayer.is_server() or is_multiplayer_authority())
 	if not is_multiplayer_authority():
 		set_process_unhandled_input(false)
@@ -193,7 +236,7 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 	}
 	var pos := Vector3(float(p.get("pos_x", 0)), float(p.get("pos_y", 0)), float(p.get("pos_z", 0)))
 	if pos != Vector3.ZERO:
-		global_position = pos
+		server_postavi_poziciju(pos, true)
 		podaci["pos_x"] = pos.x
 		podaci["pos_y"] = pos.y
 		podaci["pos_z"] = pos.z
@@ -348,8 +391,11 @@ func server_primeni_stats(st: Dictionary) -> void:
 func _process(delta: float) -> void:
 	if not multiplayer.has_multiplayer_peer(): # posle prekida veze, do promene scene
 		return
-	if not multiplayer.is_server() and not is_multiplayer_authority():
-		rotation.y = yaw_sync
+	if not multiplayer.is_server():
+		if is_multiplayer_authority():
+			_pomeri_vizuelno(delta)
+		else:
+			_interpoliraj(delta)
 	if not multiplayer.is_server() or not _stanje_ucitano or mrtav:
 		return
 	_regen_akum += delta
@@ -391,8 +437,7 @@ func _server_respawn() -> void:
 	mana = max_mana
 	mrtav = false
 	_neosjetljiv_do_ms = Time.get_ticks_msec() + NEOSJETLJIVOST_MS
-	velocity = Vector3.ZERO
-	global_position = tacka # MultiplayerSynchronizer je javlja svima
+	server_postavi_poziciju(tacka, true)
 	_regen_akum = 0.0
 	_posalji_hp()
 	print("[RESPAWN] ", ime_lika, " -> ", tacka)
@@ -632,13 +677,13 @@ func _input(event):
 				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			kamera.position.z = max(kamera.position.z - zum_brzina, min_zum)
-			if kamera.position.z <= 0.1:
+			_kamera_poz.z = max(_kamera_poz.z - zum_brzina, min_zum)
+			if _kamera_poz.z <= 0.1:
 				$CharacterMain.visible = false
 
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			kamera.position.z = min(kamera.position.z + zum_brzina, max_zum)
-			if kamera.position.z > 0.1:
+			_kamera_poz.z = min(_kamera_poz.z + zum_brzina, max_zum)
+			if _kamera_poz.z > 0.1:
 				$CharacterMain.visible = true
 
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -650,16 +695,32 @@ func _input(event):
 		kamera.rotate_x(deg_to_rad(-event.relative.y * mouse_sensitivity))
 		kamera.rotation.x = clamp(kamera.rotation.x, deg_to_rad(-60), deg_to_rad(60))
 
-func _physics_process(delta):
+func _physics_process(_delta):
 	if not multiplayer.has_multiplayer_peer():
 		return
-	if is_multiplayer_authority():
-		_posalji_moj_unos()
+	var dt := 1.0 / Engine.physics_ticks_per_second
 	if multiplayer.is_server():
-		_server_pomeri(delta)
+		if is_multiplayer_authority():
+			posalji_unos([_novi_unos()]) # host koji igra: lokalni poziv, bez predikcije
+		_server_korak(dt)
+	elif is_multiplayer_authority():
+		_klijent_korak(dt)
 
-# Vlasnik: skupi unos i pošalji ga serveru (host: lokalni poziv). Lik se lokalno ne pomera.
-func _posalji_moj_unos() -> void:
+# Jedan korak kretanja: isti kod na serveru (autoritet) i na vlasniku (predikcija i replay).
+func simuliraj_korak(unos: Array, delta: float) -> void:
+	var smer: Vector2 = unos[1]
+	rotation.y = unos[3]
+	# gravitacija uvek; na podu je move_and_slide poništi, pa replay ne zavisi od starog is_on_floor
+	velocity.y += gravitacija * delta
+	if unos[2] and is_on_floor():
+		velocity.y = SKOK
+	var pravac := transform.basis.x * smer.x - transform.basis.z * smer.y
+	velocity.x = pravac.x * brzina
+	velocity.z = pravac.z * brzina
+	move_and_slide()
+
+# Vlasnik: smer.x = desno(+)/levo(-), smer.y = napred(+)/nazad(-), yaw = rotation.y lika.
+func _novi_unos() -> Array:
 	var smer := Vector2.ZERO
 	var skok := false
 	if not mrtav:
@@ -672,37 +733,169 @@ func _posalji_moj_unos() -> void:
 		if Input.is_action_pressed("ui_right") or Input.is_key_pressed(KEY_D):
 			smer.x += 1.0
 		skok = Input.is_key_pressed(KEY_SPACE)
-	if multiplayer.is_server():
-		posalji_unos(smer, skok, rotation.y)
-	else:
-		posalji_unos.rpc_id(1, smer, skok, rotation.y)
+	_seq += 1
+	return [_seq, smer, skok, rotation.y]
 
-# Server: smer.x = desno(+)/levo(-), smer.y = napred(+)/nazad(-), yaw = rotation.y lika.
-# Pozicija se nikad ne prima od klijenta.
+# ---------------------------------------------------------------- KLIJENT: PREDIKCIJA
+
+func _klijent_korak(dt: float) -> void:
+	if _stanje != null:
+		_uskladi(_stanje, dt)
+		_stanje = null
+	if not _inicijalizovan:
+		return # čekamo prvo stanje od servera
+	for i in test_ubrzanje:
+		var u := _novi_unos()
+		simuliraj_korak(u, dt)
+		_buffer.append(u)
+	while _buffer.size() > MAX_BUFFER:
+		_buffer.pop_front()
+	if randf() >= test_gubitak:
+		posalji_unos.rpc_id(1, _buffer.slice(-UNOSA_PO_PAKETU))
+
+# Server -> vlasnik, svaki physics tick: stanje posle obrade unosa `seq`.
 @rpc("any_peer", "unreliable_ordered")
-func posalji_unos(smer: Vector2, skok: bool, yaw: float) -> void:
+func primi_stanje(seq: int, poz: Vector3, vel: Vector3, reset: bool) -> void:
+	if not _poziv_od_servera() or randf() < test_gubitak:
+		return
+	server_poz = poz
+	# više stanja u istom frame-u: važi poslednje, ali reset se ne gubi
+	_stanje = [seq, poz, vel, reset or (_stanje != null and _stanje[3])]
+
+# Reconciliation: serversko stanje + ponovo odigrani nepotvrđeni unosi, pa poređenje sa predikcijom.
+func _uskladi(s: Array, dt: float) -> void:
+	var seq: int = s[0]
+	if s[3] or not _inicijalizovan:
+		_buffer.clear()
+		global_position = s[1]
+		velocity = s[2]
+		_vizuelni_offset = Vector3.ZERO
+		_inicijalizovan = true
+		return
+	while not _buffer.is_empty() and _buffer[0][0] <= seq:
+		_buffer.pop_front()
+	var pre_poz := global_position
+	var pre_vel := velocity
+	var pre_yaw := rotation.y
+	global_position = s[1]
+	velocity = s[2]
+	for u in _buffer:
+		simuliraj_korak(u, dt)
+	rotation.y = pre_yaw
+	var greska := pre_poz.distance_to(global_position)
+	greska_suma += greska
+	greska_n += 1
+	greska_max = maxf(greska_max, greska)
+	if greska < PRAG_IGNORISI:
+		global_position = pre_poz
+		velocity = pre_vel
+	elif greska <= PRAG_SNAP:
+		# telo je već ispravljeno; model i kamera stižu za SMOOTH_TIME
+		korekcije_glatke += 1
+		_vizuelni_offset += pre_poz - global_position
+		_offset_brzina = _vizuelni_offset.length() / SMOOTH_TIME
+	else:
+		korekcije_snap += 1
+		_vizuelni_offset = Vector3.ZERO
+
+func _pomeri_vizuelno(delta: float) -> void:
+	_vizuelni_offset = _vizuelni_offset.move_toward(Vector3.ZERO, _offset_brzina * delta)
+	var lok := global_basis.inverse() * _vizuelni_offset
+	$CharacterMain.position = _model_poz + lok
+	kamera.position = _kamera_poz + lok
+
+# ---------------------------------------------------------------- POSMATRAČ: INTERPOLACIJA
+
+func _interpoliraj(delta: float) -> void:
+	var tps := float(Engine.physics_ticks_per_second)
+	var sad := Time.get_ticks_usec() / 1e6
+	if tik_sync > 0 and (_snimci.is_empty() or tik_sync > _snimci[-1][0]):
+		var uzorak := sad - tik_sync / tps
+		_sat_pomak = uzorak if _snimci.is_empty() else lerpf(_sat_pomak, uzorak, 0.02)
+		if not _snimci.is_empty() and _snimci[-1][1].distance_to(poz_sync) > PRAG_SNAP:
+			_snimci.clear() # teleport/respawn: snap, bez klizanja preko mape
+		_snimci.append([tik_sync, poz_sync, yaw_sync])
+	if _snimci.is_empty():
+		return
+	var t := (sad - _sat_pomak - INTERP_DELAY) * tps # render vreme u tikovima servera
+	while _snimci.size() > 2 and _snimci[1][0] <= t:
+		_snimci.pop_front()
+	var a = _snimci[0]
+	if t <= a[0] or _snimci.size() == 1:
+		_postavi(a[1], a[2], delta)
+		return
+	var b = _snimci[1]
+	if t <= b[0]:
+		var k: float = (t - a[0]) / float(b[0] - a[0])
+		_postavi(a[1].lerp(b[1], k), lerp_angle(a[2], b[2], k), delta)
+		return
+	# iza poslednjeg snimka: nastavi istom brzinom najviše MAX_EKSTRAPOLACIJA, pa stani
+	var v: Vector3 = (b[1] - a[1]) / float(b[0] - a[0])
+	_postavi(b[1] + v * minf(t - b[0], MAX_EKSTRAPOLACIJA * tps), b[2], delta)
+
+# Server obrađuje unose kako stignu (2+ koraka u jednom tick-u posle rafala), pa se prikaz
+# ograničava na 2x brzinu hoda; razlika veća od PRAG_SNAP je teleport/respawn i ide snap.
+func _postavi(poz: Vector3, yaw: float, delta: float) -> void:
+	if global_position.distance_to(poz) > PRAG_SNAP:
+		global_position = poz
+	else:
+		global_position = global_position.move_toward(poz, brzina * 2.0 * delta)
+	rotation.y = yaw
+
+# ---------------------------------------------------------------- SERVER: UNOSI
+
+# Pozicija se nikad ne prima od klijenta, samo unosi.
+@rpc("any_peer", "unreliable_ordered")
+func posalji_unos(unosi: Array) -> void:
 	if not multiplayer.is_server() or not _posiljalac_je_vlasnik():
 		return
-	if not smer.is_finite() or not is_finite(yaw):
-		return
-	_unos_smer = smer.limit_length(1.0)
-	_unos_skok = skok
-	_unos_ms = Time.get_ticks_msec()
-	rotation.y = wrapf(yaw, -PI, PI)
+	var sad := Time.get_ticks_msec()
+	_tokeni = minf(UNOS_BURST, _tokeni + (sad - _tokeni_ms) / 1000.0 * UNOS_RATE * Engine.physics_ticks_per_second)
+	_tokeni_ms = sad
+	var zadnji: int = _red[-1][0] if not _red.is_empty() else _poslednji_seq
+	for sirov in unosi.slice(0, UNOSA_PO_PAKETU):
+		var u := _validan_unos(sirov)
+		if u.is_empty() or u[0] <= zadnji:
+			continue # neispravan, duplikat ili star
+		if _tokeni < 1.0:
+			break # previše unosa (speed-hack)
+		_tokeni -= 1.0
+		rupe_seq += u[0] - zadnji - 1
+		zadnji = u[0]
+		_red.append(u)
+		_unos_ms = sad
 
-func _server_pomeri(delta: float) -> void:
-	if not is_on_floor():
-		velocity.y += gravitacija * delta
-	var smer := Vector2.ZERO
-	if not mrtav and Time.get_ticks_msec() - _unos_ms <= UNOS_ISTEK_MS:
-		smer = _unos_smer
-		if _unos_skok and is_on_floor():
-			velocity.y = SKOK
-	var pravac := transform.basis.x * smer.x - transform.basis.z * smer.y
-	velocity.x = pravac.x * brzina
-	velocity.z = pravac.z * brzina
-	move_and_slide()
+# [seq, smer, skok, yaw] sa proverom tipova; [] za neispravan unos
+func _validan_unos(u) -> Array:
+	if typeof(u) != TYPE_ARRAY or u.size() != 4 or typeof(u[0]) != TYPE_INT or typeof(u[1]) != TYPE_VECTOR2 \
+			or typeof(u[2]) != TYPE_BOOL or typeof(u[3]) != TYPE_FLOAT:
+		return []
+	if not u[1].is_finite() or not is_finite(u[3]):
+		return []
+	return [u[0], u[1].limit_length(1.0), u[2], wrapf(u[3], -PI, PI)]
+
+func _server_korak(dt: float) -> void:
+	if _red.is_empty() and Time.get_ticks_msec() - _unos_ms > UNOS_ISTEK_MS:
+		simuliraj_korak([0, Vector2.ZERO, false, rotation.y], dt) # vlasnik ćuti: bez unosa, samo gravitacija
+	for u in _red:
+		if mrtav:
+			u = [u[0], Vector2.ZERO, false, u[3]]
+		simuliraj_korak(u, dt)
+		_poslednji_seq = u[0]
+	_red.clear()
+	poz_sync = global_position
+	tik_sync = Engine.get_physics_frames()
 	yaw_sync = rotation.y
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik != multiplayer.get_unique_id():
+		primi_stanje.rpc_id(vlasnik, _poslednji_seq, global_position, velocity, _reset)
+	_reset = false
+
+# Server: premesti lik. reset=true (prijava, respawn) briše vlasnikov buffer; inače odlučuje PRAG_SNAP.
+func server_postavi_poziciju(poz: Vector3, reset: bool) -> void:
+	global_position = poz
+	velocity = Vector3.ZERO
+	_reset = _reset or reset
 
 # ---------------------------------------------------------------- SERVER -> IGRAC (RPC)
 
