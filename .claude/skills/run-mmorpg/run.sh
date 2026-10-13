@@ -7,12 +7,20 @@ cd "$(dirname "$0")/../../.." || exit 1
 G="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 D=res://.claude/skills/run-mmorpg/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/run-mmorpg}"
-mkdir -p "$OUT"; rm -f "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza
+mkdir -p "$OUT"; rm -f "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd
+PORT="${STUB_PORT:-18765}"
+API="--server-url=http://127.0.0.1:$PORT"
 
-"$G" --headless --path . --script $D -- server "stop=$OUT/ugasi_server" "dir=$OUT" > "$OUT/server.log" 2>&1 &
+# lažni backend (napitci): stanje u memoriji, gasi se na kraju
+python3 "$(dirname "$0")/stub_api.py" "$PORT" > "$OUT/stub.log" 2>&1 &
+STUB=$!
+trap 'kill $STUB 2>/dev/null' EXIT
+for _ in $(seq 20); do curl -s "127.0.0.1:$PORT/items/apple" > /dev/null && break; sleep 0.2; done
+
+"$G" --headless --path . --script $D -- server "stop=$OUT/ugasi_server" "dir=$OUT" "$API" > "$OUT/server.log" 2>&1 &
 S=$!
 sleep 1.5
-"$G" --headless --path . --script $D -- observer > "$OUT/observer.log" 2>&1 &
+"$G" --headless --path . --script $D -- observer "dir=$OUT" > "$OUT/observer.log" 2>&1 &
 O=$!
 sleep 0.5
 if [ "${1:-}" = "--window" ]; then
@@ -21,6 +29,8 @@ else
   "$G" --headless --path . --script $D -- mover "dir=$OUT" > "$OUT/mover.log" 2>&1 &
 fi
 M=$!
+"$G" --headless --path . --script $D -- potion "dir=$OUT" "$API" > "$OUT/potion.log" 2>&1 &
+P=$!
 
 # kad mover završi provere kretanja, ugasi server dok su klijenti još živi
 for _ in $(seq 240); do
@@ -29,14 +39,14 @@ for _ in $(seq 240); do
   sleep 0.5
 done
 touch "$OUT/ugasi_server"
-wait $M $O $S
+wait $M $O $S $P
 
 echo "logovi: $OUT"
-grep -h '^PASS\|^FAIL\|screenshot\|korekcije' "$OUT"/mover.log "$OUT"/observer.log "$OUT"/server.log
-if grep -q "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log; then
-  echo "FAIL nema_greske_neaktivnog_peera  $(grep -ch "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log | paste -sd+ - | bc) linija"
+grep -h '^PASS\|^FAIL\|screenshot\|korekcije' "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log "$OUT"/server.log
+if grep -q "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log; then
+  echo "FAIL nema_greske_neaktivnog_peera  $(grep -ch "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log | paste -sd+ - | bc) linija"
 else
   echo "PASS nema_greske_neaktivnog_peera"
 fi | tee "$OUT/run.log"
 grep -h 'SCRIPT ERROR' "$OUT"/*.log | sort | uniq -c
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS' "$OUT"/*.log | paste -sd+ - | bc)" -eq 15 ]
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS' "$OUT"/*.log | paste -sd+ - | bc)" -eq 24 ]

@@ -480,10 +480,12 @@ func _primeni_oklop(eq: Dictionary) -> void:
 signal kupovina_odgovor(odgovor: Dictionary)
 signal quest_prihvat_odgovor(odgovor: Dictionary)
 signal quest_predaja_odgovor(odgovor: Dictionary)
+signal item_odgovor(odgovor: Dictionary)
 
 const ZAHTEV_TIMEOUT_MS := 8000
 var _zahtevi_u_toku: Dictionary = {}  # klijent: tip -> true dok čeka odgovor
 var _server_zauzet: Dictionary = {}   # server: tip -> true dok se izvršava
+var _item_cd_do_ms: Dictionary = {}   # server: item_id -> kad predmet ponovo sme da se koristi
 
 func skini_iz_vlasnistva(item_id: String, kolicina: int = 1) -> void:
 	var ostalo: int = vlasnistvo.get(item_id, 0) - kolicina
@@ -502,6 +504,9 @@ func prihvati_quest_na_serveru(quest_id: String) -> Dictionary:
 
 func predaj_quest_na_serveru(quest_id: String) -> Dictionary:
 	return await _posalji_i_cekaj("predaja", quest_predaja_odgovor, zatrazi_predaju_questa, quest_id)
+
+func koristi_item_na_serveru(item_id: String) -> Dictionary:
+	return await _posalji_i_cekaj("item", item_odgovor, zatrazi_koriscenje_itema, item_id)
 
 func odustani_quest_na_serveru() -> void:
 	if multiplayer.is_server():
@@ -639,6 +644,67 @@ func zatrazi_odustajanje() -> void:
 	await ApiManager.odustani_quest_server(ime_lika)
 	_server_zauzet.erase("odustajanje")
 
+# Potrošni predmet: server proverava sve pre trošenja, backend skida komad, server primenjuje efekat.
+# _server_zauzet["item"]: dva istovremena zahteva troše najviše jedan komad.
+@rpc("any_peer", "reliable")
+func zatrazi_koriscenje_itema(item_id: String) -> void:
+	if not multiplayer.is_server():
+		return
+	if not _posiljalac_je_vlasnik():
+		return
+	var greska := _greska_zahteva("item")
+	if greska == "":
+		greska = _greska_itema(item_id)
+	if greska != "":
+		_odgovori(odgovor_item, {"ok": false, "poruka": greska})
+		return
+	_server_zauzet["item"] = true
+	var d := await _iskoristi_item(item_id)
+	_server_zauzet.erase("item")
+	_odgovori(odgovor_item, d)
+
+func _greska_itema(item_id: String) -> String:
+	if not _stanje_ucitano:
+		return "Lik nije registrovan"
+	if mrtav:
+		return "Mrtav si"
+	if not posjeduje(item_id):
+		return "Nemaš taj predmet"
+	if Time.get_ticks_msec() < _item_cd_do_ms.get(item_id, 0):
+		return "Još nije spremno"
+	return ""
+
+func _iskoristi_item(item_id: String) -> Dictionary:
+	var item: Dictionary = await ApiManager.get_item(item_id)
+	var hp_e := int(item.get("hp_efekat", 0))
+	var mana_e := int(item.get("mana_efekat", 0))
+	if item.is_empty() or item.has("error") or str(item.get("tip", "")) != "consumable" or hp_e + mana_e <= 0:
+		return {"ok": false, "poruka": "Predmet se ne može koristiti"}
+	if mrtav:
+		return {"ok": false, "poruka": "Mrtav si"}
+	if not ((hp_e > 0 and hp < max_hp) or (mana_e > 0 and mana < max_mana)):
+		return {"ok": false, "poruka": "Već si pun"}
+	var ime := ime_lika
+	var r: Dictionary = await ApiManager.koristi_item(ime, item_id)
+	if r.get("status", "") != "ok":
+		print("[ITEM] Odbijeno za ", ime, ": ", item_id, " (", r.get("error", "server nedostupan"), ")")
+		return _neuspeh(r)
+	skini_iz_vlasnistva(item_id, 1)
+	hp_e = int(r.get("hp_efekat", hp_e))
+	mana_e = int(r.get("mana_efekat", mana_e))
+	var cd := int(r.get("cooldown_ms", 0))
+	_item_cd_do_ms[item_id] = Time.get_ticks_msec() + cd
+	# raspored za snimanje prati bazu, da save sa starim brojem komada ne bude odbijen
+	var s: Dictionary = _ucitano_stanje if _poslednje_stanje.is_empty() else _poslednje_stanje
+	if r.has("inventory") and not s.is_empty():
+		s["inventory"] = r["inventory"]
+	if not mrtav: # poginuo dok smo čekali backend: komad je potrošen, efekta nema
+		hp = mini(hp + hp_e, max_hp)
+		mana = mini(mana + mana_e, max_mana)
+		_posalji_hp()
+	print("[ITEM] ", ime, " koristio ", item_id, " -> hp ", hp, ", mana ", mana)
+	return {"ok": true, "item_id": item_id, "hp_efekat": hp_e, "mana_efekat": mana_e, "cooldown_ms": cd}
+
 # Enemy poziva na serveru za svakog napadača kad neprijatelj umre
 func server_zabelezi_kill(tip: String) -> void:
 	if not multiplayer.is_server() or ime_lika == "":
@@ -664,6 +730,12 @@ func odgovor_predaja(d: Dictionary) -> void:
 	if not _poziv_od_servera():
 		return
 	quest_predaja_odgovor.emit(d)
+
+@rpc("any_peer", "reliable")
+func odgovor_item(d: Dictionary) -> void:
+	if not _poziv_od_servera():
+		return
+	item_odgovor.emit(d)
 
 func _input(event):
 	if not is_multiplayer_authority():

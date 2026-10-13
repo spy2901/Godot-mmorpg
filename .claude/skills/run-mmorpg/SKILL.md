@@ -6,9 +6,11 @@ description: Run, start, launch, drive, test or screenshot the mmorpg Godot game
 # run-mmorpg
 
 Godot 4.6 multiplayer igra (macOS, `/Applications/Godot.app`). Agent je pokreće preko
-`run.sh`, koji podiže **3 Godot procesa** sa istim drajverom `driver.gd` (SceneTree skripta):
-`server` (headless, hostuje port 7777), `observer` (headless klijent) i `mover` (klijent koji
-se kreće, headless ili u prozoru sa screenshot-om). Drajver sam proverava rezultate i ispisuje
+`run.sh`, koji podiže lažni backend `stub_api.py` (Python stdlib, port `STUB_PORT`=18765) i
+**4 Godot procesa** sa istim drajverom `driver.gd` (SceneTree skripta):
+`server` (headless, hostuje port 7777, `--server-url` → stub), `observer` (headless klijent),
+`mover` (klijent koji se kreće, headless ili u prozoru sa screenshot-om) i `potion` (headless klijent
+prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava rezultate i ispisuje
 `PASS`/`FAIL`. Putanje su relativne u odnosu na koren repoa.
 
 ## Preduslovi
@@ -23,7 +25,7 @@ se kreće, headless ili u prozoru sa screenshot-om). Drajver sam proverava rezul
 .claude/skills/run-mmorpg/run.sh --window   # mover u prozoru 1280x720 + $OUT/mover.png, ~30 s
 ```
 
-Izlaz: putanja do logova, 15 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 15 prošlo. Logovi su u
+Izlaz: putanja do logova, 24 linije `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = sve 24 prošle. Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `mover.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
@@ -44,7 +46,23 @@ Deo B (predikcija + reconciliation), nastavak iste vremenske ose:
 - server: `seq_bez_rupa_bez_gubitka` (rupe u seq obradi po fazi; u fazama bez gubitka mora 0. U fazi
   gubitka rupa ima kad se izgube 3 uzastopna paketa (~0.3³ ≈ 2.7% tick-ova), u speed-hack-u su to odbijeni unosi).
 
-Faze se usklađuju preko fajla `$OUT/faza` ("ime peer_id"), koji mover piše, a server čita (`dir=` argument).
+Napitci (`potion` klijent, provere preko stanja: HUD hp, `prebroj_item`, količina u stub "bazi"):
+`potion_lik_ucitan`, `napitak_leci` (+30, količina -1 u bazi i UI-ju, poruka "+30 HP"),
+`napitak_clamp_max` (+150 na 80/100 → 100), `pun_hp_odbija` ("Već si pun", ne troši),
+`cooldown_odbija` ("Još nije spremno"), `nema_predmet_odbija`, `nepotrosni_odbija` (mač),
+`dva_istovremena_jedan_komad` (2 direktna RPC-a → 1 ok, backend trošio 1×), `mrtav_ne_moze`.
+Štetu i smrt zadaje server drajver na komandu iz `$OUT/potion_cmd` ("br steta N" / "br ubij").
+HP se regeneriše +2/s, pa se efekat proverava kao razlika uz toleranciju.
+
+Stub (`stub_api.py`): `/auth/verify` (token `potion-token` → `TestLik`), `GET /players/{ime}`,
+`GET /items/{id}`, `/quests/completed/{ime}`, `POST /players/{ime}/save` (samo hp/mana/pozicija;
+inventar je autoritativan u stub-u), `POST /players/{ime}/item/use` (kašnjenje 0.3 s da se zahtevi
+preklope; brojač `item_use_br`). Nepoznate rute: 404 i linija u `$OUT/stub.log`. TestLik ima sačuvanu
+poziciju (6, 1, -7): van putanje movera i van aggro dometa neprijatelja (na spawn-u bi blokirao movera).
+Mover i observer i dalje rade bez prijave (lažni token "x").
+
+Faze se usklađuju preko fajla `$OUT/faza` ("ime peer_id"), koji mover piše, a server i observer čitaju
+(`dir=` argument). Observer po tom peer_id-u zna koji lik je mover (u svetu su 3 tuđa lika).
 Pozicije u proverama su `server_poz` (poslednje stanje koje je server poslao), a ne predviđena lokalna.
 
 Posle toga mover ispiše `CEKAM_GASENJE`, a `run.sh` napravi `$OUT/ugasi_server`. Server
@@ -99,6 +117,9 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
   napravljen je sa delta-om frame-a N-1; observer zato poredi sa prethodnim `d`.
 - **Server obrađuje unose kako stignu** (više u jednom tick-u posle rafala), pa bi interpolacija
   tuđeg lika pokazala >2x brzinu; `_postavi` ograničava prikaz na 2x brzinu hoda.
+
+- **`ERROR: Condition "!pinfo.recv_nodes.has(net_id)"` na klijentima** kad se `potion` klijent odjavi:
+  Godot poruka pri despawn-u tuđeg lika, ne utiče na provere.
 
 ## Troubleshooting
 

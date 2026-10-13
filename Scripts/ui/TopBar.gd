@@ -31,6 +31,11 @@ var smrt_label: Label
 var _smrt_pocetak_ms := 0
 const RESPAWN_DELAY := 3.0  # samo za odbrojavanje na ekranu; pravi respawn radi server
 
+# Kratka poruka na sredini ekrana ("+30 HP", "Već si pun", ...)
+const PORUKA_TRAJANJE := 2.0
+var _poruka_label: Label
+var _poruka_br := 0
+
 # Save / load
 const AUTOSAVE_INTERVAL = 30.0
 const DIRTY_SAVE_DELAY = 3.0
@@ -142,6 +147,28 @@ func _ready():
 		return
 	# server preko tokena dobija ime lika, učita ga iz baze i vrati primi_lik
 	get_parent().get_parent().posalji_lik_serveru(GameState.token)
+
+func prikazi_poruku(tekst: String) -> void:
+	if tekst == "":
+		return
+	if _poruka_label == null:
+		_poruka_label = Label.new()
+		_poruka_label.add_theme_font_size_override("font_size", 28)
+		_poruka_label.add_theme_color_override("font_outline_color", Color.BLACK)
+		_poruka_label.add_theme_constant_override("outline_size", 6)
+		_poruka_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_poruka_label.top_level = true
+		var w := get_viewport().get_visible_rect().size.x
+		_poruka_label.position = Vector2(w / 2 - 200, 260)
+		_poruka_label.size = Vector2(400, 40)
+		add_child(_poruka_label)
+	_poruka_label.text = tekst
+	_poruka_label.visible = true
+	_poruka_br += 1
+	var br := _poruka_br
+	await get_tree().create_timer(PORUKA_TRAJANJE).timeout
+	if br == _poruka_br: # novija poruka produžava prikaz
+		_poruka_label.visible = false
 
 # ---------------------------------------------------------------- SAVE / LOAD
 

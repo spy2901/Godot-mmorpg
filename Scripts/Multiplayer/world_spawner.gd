@@ -88,6 +88,7 @@ func _on_peer_disconnected(id: int) -> void:
 		# van grupe i sakriven dok čekamo backend, da ga neprijatelji ne vide
 		p.remove_from_group("player")
 		p.hide()
+		p.set_physics_process(false) # bez simulacije i primi_stanje ka peer-u koji je otišao
 		await p.server_sacuvaj_konacno()
 	if is_instance_valid(p):
 		p.queue_free()

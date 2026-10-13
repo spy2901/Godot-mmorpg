@@ -361,11 +361,28 @@ func _on_slot_klik(index: int):
 	if index >= inventory_data.size() or inventory_data[index].is_empty():
 		return
 	var item = inventory_data[index]
+	if item.get("tip", "") == "consumable":
+		_koristi_item(str(item.get("id", "")))
+		return
 	var eq_slot = _eq_slot_za_item(item)
 	if eq_slot == "":
 		print("Ovaj item ne moze da se opremi!")
 		return
 	_opremi_item(index, eq_slot)
+
+# Potrošni predmet troši server; UI skida komad tek kad server potvrdi (tako se slaže sa bazom)
+func _koristi_item(item_id: String) -> void:
+	var r: Dictionary = await get_parent().get_parent().koristi_item_na_serveru(item_id)
+	var poruka := str(r.get("poruka", ""))
+	if r.get("ok", false):
+		ukloni_item(item_id, 1)
+		var delovi: PackedStringArray = []
+		if int(r.get("hp_efekat", 0)) > 0: delovi.append("+%d HP" % int(r.hp_efekat))
+		if int(r.get("mana_efekat", 0)) > 0: delovi.append("+%d Mana" % int(r.mana_efekat))
+		poruka = "  ".join(delovi)
+	var hud = get_tree().get_first_node_in_group("hud")
+	if hud:
+		hud.prikazi_poruku(poruka)
 
 func _opremi_item(inventory_index: int, eq_slot: String):
 	var item = inventory_data[inventory_index].duplicate()
@@ -449,6 +466,12 @@ func _on_slot_hover(index: int):
 		str(hovered_item.get("kolicina", 1)),
 		str(int(hovered_item.get("max_stack", 1)))
 	]
+	var hp_e := int(hovered_item.get("hp_efekat", 0))
+	var mana_e := int(hovered_item.get("mana_efekat", 0))
+	if hovered_item.get("tip", "") == "consumable" and hp_e + mana_e > 0:
+		tooltip_label.text += "\nKlik: %s%s  |  cooldown %.0f s" % [
+			"+%d HP " % hp_e if hp_e > 0 else "", "+%d Mana" % mana_e if mana_e > 0 else "",
+			int(hovered_item.get("cooldown_ms", 0)) / 1000.0]
 	tooltip_label.add_theme_color_override("font_color", tip_boja)
 	tooltip_panel.visible = true
 

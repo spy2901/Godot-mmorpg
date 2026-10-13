@@ -22,6 +22,9 @@ var _obs_kraci := 0     # koraka većih od brzina*dt*2 (a manjih od PRAG_SNAP)
 var _obs_snap := 0
 var _obs_max := 0.0     # najveći korak / (brzina*dt)
 var _obs_d := 0.0       # delta prethodnog frame-a
+var _potion_krenuo := false
+var _potion_kraj := false
+var _cmd_izvrsena := ""  # server: poslednja izvršena komanda iz dir/potion_cmd
 var _ceka_gasenje := -1.0
 var _menu_t := -1.0       # mover: kad je MainMenu postao aktivan # mover: t kad je počeo da čeka gašenje servera
 var t := 0.0
@@ -52,10 +55,11 @@ func _id() -> String:
 	return str(get_multiplayer().get_unique_id()) if get_multiplayer().has_multiplayer_peer() else ""
 func _moj():
 	return _world().get_node_or_null(_id()) if _world() else null
+# observer gleda movera: njegov peer_id je u dir/faza (mover ga upisuje od prve faze)
 func _drugi():
 	if _world() == null: return null
-	for p in _world().get_children():
-		if p.is_in_group("player") and p.name != _id(): return p
+	var f := FileAccess.get_file_as_string(dir + "/faza").split(" ") if dir != "" else PackedStringArray()
+	if f.size() == 2: return _world().get_node_or_null(f[1])
 	return null
 func _fmt(p) -> String:
 	var g: Vector3 = p.global_position
@@ -69,6 +73,9 @@ func _process(d):
 	if _faza == "":
 		if root.has_node("GameState"):
 			root.get_node("GameState").token = "x" # bez tokena MultiplayerTest vraća na login
+			if uloga == "potion": # pravi login preko stub API-ja (token -> TestLik)
+				root.get_node("GameState").token = "potion-token"
+				root.get_node("GameState").ime_igraca = "TestLik"
 			change_scene_to_file("res://Scenes/UI/MultiplayerTest.tscn")
 			_faza = "scena"
 		return false
@@ -84,6 +91,7 @@ func _process(d):
 		"server": return _server(log)
 		"observer": return _observer(log, d)
 		"mover": return _mover(log)
+		"potion": return _potion()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -106,6 +114,15 @@ func _server(log: bool) -> bool:
 		var m = _world().get_node(f[1])
 		m.server_postavi_poziciju(m.global_position + Vector3(3, 0, 0), false) # bez reset-a: odlučuje PRAG_SNAP
 		print("[S] teleport ", f[1], " +3 x")
+	# komande od potion klijenta: "br steta N" / "br ubij"
+	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
+	if cmd != "" and cmd != _cmd_izvrsena and _world():
+		for p in _world().get_children():
+			if p.is_in_group("player") and p.ime_lika == "TestLik":
+				_cmd_izvrsena = cmd
+				var c := cmd.split(" ")
+				p.server_primi_damage(int(c[2]) if c[1] == "steta" else 100000)
+				print("[S] potion komanda: ", cmd)
 	# gasi se na okidač (dok su klijenti živi): quit() zatvara ENet i klijenti odmah dobiju server_disconnected
 	if stop != "" and FileAccess.file_exists(stop):
 		var bez: int = _faza_rupe.get("normal", 0) + _faza_rupe.get("teleport", 0)
@@ -229,3 +246,102 @@ func _mover_ceka_gasenje() -> bool:
 		_provera("server_prekid_vraca_na_login", false, "nema promene scene za 30 s (scena=%s poruka='%s')" % [scena, poruka])
 		return true
 	return false
+
+# ---------------------------------------------------------------- POTION (napitci preko stub API-ja)
+
+func _potion() -> bool:
+	if not _potion_krenuo and _moj() and _moj().has_node("ui/Control"):
+		_potion_krenuo = true
+		_potion_scenario()
+	return _potion_kraj or t > MAX_T
+
+func _cekaj(uslov: Callable, sek := 10.0) -> bool:
+	var kraj := Time.get_ticks_msec() + int(sek * 1000)
+	while not uslov.call():
+		if Time.get_ticks_msec() > kraj: return false
+		await process_frame
+	return true
+
+# količina u "bazi" (stub)
+func _baza(item_id: String) -> int:
+	var pl: Dictionary = await root.get_node("ApiManager").get_player("TestLik")
+	var n := 0
+	for e in pl.get("inventory", []):
+		if e.id == item_id: n += int(e.kolicina)
+	return n
+
+var _cmd_br := 0
+func _komanda(c: String) -> void:
+	_cmd_br += 1
+	var f := FileAccess.open(dir + "/potion_cmd", FileAccess.WRITE)
+	f.store_string("%d %s" % [_cmd_br, c])
+	f.close()
+
+func _potion_scenario() -> void:
+	var p = _moj()
+	var hud = p.get_node("ui/Control")
+	var inv = p.get_node("ui/InventoryUI")
+	var api = root.get_node("ApiManager")
+	var ucitan: bool = await _cekaj(func(): return hud.hp == 50 and inv.prebroj_item("small_health_potion") == 3)
+	_provera("potion_lik_ucitan", ucitan, "hp=%d small=%d" % [hud.hp, inv.prebroj_item("small_health_potion")])
+	if not ucitan:
+		_potion_kraj = true
+		return
+
+	# 1. ispod punog: +30, količina -1 (UI gest = isti klik kao za opremu -> _koristi_item).
+	# HP regeneriše +2/s, pa se efekat proverava kao razlika uz malu toleranciju.
+	var hp0: int = hud.hp
+	await inv._koristi_item("small_health_potion")
+	await _cekaj(func(): return hud.hp >= hp0 + 30, 3.0)
+	var b: int = await _baza("small_health_potion")
+	_provera("napitak_leci", hud.hp - hp0 >= 30 and hud.hp - hp0 <= 34 and b == 2 and inv.prebroj_item("small_health_potion") == 2 and hud._poruka_label.text == "+30 HP",
+		"hp %d->%d baza=%d ui=%d poruka='%s'" % [hp0, hud.hp, b, inv.prebroj_item("small_health_potion"), hud._poruka_label.text])
+
+	# 2. +150 na 80/100 -> clamp na 100
+	var r: Dictionary = await p.koristi_item_na_serveru("large_health_potion")
+	await _cekaj(func(): return hud.hp == 100, 3.0)
+	b = await _baza("large_health_potion")
+	_provera("napitak_clamp_max", r.get("ok", false) and hud.hp == 100 and b == 0, "r=%s hp=%d baza=%d" % [r, hud.hp, b])
+
+	# 3. pun HP: odbijeno, ne troši
+	r = await p.koristi_item_na_serveru("medium_health_potion")
+	b = await _baza("medium_health_potion")
+	_provera("pun_hp_odbija", not r.get("ok", true) and r.get("poruka") == "Već si pun" and b == 3, "r=%s baza=%d" % [r, b])
+
+	# 4. cooldown: ranjen, ali small je korišćen pre < 5 s
+	_komanda("steta 40")
+	await _cekaj(func(): return hud.hp <= 64, 3.0)
+	r = await p.koristi_item_na_serveru("small_health_potion")
+	b = await _baza("small_health_potion")
+	_provera("cooldown_odbija", hud.hp < 70 and r.get("poruka") == "Još nije spremno" and b == 2, "hp=%d r=%s baza=%d" % [hud.hp, r, b])
+
+	# 5. predmet koji nema; 6. nepotrošni
+	r = await p.koristi_item_na_serveru("mana_potion")
+	_provera("nema_predmet_odbija", r.get("poruka") == "Nemaš taj predmet", "r=%s" % r)
+	r = await p.koristi_item_na_serveru("iron_sword")
+	b = await _baza("iron_sword")
+	_provera("nepotrosni_odbija", r.get("poruka") == "Predmet se ne može koristiti" and b == 1, "r=%s baza=%d" % [r, b])
+
+	# 7. dva istovremena zahteva (direktni RPC, mimo klijentske zaštite) -> jedan komad
+	var pre: Dictionary = await api.get_player("TestLik")
+	var odgovori := []
+	var hvataj := func(d): odgovori.append(d)
+	p.item_odgovor.connect(hvataj)
+	p.zatrazi_koriscenje_itema.rpc_id(1, "medium_health_potion")
+	p.zatrazi_koriscenje_itema.rpc_id(1, "medium_health_potion")
+	await _cekaj(func(): return odgovori.size() == 2, 5.0)
+	p.item_odgovor.disconnect(hvataj)
+	await _cekaj(func(): return hud.hp == 100, 3.0)
+	var posle: Dictionary = await api.get_player("TestLik")
+	b = await _baza("medium_health_potion")
+	var okova := odgovori.filter(func(d): return d.get("ok", false)).size()
+	_provera("dva_istovremena_jedan_komad", odgovori.size() == 2 and okova == 1 and b == 2 and int(posle.get("item_use_br", 0)) - int(pre.get("item_use_br", 0)) == 1 and hud.hp == 100,
+		"odgovori=%s baza=%d backend_trosenja=%d hp=%d" % [odgovori, b, int(posle.get("item_use_br", 0)) - int(pre.get("item_use_br", 0)), hud.hp])
+
+	# 8. mrtav ne može
+	_komanda("ubij")
+	await _cekaj(func(): return hud.je_mrtav, 3.0)
+	r = await p.koristi_item_na_serveru("apple")
+	b = await _baza("apple")
+	_provera("mrtav_ne_moze", hud.je_mrtav and r.get("poruka") == "Mrtav si" and b == 2, "mrtav=%s r=%s baza=%d" % [hud.je_mrtav, r, b])
+	_potion_kraj = true
