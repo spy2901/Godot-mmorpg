@@ -123,7 +123,9 @@ func _scenario() -> void:
 
 	# 3. lik iz prave baze: server ga učita (token -> /auth/verify -> /players) i pošalje primi_lik
 	var ucitan: bool = await _cekaj(func(): return hud._ucitano and p._inicijalizovan, 20.0)
-	_provera("lik_ucitan_iz_baze", ucitan and hud.ime_igraca == ime, "lv=%d hp=%d/%d mana=%d/%d gold=%d poz=%s" % [hud.level, hud.hp, hud.max_hp, hud.mana, hud.max_mana, hud.gold, p.server_poz])
+	# pozicija iz baze stiže kao reset 2 (reset 1 = spawn); bez ovoga merenja počinju sa spawn tačke
+	var reset_baze: bool = await _cekaj(func(): return p._reset_id_prim >= 2, 10.0)
+	_provera("lik_ucitan_iz_baze", ucitan and reset_baze and hud.ime_igraca == ime, "lv=%d hp=%d/%d mana=%d/%d gold=%d poz=%s reset_id=%d" % [hud.level, hud.hp, hud.max_hp, hud.mana, hud.max_mana, hud.gold, p.server_poz, p._reset_id_prim])
 	if not ucitan:
 		await _zavrsi()
 		return
@@ -152,7 +154,10 @@ func _scenario() -> void:
 		"ime=%s hp_sync=%d/%d (njegov HUD %s) vidljiv=%s daljina=%.1f m" % [o.ime_sync, o.hp_sync, o.max_hp_sync, _citaj(_drugi_uloga() + "_hp"), np.visible if np else false, daljina])
 
 	# 5. kretanje: igrac1 hoda 1 s (server authority + predikcija), igrac2 gleda
+	# igrac2 uzima početnu poziciju tuđeg lika tek kad je igrac1 primenio reset iz baze, igrac1 hoda tek posle toga
 	if uloga == "igrac1":
+		_pisi("igrac1_spreman", "1")
+		await _cekaj(func(): return _citaj("igrac2_start") != "", 15.0)
 		# ka centru mape: pozicija se čuva u bazi, uvek isti smer bi lik svakim pokretanjem gurao ka ivici
 		p.rotation.y = atan2(p.global_position.x, p.global_position.z) # napred je -basis.z
 		await create_timer(0.5).timeout
@@ -167,7 +172,10 @@ func _scenario() -> void:
 			"server pomeren %.2f m za 1 s (očekivano ~5), predikcija-server %.3f m, korekcije %d/%d, greška max %.3f m" % [hod, razlika, p.korekcije_glatke, p.korekcije_snap, p.greska_max])
 		_pisi("igrac1_pomeren", "%f" % hod)
 	else:
+		await _cekaj(func(): return _citaj("igrac1_spreman") != "", 30.0)
+		await create_timer(0.5).timeout # INTERP_DELAY + rezerva: tuđi lik je stigao na poziciju iz baze
 		var start: Vector3 = o.global_position
+		_pisi("igrac2_start", "1")
 		var dosao: bool = await _cekaj(func(): return _citaj("igrac1_pomeren") != "", 30.0)
 		await create_timer(0.5).timeout # INTERP_DELAY + rezerva
 		var vidi: float = o.global_position.distance_to(start)
