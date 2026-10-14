@@ -369,6 +369,8 @@ func _objavi_ostalima() -> void:
 	if _odbijen:
 		return
 	_objavljen = true
+	for id in vlasnistvo:
+		_javi_predmet(id)
 	poz_sync = global_position
 	tik_sync = Engine.get_physics_frames()
 	yaw_sync = rotation.y
@@ -487,6 +489,7 @@ func server_isplati_xp(xp: int, razlog: String) -> void:
 # Server poziva ovo kad sam dodeli predmet (loot), pre slanja RPC-a klijentu
 func dodaj_u_vlasnistvo(item_id: String, kolicina: int = 1) -> void:
 	vlasnistvo[item_id] = vlasnistvo.get(item_id, 0) + kolicina
+	_javi_predmet(item_id)
 
 func _primeni_oruzje(item_id: String) -> void:
 	if item_id == "":
@@ -630,6 +633,32 @@ func skini_iz_vlasnistva(item_id: String, kolicina: int = 1) -> void:
 		vlasnistvo.erase(item_id)
 	else:
 		vlasnistvo[item_id] = ostalo
+	_javi_predmet(item_id)
+
+# --- stanje predmeta za vlasnika (action bar): količina i preostali cooldown po serveru
+
+signal predmet_promenjen(item_id: String) # klijent: stiglo novo stanje predmeta od servera
+var kolicine: Dictionary = {}  # klijent: item_id -> količina po serveru
+var cd_do_ms: Dictionary = {}  # klijent: item_id -> lokalni ms kad cooldown ističe (preostalo po serveru)
+
+func _javi_predmet(item_id: String) -> void:
+	if not multiplayer.is_server() or not _stanje_ucitano:
+		return
+	var n: int = vlasnistvo.get(item_id, 0)
+	var cd := maxi(0, int(_item_cd_do_ms.get(item_id, 0)) - Time.get_ticks_msec())
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik == multiplayer.get_unique_id():
+		primi_predmet(item_id, n, cd)
+	else:
+		primi_predmet.rpc_id(vlasnik, item_id, n, cd)
+
+@rpc("any_peer", "reliable")
+func primi_predmet(item_id: String, kolicina: int, cd_ms: int) -> void:
+	if not _poziv_od_servera():
+		return
+	kolicine[item_id] = kolicina
+	cd_do_ms[item_id] = Time.get_ticks_msec() + cd_ms
+	predmet_promenjen.emit(item_id)
 
 # --- klijent (zovu UI-ji)
 
@@ -793,11 +822,13 @@ func zatrazi_koriscenje_itema(item_id: String) -> void:
 	if greska == "":
 		greska = _greska_itema(item_id)
 	if greska != "":
+		_javi_predmet(item_id)
 		_odgovori(odgovor_item, {"ok": false, "poruka": greska})
 		return
 	_server_zauzet["item"] = true
 	var d := await _iskoristi_item(item_id)
 	_server_zauzet.erase("item")
+	_javi_predmet(item_id) # cooldown je postavljen tek posle skidanja komada
 	_odgovori(odgovor_item, d)
 
 func _greska_itema(item_id: String) -> String:
