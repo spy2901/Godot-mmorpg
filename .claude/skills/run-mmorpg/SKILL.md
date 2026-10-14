@@ -182,7 +182,7 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
 
 - **Server objavljuje lika ostalim klijentima tek posle učitavanja iz baze** (`public_visibility` sinhronizatora,
   važi i za spawn); do tada ga vidi samo vlasnik. Zato mover i observer imaju stub naloge (`MoverLik`,
-  `ObserverLik`, pozicija (0,0,0), veliki HP): klijent bez učitavanja (token `"x"`) ostaje nevidljiv drugima.
+  `ObserverLik`; MoverLik bez pozicije (0,0,0), ObserverLik na (11, 1.16, 4) van putanje movera; veliki HP): klijent bez učitavanja (token `"x"`) ostaje nevidljiv drugima.
   Provere `prva_pojava_na_poziciji_iz_baze` i `novi_lik_000_se_pojavljuje`.
 - **Učitavanje ima rok** (`UCITAVANJE_TIMEOUT` 10 s od `registruj_lik`): verify ili čitanje lika koje ne uspe ili
   istekne -> server izbaci peer-a, lik nikad ne postaje vidljiv. Uloga `visi` (token `visi-token`, stub ga drži

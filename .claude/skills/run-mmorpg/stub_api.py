@@ -43,9 +43,10 @@ PLAYERS = {"TestLik": {
 }}
 # mover/observer: lik bez pozicije u bazi (0,0,0) -> ostaje na spawn tački; server ga objavi ostalima tek
 # posle učitavanja. Veliki HP: neprijatelji mogu da ga napadnu, a smrt (respawn) bi pomerila merenja.
-# MoverLik je nov (0,0,0 = bez pozicije, nasumičan spawn); ObserverLik ima svoju poziciju (x=4, dalje od
-# spawn-a ±2) da se dva lika ne stvore jedan na drugom (na_podu y=2.8: mover na glavi observera).
-for _ime, _poz in (("MoverLik", (0, 0, 0)), ("ObserverLik", (4, 1.16, 0))):
+# MoverLik je nov (0,0,0 = bez pozicije, nasumičan spawn); ObserverLik ima svoju poziciju van putanje movera
+# (mover ide x -9..6, z -12..16): na (4, 0) mu je mover u speedhack fazi udarao u leđa (speedhack_max_1.2x 0.42x),
+# a na spawn-u bi se stvorili jedan na drugom. Odavde TestLik (6, -7) ostaje ispred kamere (screenshot --window).
+for _ime, _poz in (("MoverLik", (0, 0, 0)), ("ObserverLik", (11, 1.16, 4))):
     PLAYERS[_ime] = dict(PLAYERS["TestLik"], ime=_ime, hp=100000, max_hp=100000,
                          pos_x=_poz[0], pos_y=_poz[1], pos_z=_poz[2], inventory=[])
 # ObserverLik ima nekoliko potrošnih predmeta: action bar na screenshot-u (--window) nije prazan
