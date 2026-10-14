@@ -224,6 +224,11 @@ func posalji_lik_serveru(token: String) -> void:
 		registruj_lik.rpc_id(1, token)
 
 var _registracija_u_toku := false  # samo na serveru
+# Server: rok za učitavanje (verify + čitanje lika). Ne uspe ili istekne -> peer se izbacuje, lik nikad
+# ne postaje vidljiv ostalima (_objavi_ostalima proverava _odbijen: kasni odgovor posle izbacivanja).
+const UCITAVANJE_TIMEOUT := 10.0
+var _odbijen := false
+var _objavljen := false
 
 @rpc("any_peer", "reliable")
 func registruj_lik(token: String) -> void:
@@ -237,8 +242,11 @@ func registruj_lik(token: String) -> void:
 		return
 	_registracija_u_toku = true
 	var peer_id := get_multiplayer_authority()
+	get_tree().create_timer(UCITAVANJE_TIMEOUT).timeout.connect(_istek_ucitavanja)
 	var r: Dictionary = await ApiManager.verify_token(token)
 	_registracija_u_toku = false
+	if _odbijen:
+		return
 	var ime := str(r.get("ime_lika", ""))
 	if r.get("status", "") != "ok" or ime == "":
 		var razlog := str(r.get("error", "neispravan odgovor"))
@@ -256,8 +264,15 @@ func registruj_lik(token: String) -> void:
 	print("[AUTH] Peer ", peer_id, " -> ", ime)
 	_ucitaj_statistike_sa_servera(ime)
 
+func _istek_ucitavanja() -> void:
+	if _objavljen or _odbijen:
+		return
+	print("[AUTH] Peer ", get_multiplayer_authority(), ": učitavanje lika nije završeno za ", UCITAVANJE_TIMEOUT, " s, izbacujem")
+	_odbij(get_multiplayer_authority(), "Učitavanje lika nije uspelo (istek vremena)")
+
 # Server: javi peer-u razlog pa ga diskonektuj (host koji igra: lokalni poziv)
 func _odbij(peer_id: int, poruka: String) -> void:
+	_odbijen = true
 	if peer_id == multiplayer.get_unique_id():
 		registracija_odbijena(poruka)
 		return
@@ -276,8 +291,11 @@ func registracija_odbijena(poruka: String) -> void:
 
 func _ucitaj_statistike_sa_servera(ime: String) -> void:
 	var p: Dictionary = await ApiManager.get_player(ime)
+	if _odbijen:
+		return
 	if p.is_empty() or p.has("error"):
 		print("[SERVER] Ne mogu da učitam lik: ", ime)
+		_odbij(get_multiplayer_authority(), "Učitavanje lika nije uspelo")
 		return
 	napad_damage = int(p.get("napad_damage", napad_damage))
 
@@ -337,6 +355,9 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 # Server: lik je učitan (pozicija iz baze ili spawn za novi lik) -> postaje vidljiv ostalim klijentima.
 # Sync polja se pune odmah da spawn paket već nosi pravu poziciju.
 func _objavi_ostalima() -> void:
+	if _odbijen:
+		return
+	_objavljen = true
 	poz_sync = global_position
 	tik_sync = Engine.get_physics_frames()
 	yaw_sync = rotation.y
