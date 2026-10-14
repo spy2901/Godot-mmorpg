@@ -107,5 +107,16 @@ fi
 
 echo "logovi: $OUT"
 W=$(cat "$OUT"/igrac*.log | grep -c '^WARN ')
+# Mreža tokom testa (ping u pozadini): previše loša -> run je NEVAŽEĆ (exit 2), ne FAIL
+GUBITAK=$(grep -oE '[0-9.]+% packet loss' "$OUT/ping.log" | grep -oE '^[0-9.]+')
+RTT=$(grep -h 'round-trip' "$OUT/ping.log" | sed 's/.*= //' | cut -d/ -f2)
+RAZLOG=""
+[ -z "$GUBITAK" ] && RAZLOG="nema ping merenja"
+[ -n "$GUBITAK" ] && awk "BEGIN{exit !($GUBITAK > 2)}" && RAZLOG="gubitak ${GUBITAK}% > 2%"
+[ -n "$RTT" ] && awk "BEGIN{exit !($RTT > 300)}" && RAZLOG="${RAZLOG:+$RAZLOG, }prosečan RTT ${RTT} ms > 300 ms"
+if [ -n "$RAZLOG" ]; then
+  echo "REZULTAT: NEVAŽEĆ ($RAZLOG; provere: $F FAIL$([ "$W" != 0 ] && echo ", $W WARN"))"
+  exit 2
+fi
 [ "$F" = 0 ] && echo "REZULTAT: sve prošlo$([ "$W" != 0 ] && echo ", $W WARN")" || echo "REZULTAT: $F FAIL$([ "$W" != 0 ] && echo ", $W WARN")"
 [ "$F" = 0 ]

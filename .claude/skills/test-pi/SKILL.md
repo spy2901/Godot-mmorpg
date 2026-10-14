@@ -33,10 +33,13 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
    - `nameplate_drugog`: tuđi lik ima `Nameplate`, `ime_sync` = njegovo ime, `hp_sync` = HP iz
      njegovog HUD-a (oba stižu od servera, kroz različite kanale); sopstveni lik nema nameplate.
    - `kretanje_server_authority` (igrac1): 1 s W → server pomeren ~5 m, predikcija = server posle stajanja.
+     Meri se kad server potvrdi poslednji unos sa W (prazan/noviji prediction buffer), ne posle fiksnog vremena.
    - `drugi_vidi_kretanje` (igrac2): tuđi lik se pomerio koliko je server javio.
    - screenshot `$OUT/pi_igrac1.png`: igrac1 se okrene ka drugom igraču pa snimi.
    - `WARN igracN:greska_predikcije` kad je najveća greška predikcije > 1 m (`GRESKA_WARN_M`), npr. snap
      pri prijavi kad se izgubi reset; WARN ne obara rezultat.
+   Za vreme klijenata ide `ping -i 0.2` (`$OUT/ping.log`). Gubitak > 2% ili prosečan RTT > 300 ms →
+   `REZULTAT: NEVAŽEĆ (razlog)` i exit 2 (ne FAIL): mreža je preloša da bi provere kretanja bile merodavne.
    Zatim: `pi_journal_bez_gresaka` (journal od restarta, bez linija sa "key") i `tajne_van_logova`
    (nijedna lozinka u `$OUT/**/*.log`).
 

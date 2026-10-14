@@ -165,11 +165,16 @@ func _scenario() -> void:
 		Input.action_press("ui_up")
 		await create_timer(1.0).timeout
 		Input.action_release("ui_up")
-		await create_timer(0.7).timeout
+		# čekaj da server potvrdi poslednji unos sa W (seq u stanju >= seq pri puštanju), ne fiksno vreme:
+		# pri RTT od par stotina ms unosi još nisu obrađeni posle 0,7 s
+		var poslednji: int = p._seq
+		var t_pusten := Time.get_ticks_msec()
+		var potvrdjen: bool = await _cekaj(func(): return p._buffer.is_empty() or p._buffer[0][0] > poslednji, 10.0)
+		await create_timer(0.1).timeout # stanje posle potvrde primenjeno u physics tick-u
 		var hod: float = p.server_poz.distance_to(pre)
 		var razlika: float = p.global_position.distance_to(p.server_poz)
-		_provera("kretanje_server_authority", hod > 3.0 and hod < 7.0 and razlika < 0.1,
-			"server pomeren %.2f m za 1 s (očekivano ~5), predikcija-server %.3f m, korekcije %d/%d, greška max %.3f m" % [hod, razlika, p.korekcije_glatke, p.korekcije_snap, p.greska_max])
+		_provera("kretanje_server_authority", potvrdjen and hod > 3.0 and hod < 7.0 and razlika < 0.1,
+			"server pomeren %.2f m za 1 s (očekivano ~5), predikcija-server %.3f m, korekcije %d/%d, greška max %.3f m, potvrda poslednjeg unosa posle %s ms" % [hod, razlika, p.korekcije_glatke, p.korekcije_snap, p.greska_max, str(Time.get_ticks_msec() - t_pusten) if potvrdjen else "nije stigla (10 s)"])
 		_pisi("igrac1_pomeren", "%f" % hod)
 	else:
 		await _cekaj(func(): return _citaj("igrac1_spreman") != "", 30.0)
