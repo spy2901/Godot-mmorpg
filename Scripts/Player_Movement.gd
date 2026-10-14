@@ -16,7 +16,7 @@ const SMOOTH_TIME := 0.1    # s: trajanje glatke korekcije modela i kamere
 const INTERP_DELAY := 0.1   # s: tuđi likovi se crtaju ovoliko u prošlosti
 const MAX_EKSTRAPOLACIJA := 0.25 # s: posle poslednjeg snimka tuđi lik staje
 const MAX_BUFFER := 120     # nepotvrđenih unosa na klijentu
-const UNOSA_PO_PAKETU := 3  # redundansa: svaki paket nosi poslednja 3 unosa
+const UNOSA_NEPOTVRDJENIH_MAX := 32 # redundansa: paket nosi sve unose koje server nije potvrdio (seq u stanju), najviše 32
 const UNOS_RATE := 1.2      # server: najviše 1.2 * physics_ticks_per_second unosa/s (token bucket)
 const UNOS_BURST := 10.0    # server: kapacitet kofe
 # server: red unosa koji čekaju token. Rafal posle zastoja (servera ili klijenta) se zakasni umesto
@@ -49,7 +49,7 @@ var test_izgubljeno_paketa := 0
 var paket_bajtova := 0 # klijent: veličina poslednjeg paketa unosa (var_to_bytes, približno RPC payload)
 var test_zadrzi := false # test: klijent pravi unose ali ih ne šalje; kad se pusti, šalje ih u rafalu
 var _poslato_do := 0     # klijent: najveći seq koji je otišao u nekom paketu
-var _za_slanje: Array = [] # klijent: poslednjih UNOSA_PO_PAKETU unosa za slanje; reset ga NE briše
+var _za_slanje: Array = [] # klijent: nepotvrđeni unosi za slanje (najviše UNOSA_NEPOTVRDJENIH_MAX); reset ga NE briše
 # (inače unosi koji su bili na putu u trenutku reset-a ostanu bez redundanse i jedan izgubljen paket = rupa)
 var test_izgubi_posle_reseta := false # test: paketi kasne 1 tick, a onaj na putu kad stigne reset se izgubi
 var test_izgubljen_paket := false     # test: hook je zaista izgubio paket
@@ -955,7 +955,7 @@ func _klijent_korak(dt: float) -> void:
 		simuliraj_korak(u, dt)
 		_buffer.append(u)
 		_za_slanje.append(u)
-	while _za_slanje.size() > UNOSA_PO_PAKETU:
+	while _za_slanje.size() > UNOSA_NEPOTVRDJENIH_MAX:
 		_za_slanje.pop_front()
 	while _buffer.size() > MAX_BUFFER:
 		_buffer.pop_front()
@@ -1018,6 +1018,8 @@ func test_ubaci_zakasneli_reset() -> bool:
 # Reconciliation: serversko stanje + ponovo odigrani nepotvrđeni unosi, pa poređenje sa predikcijom.
 func _uskladi(s: Array, dt: float) -> void:
 	var seq: int = s[0]
+	while not _za_slanje.is_empty() and _za_slanje[0][0] <= seq: # server potvrdio: više se ne šalje
+		_za_slanje.pop_front()
 	if s[3] > _reset_id_prim or not _inicijalizovan:
 		if _debug_seq:
 			print("[SEQ-K] reset id %d: ack=%d moj_seq=%d buffer=%d inicijalizovan=%s" % [s[3], seq, _seq, _buffer.size(), _inicijalizovan])
@@ -1128,7 +1130,7 @@ func posalji_unos(unosi: Array) -> void:
 			print("[SEQ-P] t=%d peer %s novih=%d" % [sad, name, najveci - _dbg_max_vidjen])
 			_dbg_max_vidjen = najveci
 	var zadnji: int = _red[-1][0] if not _red.is_empty() else _poslednji_seq
-	for sirov in unosi.slice(0, UNOSA_PO_PAKETU):
+	for sirov in unosi.slice(0, UNOSA_NEPOTVRDJENIH_MAX): # duplikati (seq <= zadnji) se preskaču ispod
 		var u := _validan_unos(sirov)
 		if u.is_empty() or u[4] != _reset_id:
 			continue # neispravan ili iz epohe pre poslednjeg reset-a (klijent ga još nije primenio): bez rupe
