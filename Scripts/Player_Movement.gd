@@ -1018,10 +1018,6 @@ func _input(event):
 			if _kamera_poz.z > 0.1:
 				$CharacterMain.visible = true
 
-		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			if moze_napasti and not mrtav:
-				napadni()
-
 	if event is InputEventMouseMotion and rotacija_misa:
 		rotate_y(deg_to_rad(-event.relative.x * mouse_sensitivity))
 		kamera.rotate_x(deg_to_rad(-event.relative.y * mouse_sensitivity))
@@ -1044,13 +1040,18 @@ func neprijatelj_po_id(id: String) -> Node:
 			return e
 	return null
 
-# Levi klik u sceni bira neprijatelja pod mišem ili skida cilj (klik na prazno); klik preko UI-ja ovde ne stiže
-# (UI ga potroši). Esc skida cilj. Postojeći napad na levi klik je u _input i ne zavisi od ovoga.
+# Levi klik u sceni napada (kao i ranije) i bira neprijatelja pod mišem ili skida cilj (klik na prazno). Klik preko
+# UI-ja ovde ne stiže (UI ga potroši), pa ni ne napada. Esc skida cilj; otvoren dijalog/trgovac ga potroši pre ovoga.
 func _unhandled_input(event: InputEvent) -> void:
-	if not multiplayer.has_multiplayer_peer() or not is_multiplayer_authority():
+	if not is_multiplayer_authority():
+		return
+	var klik: bool = event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed
+	if klik and moze_napasti and not mrtav:
+		napadni() # radi i bez mreže, kao ranije iz _input
+	if not multiplayer.has_multiplayer_peer():
 		return
 	var id := cilj_id
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+	if klik:
 		id = _neprijatelj_pod_misem(event.position)
 	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 		id = ""
