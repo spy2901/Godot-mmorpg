@@ -225,22 +225,3 @@ func napadni_igraca():
 
 	await get_tree().create_timer(napad_cooldown).timeout
 	moze_napasti = true
-
-@rpc("any_peer")
-func zahtevaj_napad() -> void:
-	if not multiplayer.is_server():
-		return
-	var napadac_id = multiplayer.get_remote_sender_id()
-	var napadac = _nadji_igraca_po_id(napadac_id)
-	if napadac == null:
-		print("[HIT] Napadač nije pronađen, ID: ", napadac_id)
-		return
-	if napadac.mrtav:
-		return  # mrtav igrač ne napada
-	var distanca = global_position.distance_to(napadac.global_position)
-	print("[HIT] ", ime, " napadnut od ", napadac_id, ", distanca: ", snappedf(distanca, 0.01))
-	if distanca > 3.5:
-		print("[HIT] Predaleko, odbijeno")
-		return
-	# damage računa server: baza lika + bonus oružja
-	primi_damage(napadac.izracunaj_damage(), napadac_id)

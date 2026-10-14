@@ -108,7 +108,9 @@ var _sat_pomak := 0.0        # lokalno vreme - serversko vreme (usrednjeno)
 var napad_damage = 25  # na serveru: učitano iz baze preko registruj_lik
 var bonus_oruzja = 0   # na serveru: damage iz items.damage za opremljeno oružje
 var napad_cooldown = 1.0
-var moze_napasti = true
+const DOMET_NAPADA := 3.5  # m, od SERVER pozicije igrača do cilja
+var _napad_spreman_ms := 0 # server: od kada sme sledeći napad
+signal napad_odgovor(odgovor: Dictionary) # klijent: odgovor servera na napad
 var ime_lika := ""      # samo na serveru
 
 #CAMERA
@@ -202,28 +204,43 @@ func _ready():
 func izracunaj_damage() -> int:
 	return napad_damage + bonus_oruzja
 
-func napadni():
-	if mrtav:
+# Klijent: jedan pritisak = jedan zahtev. Metu, domet, cooldown i štetu određuje server.
+func napadni() -> void:
+	if multiplayer.is_server():
+		zatrazi_napad()
+	else:
+		zatrazi_napad.rpc_id(1)
+
+@rpc("any_peer", "reliable")
+func zatrazi_napad() -> void:
+	if not multiplayer.is_server() or not _posiljalac_je_vlasnik():
 		return
-	moze_napasti = false
-	print("Napadaš za ", izracunaj_damage(), " damage!")
+	_odgovori(odgovor_napad, _napadni_cilj())
 
-	var neprijatelji = get_tree().get_nodes_in_group("neprijatelj")
-	for neprijatelj in neprijatelji:
-		var distanca = global_position.distance_to(neprijatelj.global_position)
-		if distanca < 3.0:
-			if multiplayer.multiplayer_peer != null:
-				if multiplayer.is_server():
-					# host: damage računa sam server
-					neprijatelj.primi_damage(izracunaj_damage(), multiplayer.get_unique_id())
-				else:
-					# klijent: šalje samo "napadam", server sam računa damage
-					neprijatelj.zahtevaj_napad.rpc_id(1)
-			else:
-				neprijatelj.primi_damage(izracunaj_damage())
+# Server: napad na cilj koji je server zapamtio za ovog igrača.
+func _napadni_cilj() -> Dictionary:
+	if mrtav:
+		return {"ok": false, "poruka": "Mrtav si"}
+	var e := neprijatelj_po_id(_cilj_srv) if _cilj_srv != "" else null
+	if e == null or e._mrtav:
+		return {"ok": false, "poruka": "Nema cilja"}
+	if global_position.distance_to(e.global_position) > DOMET_NAPADA:
+		return {"ok": false, "poruka": "Predaleko"}
+	var sada := Time.get_ticks_msec()
+	if sada < _napad_spreman_ms:
+		return {"ok": false, "poruka": "Još nije spremno"}
+	_napad_spreman_ms = sada + int(napad_cooldown * 1000)
+	e.primi_damage(izracunaj_damage(), get_multiplayer_authority())
+	return {"ok": true}
 
-	await get_tree().create_timer(napad_cooldown).timeout
-	moze_napasti = true
+@rpc("any_peer", "reliable")
+func odgovor_napad(d: Dictionary) -> void:
+	if not _poziv_od_servera():
+		return
+	napad_odgovor.emit(d)
+	var hud = get_tree().get_first_node_in_group("hud")
+	if hud and not d.get("ok", false):
+		hud.prikazi_poruku(str(d.get("poruka", "")))
 
 # ---------------------------------------------------------------- LIK -> SERVER
 
@@ -1040,15 +1057,16 @@ func neprijatelj_po_id(id: String) -> Node:
 			return e
 	return null
 
-# Levi klik u sceni napada (kao i ranije) i bira neprijatelja pod mišem ili skida cilj (klik na prazno). Klik preko
-# UI-ja ovde ne stiže (UI ga potroši), pa ni ne napada. Esc skida cilj; otvoren dijalog/trgovac ga potroši pre ovoga.
+# Levi klik u sceni bira neprijatelja pod mišem ili skida cilj (klik na prazno); ne napada. R napada cilj. Klik i taster
+# preko UI-ja ovde ne stižu (UI ih potroši). Esc skida cilj; otvoren dijalog/trgovac ga potroši pre ovoga.
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_multiplayer_authority():
 		return
 	var klik: bool = event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed
-	if klik and moze_napasti and not mrtav:
-		napadni() # radi i bez mreže, kao ranije iz _input
 	if not multiplayer.has_multiplayer_peer():
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_R:
+		napadni()
 		return
 	var id := cilj_id
 	if klik:
