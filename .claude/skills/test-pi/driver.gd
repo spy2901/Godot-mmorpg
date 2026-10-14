@@ -95,6 +95,42 @@ func _action_bar(p, hud) -> void:
 		"odgovor=%s overlay=%s sekundi='%s'" % [odg[1] if odg.size() > 1 else "-", overlay, cd_txt])
 	await _snimi("_cooldown")
 
+func _cilj(p) -> void:
+	var e = null
+	for n in get_nodes_in_group("neprijatelj"):
+		var d: float = n.global_position.distance_to(p.server_poz)
+		if not n._mrtav and d < p.MAX_DOMET_CILJA - 5.0 and (e == null or d < e.global_position.distance_to(p.server_poz)):
+			e = n
+	if e == null:
+		_provera("cilj_na_pravom_serveru", false, "nema živog neprijatelja bliže od %.0f m" % (p.MAX_DOMET_CILJA - 5.0))
+		return
+	var id := str(e.get_parent().name)
+	var kraj := Time.get_ticks_msec() + 1500
+	while Time.get_ticks_msec() < kraj and is_instance_valid(e): # okreni se ka njemu (kamera je iza lika)
+		var dv: Vector3 = e.global_position - p.global_position
+		p.rotation.y = atan2(-dv.x, -dv.z)
+		await process_frame
+	if not is_instance_valid(e):
+		_provera("cilj_na_pravom_serveru", false, "%s nestao pre klika" % id)
+		return
+	var poz: Vector2 = p.kamera.unproject_position(e.global_position)
+	for dole in [true, false]:
+		var k := InputEventMouseButton.new()
+		k.button_index = MOUSE_BUTTON_LEFT
+		k.pressed = dole
+		k.position = poz
+		k.global_position = poz
+		Input.parse_input_event(k)
+	var okvir = p.get_node("ui/OkvirCilja")
+	var izabran: bool = await _cekaj(func(): return p.cilj_id == id and okvir.okvir.visible, 5.0)
+	var hp_ok: bool = is_instance_valid(e) and okvir.hp_tekst.text == "%d / %d" % [e.hp, e.max_hp]
+	await _snimi("_cilj")
+	var tekst: String = okvir.ime.text + " " + okvir.hp_tekst.text
+	_pritisni(KEY_ESCAPE)
+	var skinut: bool = await _cekaj(func(): return p.cilj_id == "" and not okvir.okvir.visible, 5.0)
+	_provera("cilj_na_pravom_serveru", izabran and hp_ok and skinut,
+		"%s na %.1f m: izabran=%s okvir '%s' (hp ok=%s), Esc skinuo=%s" % [id, e.global_position.distance_to(p.server_poz) if is_instance_valid(e) else -1.0, izabran, tekst, hp_ok, skinut])
+
 func _pisi(ime: String, s: String) -> void:
 	var f := FileAccess.open(dir + "/" + ime, FileAccess.WRITE)
 	f.store_string(s)
@@ -247,6 +283,9 @@ func _scenario() -> void:
 			await process_frame
 		root.get_viewport().get_texture().get_image().save_png(shot)
 		print("[%s] screenshot -> %s (drugi igrač na %.1f m)" % [uloga, shot, o.global_position.distance_to(p.global_position)])
+	# 6b. ciljanje na pravom serveru (igrac1 u prozoru): najbliži živ neprijatelj u dometu, klik, okvir, screenshot, Esc
+	if shot != "" and uloga == "igrac1":
+		await _cilj(p)
 	# greška predikcije sopstvenog lika (npr. snap pri prijavi kad se izgubi reset): WARN, ne FAIL
 	if p.greska_max > GRESKA_WARN_M:
 		print("WARN %s:greska_predikcije  najveća %.3f m > %.1f m (korekcije glatke %d, snap %d)" % [uloga, p.greska_max, GRESKA_WARN_M, p.korekcije_glatke, p.korekcije_snap])

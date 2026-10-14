@@ -40,6 +40,9 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
      slot pokazuje 2) i `action_bar_cooldown` (drugi pritisak čim server potvrdi prvi: "Još nije spremno", overlay
      sa sekundama). Screenshot-ovi `$OUT/pi_igrac1_bar.png` (popunjen bar) i `$OUT/pi_igrac1_cooldown.png`.
      Posle klijenata `run.sh`: `baza_posle_action_bara` (small_health_potion u bazi 3 -> 2, `reset_stanje.py --proveri 2`).
+   - `cilj_na_pravom_serveru` (igrac1 u prozoru, posle screenshot-a): okrene se ka najbližem živom neprijatelju bližem
+     od 25 m, levi klik na njega → server potvrdi cilj, okvir pokazuje HP = replicirani hp; screenshot
+     `$OUT/pi_igrac1_cilj.png`; Esc skida cilj.
    - `WARN igracN:greska_predikcije` kad je najveća greška predikcije > 1 m (`GRESKA_WARN_M`), npr. snap
      pri prijavi kad se izgubi reset; WARN ne obara rezultat.
    Za vreme klijenata ide `ping -i 0.1` (`$OUT/ping.log`), najmanje ~100 uzoraka (posle klijenata radi do 13 s;
