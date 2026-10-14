@@ -281,7 +281,7 @@ func _observer(log: bool, d: float) -> bool:
 			if _yaw_t < 0: _yaw_t = t
 		# 1.5-3.5 s posle yaw faze mover miruje: šalji unos za TUĐI lik, server mora da ga ignoriše
 		if _yaw_t > 0 and t > _yaw_t + 1.5 and t < _yaw_t + 3.5:
-			o.posalji_unos.rpc_id(1, [[1 << 40, Vector2(1, 0), true, 0.0, o._reset_id_prim]])
+			o.posalji_unos.rpc_id(1, o._kodiraj([[1 << 40, Vector2(1, 0), true, 0.0, o._reset_id_prim]]))
 		if log: print("[O t=%.1f] tudji %s %s" % [t, o.name, _fmt(o)])
 	if (_video_drugog and o == null) or t > MAX_T:
 		_provera("observer_vidi_yaw", _video_yaw, "rotation.y = yaw_sync = PI/2 na tuđem liku")
@@ -324,7 +324,12 @@ func _mover(log: bool) -> bool:
 	if t > 18.5 and t < 20.5: p.rotation.y = -PI / 2 # ka +x, nazad
 	if t > 24.0 and t < 27.0: p.rotation.y = 0.0 # ka -z
 	if t > 28.0 and t < 30.0: p.rotation.y = PI
-	if t > 12.5 and t < 12.7: p.posalji_unos.rpc_id(1, [[p._seq + 1000, Vector2(NAN, 1), false, INF, p._reset_id_prim]])
+	if t > 12.5 and t < 12.7: # neispravni paketi: prekratak, pogrešna dužina za broj unosa, stari format (Array sa NaN)
+		var los: PackedByteArray = p._kodiraj([[p._seq + 1000, Vector2(1, 0), false, 0.0, p._reset_id_prim]])
+		p.posalji_unos.rpc_id(1, los.slice(0, 10))
+		los.encode_u8(12, 32)
+		p.posalji_unos.rpc_id(1, los)
+		p.posalji_unos.rpc_id(1, [[p._seq + 1000, Vector2(NAN, 1), false, INF, p._reset_id_prim]])
 	p.set_physics_process(not (t > 15.0 and t < 18.0)) # 15-18 s: prestaje da šalje unos dok "drži" W
 	p.test_ubrzanje = 3 if t > 24.0 and t < 27.0 else 1 # speed-hack: 3 unosa po tick-u
 	p.test_gubitak = 0.3 if t > 27.5 and t < 33.0 else 0.0
@@ -393,7 +398,7 @@ func _mover(log: bool) -> bool:
 		_provera("W_2s_napred", w1.z > 8.5 and w1.z < 11.5 and absf(w1.x) < 1.5, "delta=%s" % w1)
 		_provera("yaw_PI/2_ide_-x", w2.x < -4.0 and absf(w2.z) < 1.5, "delta=%s" % w2)
 		_provera("tudji_unos_ignorisan", c[12.0].distance_to(c[8.5]) < 0.05, "delta=%s" % (c[12.0] - c[8.5]))
-		_provera("NaN_odbacen", c[13.5].distance_to(c[12.0]) < 0.05, "delta=%s" % (c[13.5] - c[12.0]))
+		_provera("neispravan_paket_odbacen", c[13.5].distance_to(c[12.0]) < 0.05, "delta=%s" % (c[13.5] - c[12.0]))
 		var posle: float = c[16.5].distance_to(c[15.0])
 		_provera("istek_unosa_0.5s", posle < 4.5 and c[17.5].distance_to(c[16.5]) < 0.05, "posle prekida %.2f, zatim %.2f" % [posle, c[17.5].distance_to(c[16.5])])
 		var hod: float = c[21.5].distance_to(c[18.5])

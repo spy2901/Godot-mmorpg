@@ -35,7 +35,7 @@ direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazum
 8–12 s miruje, a observer za to vreme šalje `posalji_unos` za **tuđi** lik; 12.5 s šalje NaN/INF
 unos; od 14 s drži W, a 15–18 s prestaje da šalje unos. Provere:
 `na_podu`, `W_2s_napred` (~+10 z), `yaw_PI/2_ide_-x` (~-5 x), `tudji_unos_ignorisan`,
-`NaN_odbacen`, `istek_unosa_0.5s` (server ne pomera lik bez unosa: ~0.1–0.3 posle prekida, zatim 0), `observer_vidi_yaw`.
+`neispravan_paket_odbacen` (prekratak paket, pogrešna dužina, stari format sa NaN), `istek_unosa_0.5s` (server ne pomera lik bez unosa: ~0.1–0.3 posle prekida, zatim 0), `observer_vidi_yaw`.
 
 Deo B (predikcija + reconciliation), nastavak iste vremenske ose:
 - 18.5–20.5 s hod ka +x → `mirno_0_korekcija` (0 korekcija, razlika klijent/server < 0.05 m posle zaustavljanja).

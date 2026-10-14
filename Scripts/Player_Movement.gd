@@ -46,7 +46,7 @@ var test_gubitak := 0.0 # test: deo paketa koji klijent odbacuje (oba smera)
 var test_ubrzanje := 1  # test: unosa po physics tick-u (speed-hack)
 var test_izgubi_paketa := 0 # test: sledećih N paketa unosa se ne šalje (uzastopni gubitak)
 var test_izgubljeno_paketa := 0
-var paket_bajtova := 0 # klijent: veličina poslednjeg paketa unosa (var_to_bytes, približno RPC payload)
+var paket_bajtova := 0 # klijent: veličina poslednjeg kodiranog paketa unosa (payload, bez RPC zaglavlja)
 var test_zadrzi := false # test: klijent pravi unose ali ih ne šalje; kad se pusti, šalje ih u rafalu
 var _poslato_do := 0     # klijent: najveći seq koji je otišao u nekom paketu
 var _za_slanje: Array = [] # klijent: nepotvrđeni unosi za slanje (najviše UNOSA_NEPOTVRDJENIH_MAX); reset ga NE briše
@@ -96,6 +96,9 @@ var paket_razmak_max := 0     # ms, najveći razmak između dva paketa unosa ovo
 var paketa_posle_pauze := 0   # paketa posle razmaka > 100 ms
 var frame_max_ms := 0         # najduži server frame dok je lik bio u igri
 var frame_dugih := 0          # server frame-ova > 50 ms
+var paket_b_zbir := 0         # server: primljeni paketi unosa (bajtova, broj, max) za [SESIJA]
+var paket_b_br := 0
+var paket_b_max := 0
 var _dbg_max_vidjen := 0     # server (debug): najveći seq viđen u bilo kom paketu (nezavisno od obrade)
 # posmatrač
 var _snimci: Array = []      # [tik, poz, yaw]
@@ -907,7 +910,7 @@ func _physics_process(_delta):
 	var dt := 1.0 / Engine.physics_ticks_per_second
 	if multiplayer.is_server():
 		if is_multiplayer_authority():
-			posalji_unos([_novi_unos()]) # host koji igra: lokalni poziv, bez predikcije
+			posalji_unos(_kodiraj([_novi_unos()])) # host koji igra: lokalni poziv, bez predikcije
 		_server_korak(dt)
 	elif is_multiplayer_authority():
 		_klijent_korak(dt)
@@ -940,7 +943,62 @@ func _novi_unos() -> Array:
 			smer.x += 1.0
 		skok = Input.is_key_pressed(KEY_SPACE)
 	_seq += 1
-	return [_seq, smer, skok, rotation.y, _reset_id if multiplayer.is_server() else _reset_id_prim]
+	# smer i yaw se kvantizuju odmah: predikcija i server koriste istu vrednost koju paket prenosi
+	smer = Vector2(_kv8(smer.x) / 127.0, _kv8(smer.y) / 127.0)
+	return [_seq, smer, skok, _yaw_iz16(_yaw16(rotation.y)), _reset_id if multiplayer.is_server() else _reset_id_prim]
+
+# ---------------------------------------------------------------- KODIRANJE PAKETA UNOSA
+# Zaglavlje 13 B: seq prvog (s64), reset_id najnovijeg (s32), broj unosa (u8). Po unosu 6 B:
+# seq - seq0 (u8), smer x/y (s8, /127), yaw (u16, ceo krug), flag (bit 0 skok, bitovi 1-7 = reset_id0 - reset_id).
+# 32 unosa = 205 B. Kvantizovana vrednost se kodira bez gubitka, pa server dekodira isto što je klijent predvideo.
+const KOD_ZAGLAVLJE := 13
+const KOD_UNOS := 6
+
+static func _kv8(x: float) -> int:
+	return clampi(roundi(x * 127.0), -127, 127)
+
+static func _yaw16(y: float) -> int:
+	return posmod(roundi(wrapf(y, -PI, PI) / TAU * 65536.0), 65536)
+
+static func _yaw_iz16(q: int) -> float:
+	return wrapf(q * TAU / 65536.0, -PI, PI)
+
+func _kodiraj(unosi: Array) -> PackedByteArray:
+	var b := PackedByteArray()
+	if unosi.is_empty():
+		return b
+	var seq0: int = unosi[0][0]
+	var rid0: int = unosi[-1][4]
+	b.resize(KOD_ZAGLAVLJE + KOD_UNOS * unosi.size())
+	b.encode_s64(0, seq0)
+	b.encode_s32(8, rid0)
+	b.encode_u8(12, unosi.size())
+	var o := KOD_ZAGLAVLJE
+	for u in unosi:
+		b.encode_u8(o, clampi(u[0] - seq0, 0, 255))
+		b.encode_s8(o + 1, _kv8(u[1].x))
+		b.encode_s8(o + 2, _kv8(u[1].y))
+		b.encode_u16(o + 3, _yaw16(u[3]))
+		b.encode_u8(o + 5, (1 if u[2] else 0) | (clampi(rid0 - u[4], 0, 127) << 1))
+		o += KOD_UNOS
+	return b
+
+# [] = neispravan paket (pogrešan tip, dužina ili broj unosa); inače unosi kao [seq, smer, skok, yaw, reset_id]
+func _dekodiraj(b) -> Array:
+	if typeof(b) != TYPE_PACKED_BYTE_ARRAY or b.size() < KOD_ZAGLAVLJE:
+		return []
+	var n: int = b.decode_u8(12)
+	if n == 0 or n > UNOSA_NEPOTVRDJENIH_MAX or b.size() != KOD_ZAGLAVLJE + KOD_UNOS * n:
+		return []
+	var seq0: int = b.decode_s64(0)
+	var rid0: int = b.decode_s32(8)
+	var r := []
+	for i in n:
+		var o := KOD_ZAGLAVLJE + KOD_UNOS * i
+		var f: int = b.decode_u8(o + 5)
+		r.append([seq0 + b.decode_u8(o), Vector2(b.decode_s8(o + 1) / 127.0, b.decode_s8(o + 2) / 127.0),
+			f & 1 == 1, _yaw_iz16(b.decode_u16(o + 3)), rid0 - (f >> 1)])
+	return r
 
 # ---------------------------------------------------------------- KLIJENT: PREDIKCIJA
 
@@ -964,7 +1022,7 @@ func _klijent_korak(dt: float) -> void:
 	# posle test_zadrzi: zaostali unosi odjednom, svaki u paketu sa svoja 2 prethodnika (kao pravi rafal)
 	for i in _buffer.size():
 		if _buffer[i][0] > _poslato_do and _buffer[i][0] < _seq:
-			posalji_unos.rpc_id(1, _buffer.slice(maxi(0, i - 2), i + 1))
+			posalji_unos.rpc_id(1, _kodiraj(_buffer.slice(maxi(0, i - 2), i + 1)))
 	_poslato_do = _seq
 	var paket := _za_slanje.duplicate()
 	if _debug_seq and not paket.is_empty():
@@ -973,16 +1031,17 @@ func _klijent_korak(dt: float) -> void:
 		_dbg_poslato = paket[-1][0]
 	if test_izgubi_posle_reseta:
 		if _test_paket != null:
-			posalji_unos.rpc_id(1, _test_paket)
+			posalji_unos.rpc_id(1, _kodiraj(_test_paket))
 		_test_paket = paket
 		return
-	paket_bajtova = var_to_bytes(paket).size()
+	var kodiran := _kodiraj(paket)
+	paket_bajtova = kodiran.size()
 	if test_izgubi_paketa > 0:
 		test_izgubi_paketa -= 1
 		test_izgubljeno_paketa += 1
 		return
 	if randf() >= test_gubitak:
-		posalji_unos.rpc_id(1, paket)
+		posalji_unos.rpc_id(1, kodiran)
 
 # Server -> vlasnik, svaki physics tick: stanje posle obrade unosa `seq`.
 @rpc("any_peer", "unreliable_ordered")
@@ -1111,9 +1170,15 @@ func _postavi(poz: Vector3, yaw: float, delta: float) -> void:
 
 # Pozicija se nikad ne prima od klijenta, samo unosi.
 @rpc("any_peer", "unreliable_ordered")
-func posalji_unos(unosi: Array) -> void:
+func posalji_unos(paket) -> void:
 	if not multiplayer.is_server() or not _posiljalac_je_vlasnik():
 		return
+	var unosi := _dekodiraj(paket)
+	if unosi.is_empty():
+		return
+	paket_b_zbir += paket.size()
+	paket_b_br += 1
+	paket_b_max = maxi(paket_b_max, paket.size())
 	var sad := Time.get_ticks_msec()
 	if _debug_seq and _dbg_paket_ms > 0 and sad - _dbg_paket_ms > 100 and not unosi.is_empty() and typeof(unosi[0]) == TYPE_ARRAY and unosi[0].size() > 0:
 		_dbg_seq("PAUZA %d ms pre paketa (prvi seq %s, zadnji obrađen %d)" % [sad - _dbg_paket_ms, str(unosi[0][0]), _poslednji_seq])
@@ -1228,9 +1293,10 @@ func _ceka_reset() -> bool:
 # Server, uvek (bez debug flag-a): jedna linija po sesiji kad se lik ukloni (odjava ili gašenje servera)
 func _exit_tree() -> void:
 	if _je_server and get_multiplayer_authority() != 1:
-		print("[SESIJA] peer %s lik '%s': trajanje %d s, max red %d, odbijeno_red_pun %d, rupe %d (najduži niz %d, nizovi 1:%d 2:%d 3:%d 4-6:%d 7+:%d), reseta %d (paketa sa reset-om %d), paketi: max razmak %d ms (posle pauze > 100 ms: %d), server frame: max %d ms (> 50 ms: %d)" % [
+		print("[SESIJA] peer %s lik '%s': trajanje %d s, max red %d, odbijeno_red_pun %d, rupe %d (najduži niz %d, nizovi 1:%d 2:%d 3:%d 4-6:%d 7+:%d), reseta %d (paketa sa reset-om %d), paketi: max razmak %d ms (posle pauze > 100 ms: %d), server frame: max %d ms (> 50 ms: %d), paket unosa: prosek %d B, max %d B" % [
 			name, ime_lika, (Time.get_ticks_msec() - _spawn_ms) / 1000, red_max, odbijeno_red_pun, rupe_seq, rupe_najduza,
-			rupe_nizovi["1"], rupe_nizovi["2"], rupe_nizovi["3"], rupe_nizovi["4-6"], rupe_nizovi["7+"], reset_izdato, reset_paketa, paket_razmak_max, paketa_posle_pauze, frame_max_ms, frame_dugih])
+			rupe_nizovi["1"], rupe_nizovi["2"], rupe_nizovi["3"], rupe_nizovi["4-6"], rupe_nizovi["7+"], reset_izdato, reset_paketa, paket_razmak_max, paketa_posle_pauze, frame_max_ms, frame_dugih,
+			paket_b_zbir / maxi(paket_b_br, 1), paket_b_max])
 
 # Zaostatak = red koji ostaje posle obrade u tick-u (normalno 0). Debug: vrh i vreme pražnjenja.
 func _prati_red() -> void:
