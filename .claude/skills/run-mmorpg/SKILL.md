@@ -25,10 +25,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 63 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 63 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 71 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 71 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -86,9 +86,16 @@ serveru u `$OUT/cilj_server`. Klik = `InputEventMouseButton` na `kamera.unprojec
 `klik_na_prazno_brise` (pod), `esc_brise_cilj`, `udaljavanje_brise_cilj` (31 m ostaje = histereza, 33 m skida),
 `smrt_cilja_brise`; observer: `drugi_ne_vidi_cilj` (dok server drži cilj CiljLik-a, kod observera nema ni
 `cilj_id`, ni okvira, ni prstena). Svih 10 pada bez implementacije (provereno).
-`esc_zatvara_prozor_ne_cilj` (otvoren dijalog pa trgovac: Esc zatvara samo prozor, cilj ostaje) i
-`klik_preko_ui_ne_napada` (goblin_904 na 2 m: klik na action bar ne napada; kontrola: klik na pod napada). Oba su
-padala pre popravke (trgovac nije trošio Esc; napad je bio u `_input`).
+`esc_zatvara_prozor_ne_cilj` (otvoren dijalog pa trgovac: Esc zatvara samo prozor, cilj ostaje; padao pre popravke).
+
+Napad (taster **R**; desni klik drži kameru, F je `interact`). Klijent šalje samo `zatrazi_napad` bez mete; server napada
+svoj `_cilj_srv` i odgovara `odgovor_napad` (signal `napad_odgovor`, HUD poruka). Provere (CiljLik, goblin_904 na
+~2.7 m i goblin_905 na ~2.5 m, oba u dometu 3.5 m): `napad_bez_cilja` ("Nema cilja"), `klik_bira_ne_steti`,
+`klik_preko_ui_ne_napada` (klik na action bar: ni odgovor ni šteta), `napad_samo_cilj` (904 -25, 905 netaknut),
+`napad_cooldown` ("Još nije spremno"), `napad_predaleko` (904 na ~6 m), `smrt_cilja_pa_nema_cilja`, `mrtav_ne_napada`
+(server komanda `ubij_lik CiljLik`; R i klik → "Mrtav si"). Uloga `drugi` (`DrugiLik` na (-17, 1.16, -16), token
+`drugi-token`): kad CiljLik upiše `drugi_kreni`, klik u nebo + R → `drugi_ne_napada_tudji_cilj` ("Nema cilja", HP
+tuđeg cilja nepromenjen), pa upiše `drugi_gotov`. Svih 8 novih pada bez implementacije (provereno).
 
 Nameplate (observer gleda TestLik-a; server upisuje njegov "hp max mrtav" u `$OUT/server_hp`):
 `nameplate_sync_poklapa` (hp_sync/max_hp_sync/mrtav_sync/ime_sync = server), `hp_sync_prati_stetu`
