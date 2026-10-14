@@ -88,6 +88,11 @@ var _odbijeni := {}          # seq -> razlog odbijanja (debug)
 var _rupe_otvorene := {}     # seq -> ms kad je rupa nastala (debug: da li stigne kasnije)
 var _dbg_poslato := 0        # klijent (debug): najveći poslati seq
 var _dbg_paket_ms := 0       # server (debug): kad je stigao prethodni paket unosa
+# server, uvek (za [SESIJA]): da li je server zastajao ili paketi nisu stizali
+var paket_razmak_max := 0     # ms, najveći razmak između dva paketa unosa ovog peer-a
+var paketa_posle_pauze := 0   # paketa posle razmaka > 100 ms
+var frame_max_ms := 0         # najduži server frame dok je lik bio u igri
+var frame_dugih := 0          # server frame-ova > 50 ms
 var _dbg_max_vidjen := 0     # server (debug): najveći seq viđen u bilo kom paketu (nezavisno od obrade)
 # posmatrač
 var _snimci: Array = []      # [tik, poz, yaw]
@@ -516,6 +521,9 @@ func _process(delta: float) -> void:
 		else:
 			_interpoliraj(delta)
 			_proveri_daljinu_nameplate()
+	if _je_server:
+		frame_max_ms = maxi(frame_max_ms, int(delta * 1000))
+		if delta > 0.05: frame_dugih += 1
 	if _debug_seq and multiplayer.is_server() and delta > 0.1 and _je_prvi_igrac():
 		print("[SEQ-S] t=%d dugačak server frame %d ms" % [Time.get_ticks_msec(), int(delta * 1000)])
 	if not multiplayer.is_server() or not _stanje_ucitano or mrtav:
@@ -1099,6 +1107,9 @@ func posalji_unos(unosi: Array) -> void:
 	var sad := Time.get_ticks_msec()
 	if _debug_seq and _dbg_paket_ms > 0 and sad - _dbg_paket_ms > 100 and not unosi.is_empty() and typeof(unosi[0]) == TYPE_ARRAY and unosi[0].size() > 0:
 		_dbg_seq("PAUZA %d ms pre paketa (prvi seq %s, zadnji obrađen %d)" % [sad - _dbg_paket_ms, str(unosi[0][0]), _poslednji_seq])
+	if _dbg_paket_ms > 0:
+		paket_razmak_max = maxi(paket_razmak_max, sad - _dbg_paket_ms)
+		if sad - _dbg_paket_ms > 100: paketa_posle_pauze += 1
 	_dbg_paket_ms = sad
 	if _debug_seq: # novi unosi klijenta po paketu (za analizu rafala: analiza_rafala.py)
 		var najveci := _dbg_max_vidjen
@@ -1207,9 +1218,9 @@ func _ceka_reset() -> bool:
 # Server, uvek (bez debug flag-a): jedna linija po sesiji kad se lik ukloni (odjava ili gašenje servera)
 func _exit_tree() -> void:
 	if _je_server and get_multiplayer_authority() != 1:
-		print("[SESIJA] peer %s lik '%s': trajanje %d s, max red %d, odbijeno_red_pun %d, rupe %d (najduži niz %d, nizovi 1:%d 2:%d 3:%d 4-6:%d 7+:%d), reseta %d (paketa sa reset-om %d)" % [
+		print("[SESIJA] peer %s lik '%s': trajanje %d s, max red %d, odbijeno_red_pun %d, rupe %d (najduži niz %d, nizovi 1:%d 2:%d 3:%d 4-6:%d 7+:%d), reseta %d (paketa sa reset-om %d), paketi: max razmak %d ms (posle pauze > 100 ms: %d), server frame: max %d ms (> 50 ms: %d)" % [
 			name, ime_lika, (Time.get_ticks_msec() - _spawn_ms) / 1000, red_max, odbijeno_red_pun, rupe_seq, rupe_najduza,
-			rupe_nizovi["1"], rupe_nizovi["2"], rupe_nizovi["3"], rupe_nizovi["4-6"], rupe_nizovi["7+"], reset_izdato, reset_paketa])
+			rupe_nizovi["1"], rupe_nizovi["2"], rupe_nizovi["3"], rupe_nizovi["4-6"], rupe_nizovi["7+"], reset_izdato, reset_paketa, paket_razmak_max, paketa_posle_pauze, frame_max_ms, frame_dugih])
 
 # Zaostatak = red koji ostaje posle obrade u tick-u (normalno 0). Debug: vrh i vreme pražnjenja.
 func _prati_red() -> void:
