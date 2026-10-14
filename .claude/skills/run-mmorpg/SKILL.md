@@ -151,6 +151,13 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
 - **Server obrađuje unose kako stignu** (više u jednom tick-u posle rafala), pa bi interpolacija
   tuđeg lika pokazala >2x brzinu; `_postavi` ograničava prikaz na 2x brzinu hoda.
 
+- **Server radi bez `server_relay`** (`NetworkManager.hostuj`). Sa relay-em Godot pri odlasku peer-a A
+  šalje `DEL_PEER` ostalima (kanal 0) pre nego što ENet ukloni peer-a B koji je otišao u istom paketu
+  → `Unable to send packet on channel 0, max channels: 0` u journal-u (dva klijenta izađu zajedno).
+  Posledica: **klijenti više ne dobijaju `peer_connected`/`peer_disconnected` za druge klijente**, a
+  `multiplayer.get_peers()` na klijentu vraća samo `[1]`. Tuđi likovi i dalje stižu preko
+  `MultiplayerSpawner`-a. Sve što ide od klijenta ka klijentu (chat, party, trgovina) mora da ide
+  preko servera (`rpc_id(1, ...)` pa server prosleđuje), ne `rpc()` sa klijenta.
 - **`ERROR: Condition "!pinfo.recv_nodes.has(net_id)"` na klijentima** kad se `potion` klijent odjavi:
   Godot poruka pri despawn-u tuđeg lika, ne utiče na provere.
 
