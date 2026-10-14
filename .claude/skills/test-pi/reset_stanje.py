@@ -3,7 +3,8 @@
 #   - small_health_potion tačno CILJ_NAPITAKA komada (POST /players/{ime}/inventory/change, delta);
 #   - ostali predmeti i equipment se NE diraju (ostali predmeti samo upozorenje).
 # --proveri N: samo ispiši i proveri broj small_health_potion za TEST_USER_1 (posle testa action bara).
-# Ključ i lozinke se nikad ne ispisuju; ispis je ime lika, pozicija, HP i broj napitaka.
+# Ključ i lozinke se nikad ne ispisuju; ispis je ime lika, pozicija, HP, broj napitaka i stanje action bara
+# (null / popunjen / nema polja = backend pre migracije 005), bez sadržaja rasporeda.
 import json, os, sys, urllib.request
 
 NAPITAK = "small_health_potion"
@@ -24,6 +25,9 @@ def zahtev(put, telo=None):
 
 def broj(lik, item_id):
     return sum(int(e.get("kolicina", 1)) for e in lik.get("inventory", []) if e.get("id") == item_id)
+
+def action_bar(lik):
+    return "nema polja" if "action_bar" not in lik else "null" if lik["action_bar"] is None else "popunjen"
 
 def proveri_ime(ime):
     if not ime.startswith("agent_test"):
@@ -63,4 +67,4 @@ for ime, (x, y, z) in POZICIJE.items():
             or int(posle["hp"]) != min(HP_POCETNO, int(posle["max_hp"])) or broj(posle, NAPITAK) != CILJ_NAPITAKA \
             or (posle["mana"], posle["equipment"]) != (lik["mana"], lik["equipment"]):
         sys.exit(f"{ime}: upis nije potvrđen")
-    print(f"   {ime}: ({lik['pos_x']:.2f}, {lik['pos_y']:.2f}, {lik['pos_z']:.2f}) -> ({x}, {y}, {z}), hp {lik['hp']} -> {posle['hp']}, {NAPITAK} {n0} -> {broj(posle, NAPITAK)}")
+    print(f"   {ime}: ({lik['pos_x']:.2f}, {lik['pos_y']:.2f}, {lik['pos_z']:.2f}) -> ({x}, {y}, {z}), hp {lik['hp']} -> {posle['hp']}, {NAPITAK} {n0} -> {broj(posle, NAPITAK)}, action_bar {action_bar(posle)}")
