@@ -1066,6 +1066,26 @@ func _cilj_scenario(p) -> void:
 	await _cekaj(func(): return cilj.call() == "" and _cilj_srv()[0] == "", 3.0)
 	_provera("esc_brise_cilj", pre_esc == "goblin_901" and cilj.call() == "" and _cilj_srv()[0] == "", "pre '%s', posle klijent '%s' server '%s'" % [pre_esc, cilj.call(), _cilj_srv()[0]])
 
+	# 7b. Esc sa otvorenim dijalogom pa trgovcem: zatvara samo prozor, cilj ostaje (bez prozora: esc_brise_cilj)
+	_klikni_neprijatelja(p, "goblin_901")
+	await _cekaj(func(): return cilj.call() == "goblin_901" and _cilj_srv()[0] == "goblin_901", 3.0)
+	var dijalog = root.get_node("DialogueUI")
+	var trgovac = root.get_node("MerchantUI")
+	dijalog.open("Test NPC", ["Test"])
+	await process_frame
+	var dijalog_otvoren: bool = dijalog.is_open()
+	_pritisni(KEY_ESCAPE)
+	await create_timer(0.5).timeout
+	var posle_dijaloga := [dijalog.is_open(), cilj.call(), _cilj_srv()[0]]
+	trgovac.open("Test Trgovac")
+	await process_frame
+	var trgovac_otvoren: bool = trgovac.visible
+	_pritisni(KEY_ESCAPE)
+	await create_timer(0.5).timeout
+	_provera("esc_zatvara_prozor_ne_cilj", dijalog_otvoren and not posle_dijaloga[0] and posle_dijaloga[1] == "goblin_901" and posle_dijaloga[2] == "goblin_901" \
+		and trgovac_otvoren and not trgovac.visible and cilj.call() == "goblin_901" and _cilj_srv()[0] == "goblin_901",
+		"dijalog %s->%s cilj '%s'/'%s'; trgovac %s->%s cilj '%s'/'%s' (klijent/server)" % [dijalog_otvoren, posle_dijaloga[0], posle_dijaloga[1], posle_dijaloga[2], trgovac_otvoren, trgovac.visible, cilj.call(), _cilj_srv()[0]])
+
 	# 8. udaljavanje: 31 m ostaje (histereza), 33 m skida
 	_klikni_neprijatelja(p, "goblin_901")
 	await _cekaj(func(): return cilj.call() == "goblin_901" and _cilj_srv()[0] == "goblin_901", 3.0)
@@ -1088,4 +1108,24 @@ func _cilj_scenario(p) -> void:
 	await _cekaj(func(): return cilj.call() == "" and _cilj_srv()[0] == "", 3.0)
 	_provera("smrt_cilja_brise", ima and pre_smrti == "goblin_901" and cilj.call() == "" and _cilj_srv()[0] == "" and not okvir_vidljiv.call(),
 		"pre '%s', posle klijent '%s' server '%s' okvir=%s" % [pre_smrti, cilj.call(), _cilj_srv()[0], okvir_vidljiv.call()])
+
+	# 10. napad levim klikom ne važi preko UI-ja; kontrola: klik na pod napada (goblin 2 m pored, domet napada 3 m)
+	await _cilj_komanda("spawn goblin_904 -18 -20")
+	await _cekaj(func(): return _nep("goblin_904") != null, 5.0)
+	await create_timer(2.0).timeout # pad na pod; istekne cooldown napada od ranijih klikova
+	var g = _nep("goblin_904")
+	_klik(bar.get_child(0).get_global_rect().get_center())
+	await process_frame # događaj se obrađuje u sledećem frame-u
+	await process_frame
+	var napao_ui: bool = not p.moze_napasti # napadni() ga odmah spušta
+	await create_timer(1.5).timeout
+	var hp_ui: int = g.hp if is_instance_valid(g) else -1
+	_klik(p.kamera.unproject_position(Vector3(-23, 1.1, -14)))
+	await process_frame
+	await process_frame
+	var napao_pod: bool = not p.moze_napasti
+	await _cekaj(func(): return not is_instance_valid(g) or g.hp < hp_ui, 3.0)
+	var hp_pod: int = g.hp if is_instance_valid(g) else 0 # 0 = ubijen i despawn-ovan
+	_provera("klik_preko_ui_ne_napada", not napao_ui and hp_ui == 50 and napao_pod and hp_pod < 50,
+		"klik na action bar: napad=%s hp=%d; kontrola klik na pod: napad=%s hp=%d" % [napao_ui, hp_ui, napao_pod, hp_pod])
 	_cilj_kraj = true
