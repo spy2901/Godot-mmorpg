@@ -170,10 +170,16 @@ func _ready():
 	# Node pripada vlasniku (RPC-ovi); poz_sync/yaw_sync šalje server ostalima.
 	# position se NE replicira: vlasnikovu poziciju menjaju samo predikcija i reconciliation.
 	$MultiplayerSynchronizer.set_multiplayer_authority(1)
+	if _je_server:
+		# Ostali klijenti ne dobijaju lika (ni spawn: vidljivost sinhronizatora važi i za spawn) dok se
+		# ne učita iz baze, inače ga vide na spawn tački pa skok. Vlasnik ga dobija odmah (šalje unose).
+		$MultiplayerSynchronizer.public_visibility = false
+		$MultiplayerSynchronizer.set_visibility_for(get_multiplayer_authority(), true)
 	# Server je autoritet za sve likove; vlasnik predviđa svoj lik i šalje unose
 	set_physics_process(multiplayer.is_server() or is_multiplayer_authority())
 	if not multiplayer.is_server() and not is_multiplayer_authority():
 		_napravi_nameplate()
+		hide() # tuđi lik: skriven do prvog snimka sa servera (spawn_function ga stavlja na nasumičan spawn)
 	if not is_multiplayer_authority():
 		set_process_unhandled_input(false)
 		kamera.current = false
@@ -321,11 +327,20 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 		podaci["pos_x"] = pos.x
 		podaci["pos_y"] = pos.y
 		podaci["pos_z"] = pos.z
+	_objavi_ostalima()
 	var vlasnik := get_multiplayer_authority()
 	if vlasnik == multiplayer.get_unique_id():
 		primi_lik(podaci)
 	else:
 		primi_lik.rpc_id(vlasnik, podaci)
+
+# Server: lik je učitan (pozicija iz baze ili spawn za novi lik) -> postaje vidljiv ostalim klijentima.
+# Sync polja se pune odmah da spawn paket već nosi pravu poziciju.
+func _objavi_ostalima() -> void:
+	poz_sync = global_position
+	tik_sync = Engine.get_physics_frames()
+	yaw_sync = rotation.y
+	$MultiplayerSynchronizer.public_visibility = true
 
 # ---------------------------------------------------------------- SNIMANJE (server)
 
@@ -1022,6 +1037,9 @@ func _interpoliraj(delta: float) -> void:
 		_sat_pomak = uzorak if _snimci.is_empty() else lerpf(_sat_pomak, uzorak, 0.02)
 		if not _snimci.is_empty() and _snimci[-1][1].distance_to(poz_sync) > PRAG_SNAP:
 			_snimci.clear() # teleport/respawn: snap, bez klizanja preko mape
+		if _snimci.is_empty() and not visible: # prvi snimak: odmah na poziciju sa servera, pa prikaži
+			global_position = poz_sync
+			show()
 		_snimci.append([tik_sync, poz_sync, yaw_sync])
 	if _snimci.is_empty():
 		return
