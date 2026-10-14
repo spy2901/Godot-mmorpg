@@ -66,8 +66,8 @@ done
 [ $ok = 1 ] && echo "PASS game_server_slusa  $TEST_GAME_HOST:$TEST_GAME_PORT" || pad "game_server_slusa"
 
 # ---------------------------------------------------------------- 3b. fiksna početna pozicija (pre prijave)
-python3 .claude/skills/test-pi/reset_pozicija.py || pad "reset_pozicije"
-echo "PASS reset_pozicije"
+python3 .claude/skills/test-pi/reset_stanje.py || pad "reset_stanja"
+echo "PASS reset_stanja  (pozicija, HP 60, small_health_potion 3)"
 
 # ---------------------------------------------------------------- 4. dva prava klijenta
 echo "== 4/4 dva klijenta protiv Pi-ja"
@@ -94,6 +94,11 @@ echo "PING za vreme testa: $(grep -h 'packet loss' "$OUT/ping.log" | sed 's/^ */
 grep -h '^PASS\|^FAIL\|^WARN \|screenshot' "$OUT"/igrac1.log "$OUT"/igrac2.log
 grep -h 'SCRIPT ERROR' "$OUT"/igrac*.log | sort | uniq -c
 F=$(grep -h '^FAIL' "$OUT"/igrac*.log | wc -l | tr -d ' ')
+# action bar (igrac1 pritisnuo 1 pa 1 u cooldown-u): u bazi 3 -> 2; klijent nema server key, pa proverava run.sh
+if [ -f "$OUT/igrac1_bar" ]; then
+  if B=$(python3 .claude/skills/test-pi/reset_stanje.py --proveri 2); then echo "PASS baza_posle_action_bara  $B"
+  else echo "FAIL baza_posle_action_bara  $B"; F=$((F + 1)); fi
+fi
 # journal na Pi-ju od restarta (linije sa ključem se ne prikazuju)
 ssh "$PI" "journalctl -u mmorpg-game --since '$SINCE' --no-pager" | grep -iv 'key' > "$OUT/pi-journal.log"
 if grep -q 'ERROR' "$OUT/pi-journal.log"; then
