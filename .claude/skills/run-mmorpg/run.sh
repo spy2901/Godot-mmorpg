@@ -9,7 +9,7 @@ G="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 D=res://.claude/skills/run-mmorpg/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/run-mmorpg}"
 echo "load average: $(sysctl -n vm.loadavg 2>/dev/null || cut -d' ' -f1-3 /proc/loadavg)"
-mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt "$OUT"/visi_id
+mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt "$OUT"/visi_id "$OUT"/izgubljeno_*
 PORT="${STUB_PORT:-18765}"
 API="--server-url=http://127.0.0.1:$PORT"
 
@@ -86,5 +86,5 @@ if [ -z "${RUN_PONOVLJEN:-}" ] && grep -qh '^FAIL seq_bez_rupa_bez_gubitka' "$OU
   kill $STUB 2>/dev/null; wait $STUB 2>/dev/null # port mora biti slobodan za novi stub
   RUN_PONOVLJEN=1 exec "$SKRIPTA" "$@"
 fi
-# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 40
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 40 ]
+# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 42
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 42 ]

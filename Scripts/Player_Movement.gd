@@ -44,6 +44,9 @@ var greska_suma := 0.0
 var greska_n := 0
 var test_gubitak := 0.0 # test: deo paketa koji klijent odbacuje (oba smera)
 var test_ubrzanje := 1  # test: unosa po physics tick-u (speed-hack)
+var test_izgubi_paketa := 0 # test: sledećih N paketa unosa se ne šalje (uzastopni gubitak)
+var test_izgubljeno_paketa := 0
+var paket_bajtova := 0 # klijent: veličina poslednjeg paketa unosa (var_to_bytes, približno RPC payload)
 var test_zadrzi := false # test: klijent pravi unose ali ih ne šalje; kad se pusti, šalje ih u rafalu
 var _poslato_do := 0     # klijent: najveći seq koji je otišao u nekom paketu
 var _za_slanje: Array = [] # klijent: poslednjih UNOSA_PO_PAKETU unosa za slanje; reset ga NE briše
@@ -972,6 +975,11 @@ func _klijent_korak(dt: float) -> void:
 		if _test_paket != null:
 			posalji_unos.rpc_id(1, _test_paket)
 		_test_paket = paket
+		return
+	paket_bajtova = var_to_bytes(paket).size()
+	if test_izgubi_paketa > 0:
+		test_izgubi_paketa -= 1
+		test_izgubljeno_paketa += 1
 		return
 	if randf() >= test_gubitak:
 		posalji_unos.rpc_id(1, paket)

@@ -71,6 +71,7 @@ var _slikano := false
 var _video_yaw := false # observer: video tuđi yaw_sync ~ PI/2
 var _yaw_t := -1.0      # observer: kad je prvi put video yaw
 var _video_drugog := false
+var _paket_vel := {} # mover: kategorija -> [zbir bajtova, broj, max]
 var _t0 := -1.0         # mover: početak vremenske ose (lik stao na pod)
 var _spawn = null       # mover: [vreme, pozicija] pojave lika (za ispis kad na_podu padne)
 const PODLOGA_TIMEOUT := 5.0
@@ -222,6 +223,12 @@ func _server(log: bool) -> bool:
 		_provera("nameplate_nema_na_serveru", not _nameplate_na_serveru, "")
 		_provera("rafal_bez_rupa", _faza_rupe.get("rafal", 0) == 0 and _rafal_vrh > 10 and _rafal_ms >= 0 and _rafal_ms <= RAFAL_PRAZNJENJE_MAX_MS,
 			"rupe=%d, vrh reda %d, ispražnjen za %d ms (dozvoljeno %d)" % [_faza_rupe.get("rafal", 0), _rafal_vrh, _rafal_ms, RAFAL_PRAZNJENJE_MAX_MS])
+		for n in [8, 20]:
+			var izg := ""
+			for fajl in DirAccess.get_files_at(dir):
+				if fajl.begins_with("izgubljeno_%d_" % n): izg = fajl.get_slice("_", 2)
+			_provera("gubitak_%d_paketa_bez_rupa" % n, izg == str(n) and _faza_rupe.get("gubitak%d" % n, 0) == 0,
+				"izgubljeno uzastopno %s paketa, rupe u fazi %d" % [izg if izg != "" else "-", _faza_rupe.get("gubitak%d" % n, 0)])
 		_provera("reset_bez_rupa", _resetovan and _faza_rupe.get("reset", 0) == 0, "reset izveden=%s, rupe u fazi reset=%d" % [_resetovan, _faza_rupe.get("reset", 0)])
 		_provera("red_pun_odbacuje", _mover_odbijeno > 0 and _mover_red_max <= _red_max_dozvoljen,
 			"odbačeno (pun red) %d, najduži red %d / %d" % [_mover_odbijeno, _mover_red_max, _red_max_dozvoljen])
@@ -328,6 +335,15 @@ func _mover(log: bool) -> bool:
 		p.test_zakasni_reset = true # i sačuvaj kopiju reset stanja: ubacuje se ponovo pošto lik prohoda
 	if t > 41.9 and not _cp.has("zakasneli"): # duplikat reset-a pošto je lik hodao 40.6-41.6 s
 		_cp["zakasneli"] = [p.global_position, p.korekcije_glatke + p.korekcije_snap, p.test_ubaci_zakasneli_reset(), p._test_reset_kopija]
+	# uzastopni gubitak paketa unosa (8 pa 20): sa potvrđenom redundansom server ne sme da ima rupa
+	for g in [[43.3, 8], [44.5, 20]]:
+		var kljuc := "izgubi%d" % g[1]
+		if t > g[0] and not _cp.has(kljuc):
+			_cp[kljuc] = p.test_izgubljeno_paketa
+			p.test_izgubi_paketa = g[1]
+		elif _cp.has(kljuc) and not _cp.has(kljuc + "_gotovo") and p.test_izgubi_paketa == 0:
+			_cp[kljuc + "_gotovo"] = true
+			_marker("izgubljeno_%d_%d" % [g[1], p.test_izgubljeno_paketa - _cp[kljuc]])
 	if t > 42.5 and not _cp.has("zakasneli_posle"):
 		_cp["zakasneli_posle"] = [p.global_position, p.korekcije_glatke + p.korekcije_snap]
 	var faza := "normal"
@@ -336,6 +352,8 @@ func _mover(log: bool) -> bool:
 	elif t > 27.5 and t < 33.5: faza = "gubitak"
 	elif t > 33.8 and t < 38.0: faza = "rafal"
 	elif t > 38.5 and t < 40.5: faza = "reset"
+	elif t > 43.0 and t < 44.2: faza = "gubitak8"
+	elif t > 44.2 and t < 46.0: faza = "gubitak20"
 	_upisi_fazu(faza, p.name)
 	if shot != "" and not _slikano and t > 6.7: # u mirovanju: snimanje koči frame
 		_slikano = true
@@ -352,7 +370,13 @@ func _mover(log: bool) -> bool:
 					if o != p: d.append("%s %.2f m" % [o.ime_sync if o.ime_sync != "" else str(o.name), o.global_position.distance_to(p.global_position)])
 				_cp["podloga"] = [p.is_on_floor(), d]
 	if log: print("[M t=%.1f] moj %s server=%s kor=%d/%d" % [t, _fmt(p), p.server_poz, p.korekcije_glatke, p.korekcije_snap])
-	if t > 43.0:
+	var kat := "gubitak" if faza.begins_with("gubitak") else ("normal" if faza == "normal" else "")
+	if kat != "" and p.paket_bajtova > 0: # veličina paketa unosa po kategoriji: [zbir, broj, max]
+		var v: Array = _paket_vel.get(kat, [0, 0, 0])
+		_paket_vel[kat] = [v[0] + p.paket_bajtova, v[1] + 1, maxi(v[2], p.paket_bajtova)]
+	if t > 47.0:
+		for k in _paket_vel:
+			print("[M] paket unosa (%s): prosek %d B, max %d B, uzoraka %d" % [k, _paket_vel[k][0] / _paket_vel[k][1], _paket_vel[k][2], _paket_vel[k][1]])
 		var z: Array = _cp["zakasneli"]
 		var zp: Array = _cp["zakasneli_posle"]
 		var kopija = z[3]
