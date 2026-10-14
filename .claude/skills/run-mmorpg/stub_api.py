@@ -61,8 +61,10 @@ PLAYERS["RasporedLik"] = dict(PLAYERS["TestLik"], ime="RasporedLik", pos_x=-6, p
     {"slot": 2, "id": "apple", "kolicina": 1},
     {"slot": 3, "id": "mana_potion", "kolicina": 1},
 ])
+# CiljLik: ciljanje (uloga cilj), u uglu mape da test neprijatelji ne smetaju ostalima
+PLAYERS["CiljLik"] = dict(PLAYERS["TestLik"], ime="CiljLik", pos_x=-20, pos_y=1.16, pos_z=-20, inventory=[])
 TOKENI = {"potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
-          "raspored-token": "RasporedLik"}
+          "raspored-token": "RasporedLik", "cilj-token": "CiljLik"}
 LOCK = threading.Lock()
 
 

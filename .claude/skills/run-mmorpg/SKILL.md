@@ -25,10 +25,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 51 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 51 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 61 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 61 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `raspored1.log`, `raspored2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -76,6 +76,16 @@ baza i bar nepromenjeni), apple potrošen, kupljen medium → `novi_predmet_prvi
 premeštanjem, ne 4). Korak 2: `raspored_prezivi_prijavu` (isti raspored iz baze) i `potroseni_ne_pomera_slotove`
 (apple u slotu 2 sa 0, mana u 7). Svih 5 pada bez implementacije (provereno: stari bar posle prijave pomeri manu u slot 2).
 Stub: `POST /players/{ime}/action_bar` (10 slotova, predmeti postoje) i `POST /players/{ime}/shop/buy` (samo doda komad).
+
+Ciljanje (uloga `cilj`, lik `CiljLik` na (-20, 1.16, -20), okrenut ka +z; prozor drajvera 1280x720 jer je headless
+64x64 i action bar bi pokrio ceo ekran). Test neprijatelje (`goblin_9xx`, max_hp 50) pravi i menja server drajver po
+komandama iz `$OUT/cilj_cmd` (spawn, pomeri, steta, mrtav = `_mrtav` bez despawn-a, ubij) i upisuje cilj CiljLik-a po
+serveru u `$OUT/cilj_server`. Klik = `InputEventMouseButton` na `kamera.unproject_position` neprijatelja.
+`cilj_klik_bira` (klijent + server + okvir "Goblin  Lv.1" + prsten), `okvir_prati_hp` (šteta 20 → "30 / 50" = server),
+`cilj_van_dometa_odbijen` (35 m), `cilj_nepostojeci_i_mrtav_odbijen`, `klik_preko_ui_ne_menja` (klik na action bar),
+`klik_na_prazno_brise` (pod), `esc_brise_cilj`, `udaljavanje_brise_cilj` (31 m ostaje = histereza, 33 m skida),
+`smrt_cilja_brise`; observer: `drugi_ne_vidi_cilj` (dok server drži cilj CiljLik-a, kod observera nema ni
+`cilj_id`, ni okvira, ni prstena). Svih 10 pada bez implementacije (provereno).
 
 Nameplate (observer gleda TestLik-a; server upisuje njegov "hp max mrtav" u `$OUT/server_hp`):
 `nameplate_sync_poklapa` (hp_sync/max_hp_sync/mrtav_sync/ime_sync = server), `hp_sync_prati_stetu`

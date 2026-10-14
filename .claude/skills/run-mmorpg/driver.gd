@@ -130,6 +130,10 @@ func _process(d):
 			elif uloga == "visi": # verify ovog tokena u stub-u visi: server mora da ga izbaci posle UCITAVANJE_TIMEOUT
 				root.get_node("GameState").token = "visi-token"
 				root.get_node("GameState").ime_igraca = "VisiLik"
+			elif uloga == "cilj":
+				root.size = Vector2i(1280, 720) # headless prozor je 64x64: action bar bi pokrio ceo ekran i progutao klikove
+				root.get_node("GameState").token = "cilj-token"
+				root.get_node("GameState").ime_igraca = "CiljLik"
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
 				root.get_node("GameState").ime_igraca = "RasporedLik"
@@ -156,6 +160,7 @@ func _process(d):
 		"prijava": return _prijava()
 		"visi": return _visi()
 		"raspored": return _raspored()
+		"cilj": return _cilj()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -220,6 +225,7 @@ func _server(log: bool) -> bool:
 					var fh := FileAccess.open(dir + "/server_hp", FileAccess.WRITE)
 					fh.store_string(st)
 					fh.close()
+	_server_cilj()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -275,6 +281,7 @@ func _observer(log: bool, d: float) -> bool:
 		_spreman = true
 		print("OBSERVER_SPREMAN") # run.sh tek tada pokreće movera i potion klijenta
 	_observer_nameplate()
+	_observer_cilj()
 	var o = _drugi()
 	if o:
 		_video_drugog = true
@@ -313,6 +320,7 @@ func _observer(log: bool, d: float) -> bool:
 		var ml := _pojava("MoverLik")
 		_provera("novi_lik_000_se_pojavljuje", not ml.is_empty() and ml[0].distance_to(ml[1]) < POJAVA_TOLERANCIJA,
 			"MoverLik (bez pozicije u bazi) prvi put viđen na %s, server %s" % [ml[0] if not ml.is_empty() else "-", ml[1] if not ml.is_empty() else "-"])
+		_provera("drugi_ne_vidi_cilj", _cilj_obs_ok, _cilj_obs_detalj if _cilj_obs_detalj != "" else "CiljLik nije javio cilj (dir/cilj_postavljen)")
 		_provera("observer_korak_max_2x", _obs_kraci == 0, "prekoracenja=%d, max korak=%.2f x brzina*dt, snap-ova=%d" % [_obs_kraci, _obs_max, _obs_snap])
 		return true
 	return false
@@ -885,3 +893,199 @@ func _raspored_scenario(p, bar) -> void:
 	_provera("novi_predmet_prvi_prazan", bar.slotovi == RASPORED_KRAJ and b == RASPORED_KRAJ and bar.kolicina(1) == 0,
 		"apple=%s kupovina=%s bar=%s baza=%s" % [r.get("ok"), k.get("ok"), bar.slotovi, b])
 	_raspored_kraj = true
+
+# ---------------------------------------------------------------- CILJ (CiljLik na (-20, -20), gleda ka +z)
+# Server drajver izvršava komande iz dir/cilj_cmd ("br komanda ime [x z | n]") nad test neprijateljima
+# (goblin_9xx, max_hp 50) i upisuje cilj CiljLik-a po serveru i HP tog neprijatelja u dir/cilj_server ("id hp").
+
+var _cilj_srv_cmd := ""
+var _cilj_srv_upisan := ""
+func _server_cilj() -> void:
+	if dir == "" or _world() == null: return
+	var cmd := FileAccess.get_file_as_string(dir + "/cilj_cmd")
+	if cmd != "" and cmd != _cilj_srv_cmd:
+		_cilj_srv_cmd = cmd
+		var c := cmd.split(" ")
+		var e = null
+		for n in get_nodes_in_group("neprijatelj"):
+			if str(n.get_parent().name) == c[2]: e = n
+		match c[1]:
+			"spawn": _world().goblin_spawner.spawn({"vrsta": "goblin", "id": int(c[2].get_slice("_", 1)), "pos": Vector3(float(c[3]), 2, float(c[4]))})
+			"pomeri": e.global_position = Vector3(float(c[3]), e.global_position.y, float(c[4]))
+			"steta": e.primi_damage(int(c[3]))
+			"mrtav": e._mrtav = true # živ čvor sa oznakom smrti (između smrti i despawn-a)
+			"ubij": e.primi_damage(100000)
+		print("[S] cilj komanda: ", cmd)
+		_pisi("cilj_cmd_ok", c[0])
+	for p in _world().get_children():
+		if p.is_in_group("player") and p.ime_lika == "CiljLik":
+			var id := str(p.get("_cilj_srv")) if "_cilj_srv" in p else "-"
+			var hp := -1
+			for n in get_nodes_in_group("neprijatelj"):
+				if str(n.get_parent().name) == id: hp = n.hp
+			var st := "%s %d" % [id if id != "" else "_", hp]
+			if st != _cilj_srv_upisan:
+				_cilj_srv_upisan = st
+				_pisi("cilj_server", st)
+
+func _pisi(ime: String, s: String) -> void:
+	var f := FileAccess.open(dir + "/" + ime, FileAccess.WRITE)
+	f.store_string(s)
+	f.close()
+
+# observer: dok CiljLik ima cilj (dir/cilj_postavljen), niko drugi ga ne vidi
+var _cilj_obs_ok := false
+var _cilj_obs_detalj := ""
+func _observer_cilj() -> void:
+	if _cilj_obs_detalj != "" or dir == "" or not FileAccess.file_exists(dir + "/cilj_postavljen") or _world() == null: return
+	var id := FileAccess.get_file_as_string(dir + "/cilj_postavljen")
+	var cl = null
+	for p in _world().get_children():
+		if p.is_in_group("player") and p.get("ime_sync") == "CiljLik": cl = p
+	var ja = _moj()
+	var okvir = ja.get_node_or_null("ui/OkvirCilja") if ja else null
+	var e = null
+	for n in get_nodes_in_group("neprijatelj"):
+		if str(n.get_parent().name) == id: e = n
+	var tudji: String = str(cl.get("cilj_id")) if cl and "cilj_id" in cl else "?"
+	var moj: String = str(ja.get("cilj_id")) if ja and "cilj_id" in ja else "?"
+	var okvir_vidljiv: bool = okvir == null or okvir.okvir.visible
+	var srv: String = _cilj_srv()[0] # cilj CiljLik-a po serveru u tom trenutku
+	_cilj_obs_ok = srv == id and cl != null and tudji == "" and moj == "" and not okvir_vidljiv and e != null and not e.has_node("CiljPrsten")
+	_cilj_obs_detalj = "server: CiljLik cilj '%s'; kod observera CiljLik.cilj_id '%s', moj '%s', okvir vidljiv=%s, prsten na %s=%s" % [srv, tudji, moj, okvir_vidljiv, id, e.has_node("CiljPrsten") if e else "-"]
+	_pisi("cilj_proveren", "1")
+
+var _cilj_krenuo := false
+var _cilj_kraj := false
+var _cilj_br := 0
+
+func _cilj() -> bool:
+	var p = _moj()
+	if not _cilj_krenuo and p and p.get_node("ui/Control")._ucitano:
+		_cilj_krenuo = true
+		_cilj_scenario(p)
+	return _cilj_kraj or t > MAX_T
+
+func _cilj_komanda(c: String) -> void:
+	_cilj_br += 1
+	_pisi("cilj_cmd", "%d %s" % [_cilj_br, c])
+	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/cilj_cmd_ok") == str(_cilj_br), 5.0)
+
+func _cilj_srv() -> PackedStringArray: # [id ("" = nema), hp]
+	var f := FileAccess.get_file_as_string(dir + "/cilj_server").split(" ")
+	if f.size() != 2: return PackedStringArray(["?", "-1"])
+	return PackedStringArray(["" if f[0] == "_" else f[0], f[1]])
+
+func _nep(id: String):
+	for n in get_nodes_in_group("neprijatelj"):
+		if str(n.get_parent().name) == id: return n
+	return null
+
+func _klik(poz: Vector2) -> void:
+	for dole in [true, false]:
+		var e := InputEventMouseButton.new()
+		e.button_index = MOUSE_BUTTON_LEFT
+		e.pressed = dole
+		e.position = poz
+		e.global_position = poz
+		Input.parse_input_event(e)
+
+func _klikni_neprijatelja(p, id: String) -> void:
+	var e = _nep(id)
+	if e: _klik(p.kamera.unproject_position(e.global_position))
+
+func _cilj_scenario(p) -> void:
+	var ima: bool = "cilj_id" in p
+	var okvir = p.get_node_or_null("ui/OkvirCilja")
+	var prijema := [0] # odgovori servera (i na odbijen zahtev)
+	if p.has_signal("cilj_promenjen"): p.cilj_promenjen.connect(func(): prijema[0] += 1)
+	var cilj := func() -> String: return str(p.cilj_id) if ima else "?"
+	var okvir_vidljiv := func() -> bool: return okvir != null and okvir.okvir.visible
+	p.rotation.y = PI # gleda ka +z (yaw ide serveru sa unosima)
+	await _cilj_komanda("spawn goblin_901 -20 -12")  # 8 m ispred
+	await _cilj_komanda("spawn goblin_902 -20 15")   # 35 m: van dometa
+	await _cilj_komanda("spawn goblin_903 -15 -12")  # u dometu, kasnije označen kao mrtav
+	await _cekaj(func(): return _nep("goblin_901") != null and _nep("goblin_903") != null, 5.0)
+	await create_timer(2.0).timeout # padnu na pod, pozicija stigne klijentu
+
+	# 1. klik bira neprijatelja, server beleži cilj, okvir i prsten
+	_klikni_neprijatelja(p, "goblin_901")
+	await _cekaj(func(): return cilj.call() == "goblin_901" and _cilj_srv()[0] == "goblin_901", 3.0)
+	var e = _nep("goblin_901")
+	_provera("cilj_klik_bira", cilj.call() == "goblin_901" and _cilj_srv()[0] == "goblin_901" and okvir_vidljiv.call() \
+		and okvir.ime.text == "Goblin  Lv.1" and e != null and e.has_node("CiljPrsten"),
+		"klijent '%s', server '%s', okvir=%s '%s', prsten=%s" % [cilj.call(), _cilj_srv()[0], okvir_vidljiv.call(), okvir.ime.text if okvir else "-", e.has_node("CiljPrsten") if e else "-"])
+	# drugi igrač (observer) proverava dok je cilj postavljen
+	_pisi("cilj_postavljen", "goblin_901")
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/cilj_proveren"), 10.0)
+
+	# 2. okvir prati HP iz servera
+	await _cilj_komanda("steta goblin_901 20")
+	await _cekaj(func(): return okvir != null and okvir.hp_tekst.text == "30 / 50", 3.0)
+	var shp := int(_cilj_srv()[1])
+	_provera("okvir_prati_hp", okvir != null and shp == 30 and okvir.hp_tekst.text == "%d / 50" % shp and int(okvir.traka.value) == shp and okvir.traka.max_value == 50,
+		"server hp %d, okvir '%s' traka %s/%s" % [shp, okvir.hp_tekst.text if okvir else "-", okvir.traka.value if okvir else "-", okvir.traka.max_value if okvir else "-"])
+
+	# 3. van dometa (35 m): odbijeno, ostaje stari cilj
+	var n0: int = prijema[0]
+	if ima: p.izaberi_cilj("goblin_902")
+	await _cekaj(func(): return prijema[0] > n0, 3.0)
+	_provera("cilj_van_dometa_odbijen", ima and prijema[0] == n0 + 1 and cilj.call() == "goblin_901" and _cilj_srv()[0] == "goblin_901",
+		"odgovora %d, klijent '%s', server '%s'" % [prijema[0] - n0, cilj.call(), _cilj_srv()[0]])
+
+	# 4. nepostojeći ID i mrtav neprijatelj: odbijeno
+	await _cilj_komanda("mrtav goblin_903")
+	n0 = prijema[0]
+	if ima:
+		p.izaberi_cilj("nema_99")
+		p.izaberi_cilj("goblin_903")
+	await _cekaj(func(): return prijema[0] >= n0 + 2, 3.0)
+	_provera("cilj_nepostojeci_i_mrtav_odbijen", ima and prijema[0] == n0 + 2 and cilj.call() == "goblin_901" and _cilj_srv()[0] == "goblin_901",
+		"odgovora %d/2, klijent '%s', server '%s'" % [prijema[0] - n0, cilj.call(), _cilj_srv()[0]])
+
+	# 5. klik preko action bara (ispod je pod: bez UI-ja bi skinuo cilj): ništa se ne šalje
+	var bar = p.get_node("ui/ActionBar")
+	n0 = prijema[0]
+	_klik(bar.get_child(0).get_global_rect().get_center())
+	await create_timer(1.0).timeout
+	_provera("klik_preko_ui_ne_menja", ima and prijema[0] == n0 and cilj.call() == "goblin_901" and _cilj_srv()[0] == "goblin_901",
+		"novih odgovora %d, klijent '%s', server '%s'" % [prijema[0] - n0, cilj.call(), _cilj_srv()[0]])
+
+	# 6. klik na prazno (pod): skida cilj
+	var pre_prazno: String = _cilj_srv()[0]
+	_klik(p.kamera.unproject_position(Vector3(-23, 1.1, -14)))
+	await _cekaj(func(): return cilj.call() == "" and _cilj_srv()[0] == "", 3.0)
+	_provera("klik_na_prazno_brise", ima and pre_prazno == "goblin_901" and cilj.call() == "" and _cilj_srv()[0] == "" and not okvir_vidljiv.call() and e != null and not e.has_node("CiljPrsten"),
+		"pre '%s', posle klijent '%s', server '%s', okvir=%s" % [pre_prazno, cilj.call(), _cilj_srv()[0], okvir_vidljiv.call()])
+
+	# 7. Esc skida cilj
+	_klikni_neprijatelja(p, "goblin_901")
+	await _cekaj(func(): return cilj.call() == "goblin_901", 3.0)
+	var pre_esc: String = cilj.call()
+	_pritisni(KEY_ESCAPE)
+	await _cekaj(func(): return cilj.call() == "" and _cilj_srv()[0] == "", 3.0)
+	_provera("esc_brise_cilj", pre_esc == "goblin_901" and cilj.call() == "" and _cilj_srv()[0] == "", "pre '%s', posle klijent '%s' server '%s'" % [pre_esc, cilj.call(), _cilj_srv()[0]])
+
+	# 8. udaljavanje: 31 m ostaje (histereza), 33 m skida
+	_klikni_neprijatelja(p, "goblin_901")
+	await _cekaj(func(): return cilj.call() == "goblin_901" and _cilj_srv()[0] == "goblin_901", 3.0)
+	var pre_udalj: String = _cilj_srv()[0]
+	await _cilj_komanda("pomeri goblin_901 -20 11")
+	await create_timer(1.0).timeout
+	var na_31: String = _cilj_srv()[0]
+	await _cilj_komanda("pomeri goblin_901 -20 13")
+	await _cekaj(func(): return cilj.call() == "" and _cilj_srv()[0] == "", 3.0)
+	_provera("udaljavanje_brise_cilj", ima and pre_udalj == "goblin_901" and na_31 == "goblin_901" and cilj.call() == "" and _cilj_srv()[0] == "",
+		"pre '%s', na 31 m '%s', na 33 m klijent '%s' server '%s'" % [pre_udalj, na_31, cilj.call(), _cilj_srv()[0]])
+
+	# 9. smrt cilja skida cilj
+	await _cilj_komanda("pomeri goblin_901 -20 -12")
+	await create_timer(1.0).timeout
+	_klikni_neprijatelja(p, "goblin_901")
+	await _cekaj(func(): return cilj.call() == "goblin_901" and _cilj_srv()[0] == "goblin_901", 3.0)
+	var pre_smrti: String = _cilj_srv()[0]
+	await _cilj_komanda("ubij goblin_901")
+	await _cekaj(func(): return cilj.call() == "" and _cilj_srv()[0] == "", 3.0)
+	_provera("smrt_cilja_brise", ima and pre_smrti == "goblin_901" and cilj.call() == "" and _cilj_srv()[0] == "" and not okvir_vidljiv.call(),
+		"pre '%s', posle klijent '%s' server '%s' okvir=%s" % [pre_smrti, cilj.call(), _cilj_srv()[0], okvir_vidljiv.call()])
+	_cilj_kraj = true
