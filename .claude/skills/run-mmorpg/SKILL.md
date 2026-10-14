@@ -25,7 +25,7 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 40 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 40 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 46 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 46 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -60,6 +60,12 @@ Napitci (`potion` klijent, provere preko stanja: HUD hp, `prebroj_item`, količi
 `dva_istovremena_jedan_komad` (2 direktna RPC-a → 1 ok, backend trošio 1×), `mrtav_ne_moze`.
 Štetu i smrt zadaje server drajver na komandu iz `$OUT/potion_cmd` ("br steta N" / "br ubij").
 HP se regeneriše +2/s, pa se efekat proverava kao razlika uz toleranciju.
+
+Action bar (`Scenes/UI/ActionBar.tscn`, potion klijent, tasteri preko `Input.parse_input_event`): bar se puni iz
+servera (`primi_predmet`: količina i preostali cooldown), slot 1 = small HP, 2 = large, 3 = medium, 4 = apple, 10 prazan.
+`action_slot_koristi_napitak` (taster 1: +30, baza -1), `action_cooldown_odbija` ("Još nije spremno", overlay sa
+sekundama), `action_prazan_slot_nista` (taster 0: nijedan zahtev), `action_kolicina_iz_servera` (slot 1 = baza,
+slot 2 = 0 jer je large potrošen mimo bara). Sve 4 padaju bez implementacije (provereno).
 
 Nameplate (observer gleda TestLik-a; server upisuje njegov "hp max mrtav" u `$OUT/server_hp`):
 `nameplate_sync_poklapa` (hp_sync/max_hp_sync/mrtav_sync/ime_sync = server), `hp_sync_prati_stetu`

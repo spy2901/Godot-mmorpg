@@ -86,5 +86,5 @@ if [ -z "${RUN_PONOVLJEN:-}" ] && grep -qh '^FAIL seq_bez_rupa_bez_gubitka' "$OU
   kill $STUB 2>/dev/null; wait $STUB 2>/dev/null # port mora biti slobodan za novi stub
   RUN_PONOVLJEN=1 exec "$SKRIPTA" "$@"
 fi
-# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 42
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 42 ]
+# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 46
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 46 ]

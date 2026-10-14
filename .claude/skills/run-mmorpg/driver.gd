@@ -544,6 +544,11 @@ func _potion_scenario() -> void:
 	_komanda("steta 40")
 	await _cekaj(func(): return hud.hp <= 64, 3.0)
 
+	# 4b. action bar: taster 1 (small HP), taster 0 (prazan slot), količina/cooldown iz servera
+	await _action_bar_provere(p, hud)
+	_komanda("steta 40") # da HP ne bude pun za dva istovremena zahteva (regen +2/s za vreme provera bara)
+	await _cekaj(func(): return hud.hp <= 70, 3.0)
+
 	# 5. predmet koji nema; 6. nepotrošni
 	r = await p.koristi_item_na_serveru("mana_potion")
 	_provera("nema_predmet_odbija", r.get("poruka") == "Nemaš taj predmet", "r=%s" % r)
@@ -587,6 +592,62 @@ func _potion_scenario() -> void:
 	await _cekaj(func(): return not hud.je_mrtav, 6.0)
 	await _cekaj(func(): return FileAccess.file_exists(dir + "/observer_respawn"), 5.0)
 	_potion_kraj = true
+
+# ---------------------------------------------------------------- ACTION BAR (potion klijent)
+
+func _pritisni(k: Key) -> void:
+	for dole in [true, false]:
+		var e := InputEventKey.new()
+		e.keycode = k
+		e.physical_keycode = k
+		e.pressed = dole
+		Input.parse_input_event(e)
+
+# Bar se popunjava iz servera: slot 1 small, 2 large (već potrošen drugim putem), 3 medium, 4 apple, 10 prazan.
+func _action_bar_provere(p, hud) -> void:
+	var bar = p.get_node_or_null("ui/ActionBar")
+	var ima: bool = bar != null and bar.has_method("koristi_slot")
+	if ima:
+		await _cekaj(func(): return bar.slotovi.size() == 10 and bar.slotovi[0] == "small_health_potion" and bar.slotovi[1] == "large_health_potion", 5.0)
+		await _cekaj(func(): return bar.preostalo_ms(0) == 0, 7.0) # cooldown prve upotrebe (po serveru) istekao
+	_komanda("steta 30") # HP dovoljno nizak da +30 ne udari u maksimum (regen +2/s dok se čeka cooldown)
+	await _cekaj(func(): return hud.hp <= 50, 3.0)
+	var odgovori := []
+	var hvataj := func(d): odgovori.append(d)
+	p.item_odgovor.connect(hvataj)
+
+	# slot koristi potion: +30, količina -1 (baza i slot)
+	var hp0: int = hud.hp
+	var b0: int = await _baza("small_health_potion")
+	_pritisni(KEY_1)
+	await _cekaj(func(): return odgovori.size() >= 1, 5.0)
+	await _cekaj(func(): return hud.hp >= hp0 + 30, 3.0)
+	var b1: int = await _baza("small_health_potion")
+	_provera("action_slot_koristi_napitak", ima and odgovori.size() == 1 and odgovori[0].get("ok", false) and hud.hp - hp0 >= 30 and hud.hp - hp0 <= 34 and b1 == b0 - 1,
+		"bar=%s hp %d->%d baza %d->%d odgovor=%s" % [ima, hp0, hud.hp, b0, b1, odgovori[0] if odgovori.size() > 0 else "-"])
+
+	# cooldown odbija drugi pokušaj; overlay pokazuje preostale sekunde
+	var hp1: int = hud.hp
+	_pritisni(KEY_1)
+	await _cekaj(func(): return odgovori.size() >= 2, 5.0)
+	var b2: int = await _baza("small_health_potion")
+	var cd_txt: String = bar._prikaz[0].cd.text if ima else ""
+	var overlay: bool = ima and bar._prikaz[0].overlay.visible
+	_provera("action_cooldown_odbija", ima and odgovori.size() == 2 and odgovori[1].get("poruka") == "Još nije spremno" and b2 == b1 and overlay and cd_txt.is_valid_int() and int(cd_txt) > 0 and hud.hp <= hp1 + 4,
+		"odgovor=%s baza=%d overlay=%s sekundi='%s' hp %d->%d" % [odgovori[1] if odgovori.size() > 1 else "-", b2, overlay, cd_txt, hp1, hud.hp])
+
+	# prazan slot (taster 0): bez zahteva serveru
+	_pritisni(KEY_0)
+	await create_timer(1.0).timeout
+	var b3: int = await _baza("small_health_potion")
+	_provera("action_prazan_slot_nista", ima and bar.slotovi[9] == "" and odgovori.size() == 2 and b3 == b1,
+		"slot 10='%s' novih odgovora=%d baza=%d" % [bar.slotovi[9] if ima else "-", odgovori.size() - 2, b3])
+	p.item_odgovor.disconnect(hvataj)
+
+	# UI prati količinu iz servera: slot 1 = baza, slot 2 (large, potrošen mimo bara) = 0
+	var bl: int = await _baza("large_health_potion")
+	_provera("action_kolicina_iz_servera", ima and bar.kolicina(0) == b3 and bar._prikaz[0].kolicina.text == str(b3) and bar.kolicina(1) == bl and bar._prikaz[1].kolicina.text == str(bl) and bl == 0,
+		"slot1 %s (baza %d), slot2 %s (baza %d)" % [bar._prikaz[0].kolicina.text if ima else "-", b3, bar._prikaz[1].kolicina.text if ima else "-", bl])
 
 # ---------------------------------------------------------------- NAMEPLATE (observer gleda TestLik-a)
 
