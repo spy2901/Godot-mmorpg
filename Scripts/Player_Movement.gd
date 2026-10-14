@@ -76,6 +76,8 @@ var reset_izdato := 0        # server: broj reset-a u sesiji ([SESIJA])
 var reset_paketa := 0        # server: broj stanja poslatih sa reset-om ([SESIJA])
 var _reset_id_prim := 0      # klijent: poslednji primenjeni reset_id (duplikati se ignorišu)
 var rupe_seq := 0            # preskočeni seq-ovi (izgubljeni ili odbijeni)
+var rupe_najduza := 0        # najduži niz uzastopno preskočenih seq-ova
+var rupe_nizovi := {"1": 0, "2": 0, "3": 0, "4-6": 0, "7+": 0} # broj nizova po dužini
 # debug (server, MMORPG_DEBUG_SEQ=1): svaka rupa u seq obradi sa razlogom i vremenima
 var _debug_seq := OS.get_environment("MMORPG_DEBUG_SEQ") == "1"
 var _spawn_ms := 0           # server: kad je lik napravljen (konekcija peer-a)
@@ -1090,7 +1092,11 @@ func posalji_unos(unosi: Array) -> void:
 				_odbijeni[u[0]] = "red pun"
 				_dbg_seq("ODBIJEN seq=%d razlog=red pun (%d)" % [u[0], _red.size()])
 			continue # redundantna kopija u sledećem paketu može da uđe kad se red isprazni
-		rupe_seq += u[0] - zadnji - 1
+		var niz: int = u[0] - zadnji - 1
+		if niz > 0:
+			rupe_seq += niz
+			rupe_najduza = maxi(rupe_najduza, niz)
+			rupe_nizovi[str(niz) if niz <= 3 else ("4-6" if niz <= 6 else "7+")] += 1
 		if _debug_seq:
 			for r in range(zadnji + 1, u[0]):
 				_rupe_otvorene[r] = sad
@@ -1162,8 +1168,9 @@ func _ceka_reset() -> bool:
 # Server, uvek (bez debug flag-a): jedna linija po sesiji kad se lik ukloni (odjava ili gašenje servera)
 func _exit_tree() -> void:
 	if _je_server and get_multiplayer_authority() != 1:
-		print("[SESIJA] peer %s lik '%s': trajanje %d s, max red %d, odbijeno_red_pun %d, rupe %d, reseta %d (paketa sa reset-om %d)" % [
-			name, ime_lika, (Time.get_ticks_msec() - _spawn_ms) / 1000, red_max, odbijeno_red_pun, rupe_seq, reset_izdato, reset_paketa])
+		print("[SESIJA] peer %s lik '%s': trajanje %d s, max red %d, odbijeno_red_pun %d, rupe %d (najduži niz %d, nizovi 1:%d 2:%d 3:%d 4-6:%d 7+:%d), reseta %d (paketa sa reset-om %d)" % [
+			name, ime_lika, (Time.get_ticks_msec() - _spawn_ms) / 1000, red_max, odbijeno_red_pun, rupe_seq, rupe_najduza,
+			rupe_nizovi["1"], rupe_nizovi["2"], rupe_nizovi["3"], rupe_nizovi["4-6"], rupe_nizovi["7+"], reset_izdato, reset_paketa])
 
 # Zaostatak = red koji ostaje posle obrade u tick-u (normalno 0). Debug: vrh i vreme pražnjenja.
 func _prati_red() -> void:
