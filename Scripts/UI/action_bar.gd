@@ -1,7 +1,8 @@
 # Action bar: slotovi sa potrošnim predmetima i tasterima. Ponovo upotrebljiv (ActionBar.tscn): broj slotova,
 # tasteri i orijentacija su parametri. Izgled je samo u action_bar_stil.gd.
-# Stanje (količina, cooldown) dolazi od servera (igrač.kolicine / igrač.cd_do_ms, signal predmet_promenjen);
-# taster samo pošalje zahtev kroz postojeći tok (InventoryUI._koristi_item -> server).
+# Raspored (koji predmet je u kom slotu) drži server po liku (igrač.action_bar, signal action_bar_promenjen);
+# izmenu traži igrač.promeni_action_slot. Stanje (količina, cooldown) takođe od servera (igrač.kolicine /
+# igrač.cd_do_ms, signal predmet_promenjen); taster samo pošalje zahtev (InventoryUI._koristi_item -> server).
 extends Control
 
 const STIL := preload("res://Scripts/UI/action_bar_stil.gd")
@@ -11,10 +12,7 @@ const STIL := preload("res://Scripts/UI/action_bar_stil.gd")
 @export_enum("Horizontalno", "Vertikalno") var orijentacija := 0
 
 var slotovi: Array[String] = []  # item_id po slotu, "" = prazan
-var _predmeti: Dictionary = {}   # item_id -> podaci predmeta (ime, tip...) za oznaku
-var _odbaceni: Dictionary = {}   # item_id koji nisu potrošni (ne idu u bar)
-var _red: Array[String] = []     # novi predmeti od servera, obrađuju se redom (stabilan raspored)
-var _obrada := false
+var _predmeti: Dictionary = {}   # item_id -> podaci predmeta (ime...) za oznaku; {} dok se čitaju
 var _igrac: Node
 var _prikaz: Array = []          # po slotu: {panel, oznaka, kolicina, overlay, cd}
 
@@ -31,8 +29,8 @@ func _ready() -> void:
 	_napravi()
 	if _igrac:
 		_igrac.predmet_promenjen.connect(_na_predmet)
-		for id in _igrac.kolicine:
-			_na_predmet(id)
+		_igrac.action_bar_promenjen.connect(_na_raspored)
+		_na_raspored()
 
 func _nadji_igraca() -> Node:
 	var n := get_parent()
@@ -154,32 +152,22 @@ func _na_predmet(item_id: String) -> void:
 	var i := slotovi.find(item_id)
 	if i >= 0:
 		_osvezi_slot(i)
-		return
-	if _odbaceni.has(item_id) or _red.has(item_id):
-		return
-	_red.append(item_id)
-	if not _obrada:
-		_obradi_red()
 
-# novi predmet: potrošni ide u prvi prazan slot (redom kojim server šalje = redosled inventara)
-func _obradi_red() -> void:
-	_obrada = true
-	while not _red.is_empty():
-		var id: String = _red.pop_front()
-		var predmet: Dictionary = await ApiManager.get_item(id)
-		if predmet.is_empty() or predmet.has("error"):
-			continue # API nedostupan: ne odbacuje se, pokušava ponovo pri sledećem stanju od servera
-		if str(predmet.get("tip", "")) != "consumable":
-			_odbaceni[id] = true
-			continue
-		var prazan := slotovi.find("")
-		if prazan < 0:
-			break
-		_predmeti[id] = predmet
-		slotovi[prazan] = id
-		_osvezi_slot(prazan)
-	_red.clear()
-	_obrada = false
+func _na_raspored() -> void:
+	for i in broj_slotova:
+		slotovi[i] = str(_igrac.action_bar[i]) if i < _igrac.action_bar.size() else ""
+		if slotovi[i] != "" and not _predmeti.has(slotovi[i]):
+			_ucitaj_predmet(slotovi[i])
+	_osvezi_sve()
+
+func _ucitaj_predmet(id: String) -> void:
+	_predmeti[id] = {}
+	var predmet: Dictionary = await ApiManager.get_item(id)
+	if predmet.is_empty() or predmet.has("error"):
+		_predmeti.erase(id) # API nedostupan: pokušava ponovo pri sledećem rasporedu od servera
+		return
+	_predmeti[id] = predmet
+	_osvezi_sve()
 
 # ---------------------------------------------------------------- tasteri
 

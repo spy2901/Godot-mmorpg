@@ -122,6 +122,10 @@ func koristi_item(ime: String, item_id: String) -> Dictionary:
 	var r = await _zahtev("/players/" + ime + "/item/use", HTTPClient.METHOD_POST, {"item_id": item_id}, 1)
 	return r if r is Dictionary else {}
 
+func sacuvaj_action_bar(ime: String, slotovi: Array) -> bool:
+	var r = await _zahtev("/players/" + ime + "/action_bar", HTTPClient.METHOD_POST, {"slotovi": slotovi}, 1)
+	return r is Dictionary and r.get("status", "") == "ok"
+
 func kupi_item(ime: String, item_id: String) -> Dictionary:
 	var r = await _zahtev("/players/" + ime + "/shop/buy", HTTPClient.METHOD_POST, {"item_id": item_id, "kolicina": 1}, 1)
 	return r if r is Dictionary else {}

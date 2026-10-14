@@ -324,6 +324,7 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 
 	await _primeni_oruzje(str(eq.get("weapon", "")))
 	await _primeni_oklop(eq)
+	var ab_sacuvan := await _ucitaj_action_bar(p.get("action_bar"), p.get("inventory", []))
 	var zavrseni: Array = await ApiManager.get_completed_quests(ime)
 	if ime_lika != ime:  # izbačen dok smo čekali backend
 		return
@@ -362,6 +363,10 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 		primi_lik(podaci)
 	else:
 		primi_lik.rpc_id(vlasnik, podaci)
+	if ab_sacuvan:
+		_javi_action_bar()
+	else:
+		_ab_sacuvaj() # početni raspored (iz inventara) se upisuje u bazu
 
 # Server: lik je učitan (pozicija iz baze ili spawn za novi lik) -> postaje vidljiv ostalim klijentima.
 # Sync polja se pune odmah da spawn paket već nosi pravu poziciju.
@@ -490,6 +495,8 @@ func server_isplati_xp(xp: int, razlog: String) -> void:
 func dodaj_u_vlasnistvo(item_id: String, kolicina: int = 1) -> void:
 	vlasnistvo[item_id] = vlasnistvo.get(item_id, 0) + kolicina
 	_javi_predmet(item_id)
+	if await _ab_dodaj(item_id):
+		_ab_sacuvaj()
 
 func _primeni_oruzje(item_id: String) -> void:
 	if item_id == "":
@@ -659,6 +666,91 @@ func primi_predmet(item_id: String, kolicina: int, cd_ms: int) -> void:
 	kolicine[item_id] = kolicina
 	cd_do_ms[item_id] = Time.get_ticks_msec() + cd_ms
 	predmet_promenjen.emit(item_id)
+
+# --- action bar: raspored po liku (10 slotova, item_id ili ""). Drži ga server, klijent samo prikazuje i traži izmenu.
+
+const BROJ_SLOTOVA_BARA := 10
+signal action_bar_promenjen # klijent: stigao raspored od servera (i kad je zahtev odbijen)
+var action_bar: Array = []  # indeks 0 = slot 1; server: izvor istine (prazno dok lik nije učitan), klijent: kopija
+var _ab_upis_u_toku := false
+var _ab_prljav := false
+
+# Server, pri učitavanju: sačuvan raspored iz baze; lik bez rasporeda dobija potrošne predmete redom iz inventara.
+# Vraća da li je raspored bio sačuvan.
+func _ucitaj_action_bar(sacuvan, inventory: Array) -> bool:
+	action_bar.resize(BROJ_SLOTOVA_BARA)
+	action_bar.fill("")
+	if sacuvan is Array:
+		for i in mini(sacuvan.size(), BROJ_SLOTOVA_BARA):
+			action_bar[i] = "" if sacuvan[i] == null else str(sacuvan[i])
+		return true
+	for e in inventory: # redom, da raspored prati redosled inventara
+		await _ab_dodaj(str(e.get("id", "")))
+	return false
+
+# Novi potrošni predmet ide u prvi prazan slot. Predmet koji već ima slot ostaje u njemu (i sa 0 komada).
+func _ab_dodaj(item_id: String) -> bool:
+	if item_id == "" or action_bar.has(item_id) or not action_bar.has(""):
+		return false
+	var item: Dictionary = await ApiManager.get_item(item_id)
+	if str(item.get("tip", "")) != "consumable" or action_bar.has(item_id) or not action_bar.has(""):
+		return false
+	action_bar[action_bar.find("")] = item_id
+	return true
+
+# Javi vlasniku pa upiši u bazu. Jedan upis u letu; promena za vreme upisa ide posle (poslednji raspored pobeđuje).
+func _ab_sacuvaj() -> void:
+	_javi_action_bar()
+	_ab_prljav = true
+	if _ab_upis_u_toku:
+		return
+	_ab_upis_u_toku = true
+	var ime := ime_lika
+	while _ab_prljav:
+		_ab_prljav = false
+		var slotovi := action_bar.map(func(id): return null if id == "" else id)
+		if not await ApiManager.sacuvaj_action_bar(ime, slotovi):
+			print("[ACTION BAR] Upis nije uspeo za ", ime)
+	_ab_upis_u_toku = false
+
+func _javi_action_bar() -> void:
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik == multiplayer.get_unique_id():
+		primi_action_bar(action_bar)
+	else:
+		primi_action_bar.rpc_id(vlasnik, action_bar)
+
+@rpc("any_peer", "reliable")
+func primi_action_bar(slotovi: Array) -> void:
+	if not _poziv_od_servera():
+		return
+	action_bar = slotovi.duplicate()
+	action_bar_promenjen.emit()
+
+# Klijent: zahtev da slot (1-10) drži item_id ("" = isprazni). Server odlučuje i uvek vrati raspored.
+func promeni_action_slot(slot: int, item_id: String) -> void:
+	if multiplayer.is_server():
+		zatrazi_action_slot(slot, item_id)
+	else:
+		zatrazi_action_slot.rpc_id(1, slot, item_id)
+
+@rpc("any_peer", "reliable")
+func zatrazi_action_slot(slot: int, item_id: String) -> void:
+	if not multiplayer.is_server() or not _posiljalac_je_vlasnik() or not _stanje_ucitano:
+		return
+	var ok := slot >= 1 and slot <= BROJ_SLOTOVA_BARA
+	if ok and item_id != "": # predmet mora da postoji (isti id i u odgovoru: id nije deo neke druge putanje)
+		var item: Dictionary = await ApiManager.get_item(item_id)
+		ok = str(item.get("id", "")) == item_id
+	if not ok:
+		print("[ACTION BAR] Odbijeno za ", ime_lika, ": slot ", slot, " = '", item_id, "'")
+		_javi_action_bar()
+		return
+	var staro := action_bar.find(item_id) # predmet je u najviše jednom slotu: premešta se
+	if item_id != "" and staro >= 0:
+		action_bar[staro] = ""
+	action_bar[slot - 1] = item_id
+	_ab_sacuvaj()
 
 # --- klijent (zovu UI-ji)
 
