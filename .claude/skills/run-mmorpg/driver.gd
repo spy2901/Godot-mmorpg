@@ -134,6 +134,10 @@ func _process(d):
 				root.size = Vector2i(1280, 720) # headless prozor je 64x64: action bar bi pokrio ceo ekran i progutao klikove
 				root.get_node("GameState").token = "cilj-token"
 				root.get_node("GameState").ime_igraca = "CiljLik"
+			elif uloga == "drugi":
+				root.size = Vector2i(1280, 720) # kao cilj: u 64x64 bi action bar progutao klik
+				root.get_node("GameState").token = "drugi-token"
+				root.get_node("GameState").ime_igraca = "DrugiLik"
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
 				root.get_node("GameState").ime_igraca = "RasporedLik"
@@ -161,6 +165,7 @@ func _process(d):
 		"visi": return _visi()
 		"raspored": return _raspored()
 		"cilj": return _cilj()
+		"drugi": return _uloga_drugi()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -909,12 +914,18 @@ func _server_cilj() -> void:
 		var e = null
 		for n in get_nodes_in_group("neprijatelj"):
 			if str(n.get_parent().name) == c[2]: e = n
+		if e == null and c[1] in ["pomeri", "steta", "mrtav", "ubij"]:
+			print("[S] cilj komanda bez neprijatelja: ", cmd) # npr. već ubijen (stari kod bez cilja)
+			c[1] = "-"
 		match c[1]:
 			"spawn": _world().goblin_spawner.spawn({"vrsta": "goblin", "id": int(c[2].get_slice("_", 1)), "pos": Vector3(float(c[3]), 2, float(c[4]))})
 			"pomeri": e.global_position = Vector3(float(c[3]), e.global_position.y, float(c[4]))
 			"steta": e.primi_damage(int(c[3]))
 			"mrtav": e._mrtav = true # živ čvor sa oznakom smrti (između smrti i despawn-a)
 			"ubij": e.primi_damage(100000)
+			"ubij_lik":
+				for p in _world().get_children():
+					if p.is_in_group("player") and p.ime_lika == c[2]: p.server_primi_damage(100000)
 		print("[S] cilj komanda: ", cmd)
 		_pisi("cilj_cmd_ok", c[0])
 	for p in _world().get_children():
@@ -1109,23 +1120,124 @@ func _cilj_scenario(p) -> void:
 	_provera("smrt_cilja_brise", ima and pre_smrti == "goblin_901" and cilj.call() == "" and _cilj_srv()[0] == "" and not okvir_vidljiv.call(),
 		"pre '%s', posle klijent '%s' server '%s' okvir=%s" % [pre_smrti, cilj.call(), _cilj_srv()[0], okvir_vidljiv.call()])
 
-	# 10. napad levim klikom ne važi preko UI-ja; kontrola: klik na pod napada (goblin 2 m pored, domet napada 3 m)
-	await _cilj_komanda("spawn goblin_904 -18 -20")
-	await _cekaj(func(): return _nep("goblin_904") != null, 5.0)
-	await create_timer(2.0).timeout # pad na pod; istekne cooldown napada od ranijih klikova
-	var g = _nep("goblin_904")
-	_klik(bar.get_child(0).get_global_rect().get_center())
-	await process_frame # događaj se obrađuje u sledećem frame-u
-	await process_frame
-	var napao_ui: bool = not p.moze_napasti # napadni() ga odmah spušta
+	# 10. NAPAD NA CILJ (taster R; stari napad je bio levi klik, pa ga test šalje gde treba da ne šteti)
+	# goblin_904 2.7 m ispred-desno, goblin_905 2.5 m ispred-levo: oba u dometu napada (3 m + 0.5)
+	var bar_poz: Vector2 = bar.get_child(0).get_global_rect().get_center()
+	await _cilj_komanda("spawn goblin_904 -19 -17.5")
+	await _cilj_komanda("spawn goblin_905 -21.5 -18")
+	await _cekaj(func(): return _nep("goblin_904") != null and _nep("goblin_905") != null, 5.0)
+	await create_timer(2.0).timeout # pad na pod
+	var g4 = _nep("goblin_904")
+	var g5 = _nep("goblin_905")
+	var hp := func(g) -> int: return g.hp if is_instance_valid(g) else 0 # 0 = ubijen (despawn)
+	var odg := [] # odgovori servera na napad
+	if p.has_signal("napad_odgovor"): p.napad_odgovor.connect(func(d): odg.append(d))
+	var poruka := func(i: int) -> String: return str(odg[i].get("poruka", "")) if odg.size() > i else "-"
+
+	# a) bez cilja (smrt goblin_901 ga je skinula): "Nema cilja", bez štete
+	_pritisni(KEY_R)
+	await _cekaj(func(): return odg.size() >= 1, 3.0)
+	await create_timer(0.5).timeout
+	_provera("napad_bez_cilja", cilj.call() == "" and poruka.call(0) == "Nema cilja" and hp.call(g4) == 50 and hp.call(g5) == 50,
+		"cilj '%s', odgovor '%s', hp 904=%d 905=%d" % [cilj.call(), poruka.call(0), hp.call(g4), hp.call(g5)])
+
+	# b) klik na neprijatelja bira cilj, ali ne šteti
+	_klikni_neprijatelja(p, "goblin_904")
+	await _cekaj(func(): return cilj.call() == "goblin_904" and _cilj_srv()[0] == "goblin_904", 3.0)
 	await create_timer(1.5).timeout
-	var hp_ui: int = g.hp if is_instance_valid(g) else -1
-	_klik(p.kamera.unproject_position(Vector3(-23, 1.1, -14)))
-	await process_frame
-	await process_frame
-	var napao_pod: bool = not p.moze_napasti
-	await _cekaj(func(): return not is_instance_valid(g) or g.hp < hp_ui, 3.0)
-	var hp_pod: int = g.hp if is_instance_valid(g) else 0 # 0 = ubijen i despawn-ovan
-	_provera("klik_preko_ui_ne_napada", not napao_ui and hp_ui == 50 and napao_pod and hp_pod < 50,
-		"klik na action bar: napad=%s hp=%d; kontrola klik na pod: napad=%s hp=%d" % [napao_ui, hp_ui, napao_pod, hp_pod])
+	_provera("klik_bira_ne_steti", cilj.call() == "goblin_904" and _cilj_srv()[0] == "goblin_904" and hp.call(g4) == 50 and hp.call(g5) == 50,
+		"cilj '%s'/'%s', hp 904=%d 905=%d" % [cilj.call(), _cilj_srv()[0], hp.call(g4), hp.call(g5)])
+
+	# c) klik preko UI-ja ne napada (i ne menja cilj)
+	n0 = odg.size()
+	_klik(bar_poz)
+	await create_timer(1.5).timeout
+	_provera("klik_preko_ui_ne_napada", odg.size() == n0 and cilj.call() == "goblin_904" and hp.call(g4) == 50 and hp.call(g5) == 50,
+		"novih odgovora %d, cilj '%s', hp 904=%d 905=%d" % [odg.size() - n0, cilj.call(), hp.call(g4), hp.call(g5)])
+
+	# d) napad pogađa samo cilj; e) drugi odmah posle: cooldown
+	n0 = odg.size()
+	_pritisni(KEY_R)
+	await _cekaj(func(): return odg.size() > n0, 3.0)
+	await _cekaj(func(): return hp.call(g4) < 50, 2.0)
+	await create_timer(0.3).timeout
+	var ok_d: bool = odg.size() > n0 and odg[n0].get("ok", false)
+	_provera("napad_samo_cilj", ok_d and hp.call(g4) == 25 and hp.call(g5) == 50,
+		"odgovor %s, hp 904 (cilj)=%d 905=%d" % [odg[n0] if odg.size() > n0 else "-", hp.call(g4), hp.call(g5)])
+	n0 = odg.size()
+	_pritisni(KEY_R)
+	await _cekaj(func(): return odg.size() > n0, 3.0)
+	await create_timer(0.3).timeout
+	_provera("napad_cooldown", poruka.call(n0) == "Još nije spremno" and hp.call(g4) == 25,
+		"odgovor '%s', hp 904=%d" % [poruka.call(n0), hp.call(g4)])
+
+	# g) drugi igrač (DrugiLik 2.5 m od goblin_904, bez cilja): klik + R ne štete tuđem cilju
+	_pisi("drugi_kreni", "1")
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/drugi_gotov"), 15.0)
+
+	# f) cilj van dometa napada (6 m, ali u dometu cilja): "Predaleko"
+	await _cilj_komanda("pomeri goblin_904 -19 -14")
+	await create_timer(1.2).timeout # i cooldown istekne
+	n0 = odg.size()
+	var hp_pre: int = hp.call(g4)
+	_pritisni(KEY_R)
+	await _cekaj(func(): return odg.size() > n0, 3.0)
+	await create_timer(0.3).timeout
+	_provera("napad_predaleko", poruka.call(n0) == "Predaleko" and cilj.call() == "goblin_904" and hp.call(g4) == hp_pre,
+		"odgovor '%s', cilj '%s', hp 904 %d->%d" % [poruka.call(n0), cilj.call(), hp_pre, hp.call(g4)])
+
+	# h) smrt cilja skida cilj, naredni napad: "Nema cilja"
+	await _cilj_komanda("ubij goblin_904")
+	await _cekaj(func(): return cilj.call() == "" and _cilj_srv()[0] == "", 3.0)
+	n0 = odg.size()
+	_pritisni(KEY_R)
+	await _cekaj(func(): return odg.size() > n0, 3.0)
+	await create_timer(0.3).timeout
+	_provera("smrt_cilja_pa_nema_cilja", cilj.call() == "" and poruka.call(n0) == "Nema cilja" and hp.call(g5) == 50,
+		"cilj '%s', odgovor '%s', hp 905=%d" % [cilj.call(), poruka.call(n0), hp.call(g5)])
+
+	# i) mrtav igrač ne napada (cilj goblin_905 u dometu)
+	_klikni_neprijatelja(p, "goblin_905")
+	await _cekaj(func(): return cilj.call() == "goblin_905", 3.0)
+	await create_timer(1.2).timeout
+	var hud = p.get_node("ui/Control")
+	await _cilj_komanda("ubij_lik CiljLik")
+	await _cekaj(func(): return hud.je_mrtav, 3.0)
+	n0 = odg.size()
+	_pritisni(KEY_R)
+	_klik(p.kamera.unproject_position(g5.global_position) if is_instance_valid(g5) else bar_poz) # stari napad
+	await _cekaj(func(): return odg.size() > n0, 3.0)
+	await create_timer(0.5).timeout
+	_provera("mrtav_ne_napada", hud.je_mrtav and poruka.call(n0) == "Mrtav si" and hp.call(g5) == 50,
+		"mrtav=%s cilj '%s', odgovor '%s', hp 905=%d" % [hud.je_mrtav, cilj.call(), poruka.call(n0), hp.call(g5)])
 	_cilj_kraj = true
+
+# ---------------------------------------------------------------- DRUGI (DrugiLik 2.5 m od CiljLik-ovog cilja goblin_904)
+# Kad CiljLik javi (dir/drugi_kreni): levi klik u nebo (nijedan neprijatelj pod mišem = bez sopstvenog cilja) i R.
+# Ni jedno ni drugo ne sme da ošteti tuđi cilj; server odgovara "Nema cilja".
+var _drugi_krenuo := false
+var _drugi_kraj := false
+
+func _uloga_drugi() -> bool:
+	var p = _moj()
+	if not _drugi_krenuo and p and p.get_node("ui/Control")._ucitano:
+		_drugi_krenuo = true
+		_drugi_scenario(p)
+	return _drugi_kraj or t > MAX_T
+
+func _drugi_scenario(p) -> void:
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/drugi_kreni"), 90.0)
+	var e = _nep("goblin_904")
+	var hp0: int = e.hp if e else -1
+	var odg := []
+	if p.has_signal("napad_odgovor"): p.napad_odgovor.connect(func(d): odg.append(d))
+	_klik(Vector2(640, 5))
+	await create_timer(0.3).timeout
+	_pritisni(KEY_R)
+	await _cekaj(func(): return odg.size() >= 1, 3.0)
+	await create_timer(1.5).timeout
+	var hp1: int = e.hp if is_instance_valid(e) else 0
+	_provera("drugi_ne_napada_tudji_cilj", e != null and hp0 == 25 and hp1 == hp0 and odg.size() == 1 and str(odg[0].get("poruka", "")) == "Nema cilja",
+		"goblin_904 (cilj CiljLik-a) hp %d->%d, odgovor %s, moj cilj '%s'" % [hp0, hp1, odg[0] if odg.size() > 0 else "-", p.get("cilj_id")])
+	_pisi("drugi_gotov", "1")
+	_drugi_kraj = true
