@@ -15,6 +15,10 @@ func hostuj(port: int = DEFAULT_PORT) -> bool:
 	if err != OK:
 		print("[NET] Ne mogu da pokrenem server: ", err)
 		return false
+	# Bez server relay-a: klijenti ne šalju jedni drugima (sve ide preko servera). Sa relay-em Godot pri
+	# odlasku peer-a A šalje DEL_PEER ostalima (kanal 0) pre nego što ENet ukloni i peer-a B koji je otišao
+	# u istom paketu -> "Unable to send packet on channel 0, max channels: 0". Mora pre multiplayer_peer.
+	(multiplayer as SceneMultiplayer).server_relay = false
 	multiplayer.multiplayer_peer = peer
 	_povezi_signale()
 	print("[NET] Server pokrenut na portu ", port, " (moj ID: ", multiplayer.get_unique_id(), ")")
