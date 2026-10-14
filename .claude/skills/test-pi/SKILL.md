@@ -43,6 +43,10 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
    - `cilj_na_pravom_serveru` (igrac1 u prozoru, posle screenshot-a): okrene se ka najbližem živom neprijatelju bližem
      od 25 m, levi klik na njega → server potvrdi cilj, okvir pokazuje HP = replicirani hp; screenshot
      `$OUT/pi_igrac1_cilj.png`; Esc skida cilj.
+   - `napad_predaleko_na_pravom_serveru` (pre Esc-a): tačno jedan napad (R) na izabran cilj van dometa napada (cilj
+     mora biti dalje od 5.5 m, inače se R ne pritiska i provera pada): server odgovori "Predaleko", HP cilja
+     nepromenjen; screenshot `$OUT/pi_igrac1_napad.png`. Test ne ubija neprijatelje (XP i loot test naloga su u
+     pravoj bazi).
    - `WARN igracN:greska_predikcije` kad je najveća greška predikcije > 1 m (`GRESKA_WARN_M`), npr. snap
      pri prijavi kad se izgubi reset; WARN ne obara rezultat.
    Za vreme klijenata ide `ping -i 0.1` (`$OUT/ping.log`), najmanje ~100 uzoraka (posle klijenata radi do 13 s;

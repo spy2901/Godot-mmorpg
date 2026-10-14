@@ -126,10 +126,29 @@ func _cilj(p) -> void:
 	var hp_ok: bool = is_instance_valid(e) and okvir.hp_tekst.text == "%d / %d" % [e.hp, e.max_hp]
 	await _snimi("_cilj")
 	var tekst: String = okvir.ime.text + " " + okvir.hp_tekst.text
+	await _napad_predaleko(p, e, izabran)
 	_pritisni(KEY_ESCAPE)
 	var skinut: bool = await _cekaj(func(): return p.cilj_id == "" and not okvir.okvir.visible, 5.0)
 	_provera("cilj_na_pravom_serveru", izabran and hp_ok and skinut,
 		"%s na %.1f m: izabran=%s okvir '%s' (hp ok=%s), Esc skinuo=%s" % [id, e.global_position.distance_to(p.server_poz) if is_instance_valid(e) else -1.0, izabran, tekst, hp_ok, skinut])
+
+# Jedan napad (R) na izabran cilj van dometa napada: server odbija sa "Predaleko", bez štete. Ne ubija neprijatelje
+# (XP i loot test naloga su u pravoj bazi), pa se R ne pritiska ako je cilj blizu.
+func _napad_predaleko(p, e, izabran: bool) -> void:
+	var d: float = e.global_position.distance_to(p.server_poz) if is_instance_valid(e) else -1.0
+	if not izabran or d < p.DOMET_NAPADA + 2.0:
+		_provera("napad_predaleko_na_pravom_serveru", false, "cilj izabran=%s na %.1f m (treba > %.1f m), R nije pritisnut" % [izabran, d, p.DOMET_NAPADA + 2.0])
+		return
+	var odg := []
+	p.napad_odgovor.connect(func(o): odg.append(o))
+	var hp0: int = e.hp
+	_pritisni(KEY_R)
+	await _cekaj(func(): return odg.size() >= 1, 5.0)
+	await create_timer(0.5).timeout # da bi se video eventualni drugi odgovor ili šteta
+	await _snimi("_napad")
+	var hp1: int = e.hp if is_instance_valid(e) else -1
+	_provera("napad_predaleko_na_pravom_serveru", odg.size() == 1 and odg[0].get("poruka") == "Predaleko" and hp1 == hp0,
+		"cilj na %.1f m, odgovor %s, hp %d->%d" % [d, odg[0] if odg.size() > 0 else "-", hp0, hp1])
 
 func _pisi(ime: String, s: String) -> void:
 	var f := FileAccess.open(dir + "/" + ime, FileAccess.WRITE)
