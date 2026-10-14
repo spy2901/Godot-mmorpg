@@ -72,7 +72,8 @@ echo "PASS reset_pozicije"
 # ---------------------------------------------------------------- 4. dva prava klijenta
 echo "== 4/4 dva klijenta protiv Pi-ja"
 # ping u pozadini za vreme celog testa klijenata (gubitak paketa baš dok se meri)
-ping -i 0.2 -q "${PI#*@}" > "$OUT/ping.log" 2>&1 &
+ping -i 0.1 -q "${PI#*@}" > "$OUT/ping.log" 2>&1 &
+PING_OD=$SECONDS
 PING=$!; trap 'kill $PING 2>/dev/null' EXIT # ne ostavljaj ping ako skripta stane ranije
 ARG=("dir=$OUT" "host=$TEST_GAME_HOST" "port=$TEST_GAME_PORT" "--server-url=$TEST_API_URL")
 [ $REG = 1 ] && ARG+=("registruj=1")
@@ -85,6 +86,8 @@ P1=$!
 "$G" --headless --path . --script $D -- igrac2 "${ARG[@]}" > "$OUT/igrac2.log" 2>&1 &
 P2=$!
 wait $P1 $P2
+# najmanje ~100 uzoraka (0,1 s): ako su klijenti bili kraći od 11 s, ping radi do 11 s
+PREOSTALO=$((11 - (SECONDS - PING_OD))); [ $PREOSTALO -gt 0 ] && sleep $PREOSTALO
 kill -INT $PING 2>/dev/null; wait $PING 2>/dev/null
 echo "PING za vreme testa: $(grep -h 'packet loss' "$OUT/ping.log" | sed 's/^ *//') | $(grep -h 'round-trip' "$OUT/ping.log" | sed 's/.*= //')"
 
@@ -110,9 +113,12 @@ W=$(cat "$OUT"/igrac*.log | grep -c '^WARN ')
 # Mreža tokom testa (ping u pozadini): previše loša -> run je NEVAŽEĆ (exit 2), ne FAIL
 GUBITAK=$(grep -oE '[0-9.]+% packet loss' "$OUT/ping.log" | grep -oE '^[0-9.]+')
 RTT=$(grep -h 'round-trip' "$OUT/ping.log" | sed 's/.*= //' | cut -d/ -f2)
+UZORAKA=$(grep -oE '^[0-9]+ packets transmitted' "$OUT/ping.log" | grep -oE '^[0-9]+')
+# samo ping odlučuje (rupe iz igre ne čine run nevažećim); gubitak se računa tek na >= 100 uzoraka
 RAZLOG=""
 [ -z "$GUBITAK" ] && RAZLOG="nema ping merenja"
-[ -n "$GUBITAK" ] && awk "BEGIN{exit !($GUBITAK > 2)}" && RAZLOG="gubitak ${GUBITAK}% > 2%"
+[ -n "$UZORAKA" ] && [ "$UZORAKA" -lt 100 ] && RAZLOG="premalo uzoraka ($UZORAKA < 100)"
+[ -n "$GUBITAK" ] && awk "BEGIN{exit !($GUBITAK > 2)}" && RAZLOG="${RAZLOG:+$RAZLOG, }gubitak ${GUBITAK}% > 2%"
 [ -n "$RTT" ] && awk "BEGIN{exit !($RTT > 300)}" && RAZLOG="${RAZLOG:+$RAZLOG, }prosečan RTT ${RTT} ms > 300 ms"
 if [ -n "$RAZLOG" ]; then
   echo "REZULTAT: NEVAŽEĆ ($RAZLOG; provere: $F FAIL$([ "$W" != 0 ] && echo ", $W WARN"))"

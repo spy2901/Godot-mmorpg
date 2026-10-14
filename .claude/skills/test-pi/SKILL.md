@@ -38,7 +38,8 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
    - screenshot `$OUT/pi_igrac1.png`: igrac1 se okrene ka drugom igraču pa snimi.
    - `WARN igracN:greska_predikcije` kad je najveća greška predikcije > 1 m (`GRESKA_WARN_M`), npr. snap
      pri prijavi kad se izgubi reset; WARN ne obara rezultat.
-   Za vreme klijenata ide `ping -i 0.2` (`$OUT/ping.log`). Gubitak > 2% ili prosečan RTT > 300 ms →
+   Za vreme klijenata ide `ping -i 0.1` (`$OUT/ping.log`), najmanje ~100 uzoraka (posle klijenata radi do 11 s;
+   < 100 uzoraka = nevažeće). Gubitak > 2% ili prosečan RTT > 300 ms (samo ping, ne rupe iz igre) →
    `REZULTAT: NEVAŽEĆ (razlog)` i exit 2 (ne FAIL): mreža je preloša da bi provere kretanja bile merodavne.
    Zatim: `pi_journal_bez_gresaka` (journal od restarta, bez linija sa "key") i `tajne_van_logova`
    (nijedna lozinka u `$OUT/**/*.log`).
