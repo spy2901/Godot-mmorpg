@@ -153,6 +153,12 @@ func _process(d):
 	return true
 
 func _server(log: bool) -> bool:
+	# test stabilnost: neprijatelji ne jure test likove (troll na (0,0,15) je ~3 m od putanje movera i ume da
+	# ga zaustavi); borba se testira komandama servera nad TestLik-om, ne preko neprijatelja
+	for e in get_nodes_in_group("neprijatelj"):
+		if e.aggro_range != 0.0:
+			e.aggro_range = 0.0
+			e.player = null
 	if log and _world():
 		for p in _world().get_children():
 			if p.is_in_group("player"):

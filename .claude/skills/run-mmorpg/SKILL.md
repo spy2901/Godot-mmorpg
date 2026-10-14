@@ -134,6 +134,9 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
 - **Snimanje screenshot-a koči frame** (GPU readback). Zato prozor ima observer (ne mover): zastoj
   u moveru bi skratio W fazu i `W_2s_napred` bi pao (-8 umesto -10).
 - **Headless ne može screenshot** (dummy renderer). Za sliku koristi `--window`.
+- **Neprijatelji ne jure test likove**: server drajver svakom neprijatelju (grupa `neprijatelj`) postavlja
+  `aggro_range = 0`. Troll na (0, 0, 15) je ranije ume da priđe moveru i zaustavi ga (`yaw_PI/2_ide_-x`
+  -1.1 umesto -5). Borba se testira komandama servera nad TestLik-om (`potion_cmd`).
 - **NPC stoji na (0, 2.7, -10)** (crna kapsula na screenshot-u) i blokira kretanje ka -z, pa se lik zaglavi zavisno od nasumičnog x spawna. Zato prva W faza ide ka +z.
 - **Spawn je nasumičan** (±2 oko (0,1,0)), pa lik ponekad zakači prepreku. Tolerancije
   bočnog pomeranja su 1.5.
