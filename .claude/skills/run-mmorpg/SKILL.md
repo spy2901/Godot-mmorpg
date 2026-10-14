@@ -168,6 +168,10 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
   istekne -> server izbaci peer-a, lik nikad ne postaje vidljiv. Uloga `visi` (token `visi-token`, stub ga drži
   40 s) proverava `ucitavanje_istek_izbacuje` (izbačen < 12 s) i `neucitan_lik_nevidljiv` (observer ga nikad ne vidi).
   `visi.log` sadrži `WARNING: ObjectDB instances leaked` (prekid usred scene), zato se WARN broji kao `^WARN `.
+- **Action bar: raspored se ne čuva (poznato ograničenje).** Slotovi se pune automatski po redosledu inventara
+  (redosled kojim server šalje `primi_predmet` posle učitavanja = redosled u bazi); novi potrošni predmet ide u prvi
+  prazan slot. Raspored po liku se ne snima u bazu, pa posle ponovne prijave bar opet prati redosled inventara.
+  Nema drag-and-drop-a. Kad se doda ručno raspoređivanje, raspored treba čuvati po liku (backend).
 - **Server radi bez `server_relay`** (`NetworkManager.hostuj`). Sa relay-em Godot pri odlasku peer-a A
   šalje `DEL_PEER` ostalima (kanal 0) pre nego što ENet ukloni peer-a B koji je otišao u istom paketu
   → `Unable to send packet on channel 0, max channels: 0` u journal-u (dva klijenta izađu zajedno).
