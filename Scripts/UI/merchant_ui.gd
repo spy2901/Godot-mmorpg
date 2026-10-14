@@ -175,6 +175,7 @@ func _input(event: InputEvent) -> void:
 	if not _active:
 		return
 	if event.is_action_pressed("ui_cancel"):
+		get_viewport().set_input_as_handled() # Esc zatvara samo prodavnicu (ne skida i cilj)
 		_close()
 
 func _close() -> void:
