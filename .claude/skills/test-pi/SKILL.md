@@ -55,6 +55,11 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
 
 ## Gotchas
 
+- **Klijent i server se deploy-uju zajedno.** Paket unosa je kompaktno kodiran (`PackedByteArray`: 13 B zaglavlje
+  + 6 B po unosu, do 32 nepotvrđena unosa, `Player_Movement._kodiraj/_dekodiraj`). Server odbacuje stari format
+  (Array) kao neispravan paket, a stari server ne razume novi: klijent starije verzije se poveže, ali se lik ne
+  pomera. Svaka promena formata = novi build i za server (Pi) i za sve klijente u isto vreme.
+
 - Hostname (`spajko`, Tailscale) se razrešava u drajveru (`IP.resolve_hostname`) pre `pridruzi_se`.
 - Prozorski klijent kasni ~8 s; zato se sve čeka preko stanja (fajlovi `igracN_ime`, `igracN_hp`,
   `igrac1_pomeren`, `igracN_gotov`), ne po satu.
