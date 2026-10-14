@@ -25,7 +25,7 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 61 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 61 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 63 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 63 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -86,6 +86,9 @@ serveru u `$OUT/cilj_server`. Klik = `InputEventMouseButton` na `kamera.unprojec
 `klik_na_prazno_brise` (pod), `esc_brise_cilj`, `udaljavanje_brise_cilj` (31 m ostaje = histereza, 33 m skida),
 `smrt_cilja_brise`; observer: `drugi_ne_vidi_cilj` (dok server drži cilj CiljLik-a, kod observera nema ni
 `cilj_id`, ni okvira, ni prstena). Svih 10 pada bez implementacije (provereno).
+`esc_zatvara_prozor_ne_cilj` (otvoren dijalog pa trgovac: Esc zatvara samo prozor, cilj ostaje) i
+`klik_preko_ui_ne_napada` (goblin_904 na 2 m: klik na action bar ne napada; kontrola: klik na pod napada). Oba su
+padala pre popravke (trgovac nije trošio Esc; napad je bio u `_input`).
 
 Nameplate (observer gleda TestLik-a; server upisuje njegov "hp max mrtav" u `$OUT/server_hp`):
 `nameplate_sync_poklapa` (hp_sync/max_hp_sync/mrtav_sync/ime_sync = server), `hp_sync_prati_stetu`
