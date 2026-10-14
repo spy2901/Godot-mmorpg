@@ -4,6 +4,7 @@ extends CharacterBody3D
 
 @export var ime = "Neprijatelj"
 @export var max_hp = 100
+@export var nivo = 1  # prikazuje se u okviru cilja
 @export var brzina = 2.0
 @export var napad_damage = 10
 @export var aggro_range = 10.0

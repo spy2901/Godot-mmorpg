@@ -1027,6 +1027,85 @@ func _input(event):
 		kamera.rotate_x(deg_to_rad(-event.relative.y * mouse_sensitivity))
 		kamera.rotation.x = clamp(kamera.rotation.x, deg_to_rad(-60), deg_to_rad(60))
 
+# ---------------------------------------------------------------- CILJ (klik na neprijatelja)
+# Cilj drži server po igraču (čvor ovog igrača, pa nestaje sa odjavom) i javlja ga samo vlasniku; ne replicira se.
+# ID neprijatelja = ime njegovog čvora u World-u (npr. "goblin_3", jedinstveno po spawn-u).
+
+const MAX_DOMET_CILJA := 30.0  # m, od SERVER pozicije igrača
+const HISTEREZA_CILJA := 2.0   # m preko dometa pre nego što se cilj izgubi (da ne treperi na granici)
+const DOMET_KLIKA := 200.0     # m, dužina zraka iz kamere (domet izbora proverava server)
+signal cilj_promenjen          # klijent: server javio cilj (i kad je zahtev odbijen)
+var cilj_id := ""              # klijent: cilj po serveru, "" = nema
+var _cilj_srv := ""            # server: cilj ovog igrača
+
+func neprijatelj_po_id(id: String) -> Node:
+	for e in get_tree().get_nodes_in_group("neprijatelj"):
+		if str(e.get_parent().name) == id:
+			return e
+	return null
+
+# Levi klik u sceni bira neprijatelja pod mišem ili skida cilj (klik na prazno); klik preko UI-ja ovde ne stiže
+# (UI ga potroši). Esc skida cilj. Postojeći napad na levi klik je u _input i ne zavisi od ovoga.
+func _unhandled_input(event: InputEvent) -> void:
+	if not multiplayer.has_multiplayer_peer() or not is_multiplayer_authority():
+		return
+	var id := cilj_id
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		id = _neprijatelj_pod_misem(event.position)
+	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		id = ""
+	if id != cilj_id:
+		izaberi_cilj(id)
+
+func _neprijatelj_pod_misem(poz: Vector2) -> String:
+	var od: Vector3 = kamera.project_ray_origin(poz)
+	var upit := PhysicsRayQueryParameters3D.create(od, od + kamera.project_ray_normal(poz) * DOMET_KLIKA)
+	upit.exclude = [get_rid()]
+	var e = get_world_3d().direct_space_state.intersect_ray(upit).get("collider")
+	return str(e.get_parent().name) if e and e.is_in_group("neprijatelj") else ""
+
+# Klijent: zahtev serveru ("" = skini cilj). Server odlučuje i uvek vrati trenutni cilj.
+func izaberi_cilj(id: String) -> void:
+	if multiplayer.is_server():
+		zatrazi_cilj(id)
+	else:
+		zatrazi_cilj.rpc_id(1, id)
+
+@rpc("any_peer", "reliable")
+func zatrazi_cilj(id: String) -> void:
+	if not multiplayer.is_server() or not _posiljalac_je_vlasnik():
+		return
+	if id != "":
+		var e := neprijatelj_po_id(id)
+		if e == null or e._mrtav or global_position.distance_to(e.global_position) > MAX_DOMET_CILJA:
+			print("[CILJ] Odbijeno za ", ime_lika, ": ", id)
+			id = _cilj_srv
+	_cilj_srv = id
+	_javi_cilj()
+
+# Server, svaki tick: cilj koji je umro, nestao ili otišao preko dometa + histereze se skida.
+func _server_proveri_cilj() -> void:
+	if _cilj_srv == "":
+		return
+	var e := neprijatelj_po_id(_cilj_srv)
+	if e == null or e._mrtav or global_position.distance_to(e.global_position) > MAX_DOMET_CILJA + HISTEREZA_CILJA:
+		_cilj_srv = ""
+		_javi_cilj()
+
+func _javi_cilj() -> void:
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik == multiplayer.get_unique_id():
+		primi_cilj(_cilj_srv)
+	else:
+		primi_cilj.rpc_id(vlasnik, _cilj_srv)
+
+@rpc("any_peer", "reliable")
+func primi_cilj(id: String) -> void:
+	if not _poziv_od_servera():
+		return
+	cilj_id = id
+	cilj_promenjen.emit()
+
 func _physics_process(_delta):
 	if not multiplayer.has_multiplayer_peer():
 		return
@@ -1035,6 +1114,7 @@ func _physics_process(_delta):
 		if is_multiplayer_authority():
 			posalji_unos(_kodiraj([_novi_unos()])) # host koji igra: lokalni poziv, bez predikcije
 		_server_korak(dt)
+		_server_proveri_cilj()
 	elif is_multiplayer_authority():
 		_klijent_korak(dt)
 

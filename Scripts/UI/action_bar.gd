@@ -42,7 +42,7 @@ func _nadji_igraca() -> Node:
 
 func _napravi() -> void:
 	var okvir := PanelContainer.new()
-	okvir.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	okvir.mouse_filter = Control.MOUSE_FILTER_STOP # klik preko bara ne ide u svet (ne menja cilj)
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = STIL.BOJA_BAR
 	sb.set_border_width_all(STIL.IVICA_BAR)
