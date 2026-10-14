@@ -5,6 +5,7 @@
 [ext_resource type="Script" uid="uid://b5ch8pf68vvb7" path="res://Scripts/UI/TopBar.gd" id="3_x3wgy"]
 [ext_resource type="PackedScene" uid="uid://cljkfnkgprjv5" path="res://Scenes/Inventory/InventoryUI.tscn" id="4_3smsa"]
 [ext_resource type="PackedScene" path="res://Scenes/UI/ActionBar.tscn" id="5_abar"]
+[ext_resource type="PackedScene" path="res://Scenes/UI/OkvirCilja.tscn" id="6_cilj"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_7q7q3"]
 margin = 0.0
@@ -126,6 +127,8 @@ layout_mode = 2
 [node name="InventoryUI" parent="ui" unique_id=1342373889 instance=ExtResource("4_3smsa")]
 
 [node name="ActionBar" parent="ui" instance=ExtResource("5_abar")]
+
+[node name="OkvirCilja" parent="ui" instance=ExtResource("6_cilj")]
 
 [node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="." unique_id=1105863601]
 replication_config = SubResource("SceneReplicationConfig_vgqql")
