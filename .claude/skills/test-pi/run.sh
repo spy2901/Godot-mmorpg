@@ -86,8 +86,8 @@ P1=$!
 "$G" --headless --path . --script $D -- igrac2 "${ARG[@]}" > "$OUT/igrac2.log" 2>&1 &
 P2=$!
 wait $P1 $P2
-# najmanje ~100 uzoraka (0,1 s): ako su klijenti bili kraći od 11 s, ping radi do 11 s
-PREOSTALO=$((11 - (SECONDS - PING_OD))); [ $PREOSTALO -gt 0 ] && sleep $PREOSTALO
+# najmanje 100 uzoraka (0,1 s): ping radi bar 13 s (stvarno ~8-9 paketa/s, SECONDS je ceo broj)
+PREOSTALO=$((13 - (SECONDS - PING_OD))); [ $PREOSTALO -gt 0 ] && sleep $PREOSTALO
 kill -INT $PING 2>/dev/null; wait $PING 2>/dev/null
 echo "PING za vreme testa: $(grep -h 'packet loss' "$OUT/ping.log" | sed 's/^ *//') | $(grep -h 'round-trip' "$OUT/ping.log" | sed 's/.*= //')"
 
