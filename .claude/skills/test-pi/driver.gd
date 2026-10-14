@@ -47,6 +47,54 @@ func _cekaj(uslov: Callable, sek: float) -> bool:
 		await process_frame
 	return true
 
+func _pritisni(k: Key) -> void:
+	for dole in [true, false]:
+		var e := InputEventKey.new()
+		e.keycode = k
+		e.physical_keycode = k
+		e.pressed = dole
+		Input.parse_input_event(e)
+
+func _snimi(sufiks: String) -> void:
+	if shot == "":
+		return
+	for i in 3: # da se poslednja promena UI-ja iscrta
+		await process_frame
+	var putanja := shot.get_basename() + sufiks + ".png"
+	root.get_viewport().get_texture().get_image().save_png(putanja)
+	print("[igrac1] screenshot -> ", putanja)
+
+# Taster 1 = small_health_potion (reset_stanje.py: 3 komada u bazi, HP 60). Prvi pritisak: HP 88-100, slot 2.
+# Drugi odmah po potvrdi prvog iz stanja servera (količina 2 i cooldown): "Još nije spremno" + overlay sa sekundama.
+# Količinu u BAZI (3 -> 2) proverava run.sh posle klijenata (klijent nema server key).
+func _action_bar(p, hud) -> void:
+	var bar = p.get_node_or_null("ui/ActionBar")
+	var ima: bool = bar != null and bar.has_method("koristi_slot")
+	var spreman: bool = ima and await _cekaj(func(): return bar.slotovi.size() > 0 and bar.slotovi[0] == "small_health_potion" \
+		and bar.kolicina(0) == 3 and bar._prikaz[0].oznaka.text != "", 10.0)
+	await _snimi("_bar")
+	var odg := []
+	var hvataj := func(d): odg.append(d)
+	p.item_odgovor.connect(hvataj)
+	var hp0: int = hud.hp
+	_pritisni(KEY_1)
+	# potvrda iz stanja: odgovor stigao, server javio količinu 2 i cooldown, klijentski zahtev završen
+	var potvrda: bool = await _cekaj(func(): return odg.size() >= 1 and ima and bar.kolicina(0) == 2 and bar.preostalo_ms(0) > 0 \
+		and not p._zahtevi_u_toku.has("item"), 5.0)
+	_pritisni(KEY_1)
+	_pisi("igrac1_bar", "1")
+	await _cekaj(func(): return odg.size() >= 2, 5.0)
+	p.item_odgovor.disconnect(hvataj)
+	for i in 2: await process_frame
+	var cd_txt: String = bar._prikaz[0].cd.text if ima else ""
+	var overlay: bool = ima and bar._prikaz[0].overlay.visible
+	_provera("action_bar_napitak", spreman and potvrda and odg[0].get("ok", false) and hud.hp >= 88 and hud.hp <= 100 \
+		and bar.kolicina(0) == 2 and bar._prikaz[0].kolicina.text == "2",
+		"bar=%s slot1 '%s' x%s, hp %d->%d, odgovor=%s" % [ima, bar._prikaz[0].oznaka.text if ima else "-", bar._prikaz[0].kolicina.text if ima else "-", hp0, hud.hp, odg[0] if odg.size() > 0 else "-"])
+	_provera("action_bar_cooldown", odg.size() == 2 and odg[1].get("poruka") == "Još nije spremno" and overlay and cd_txt.is_valid_int() and int(cd_txt) > 0,
+		"odgovor=%s overlay=%s sekundi='%s'" % [odg[1] if odg.size() > 1 else "-", overlay, cd_txt])
+	await _snimi("_cooldown")
+
 func _pisi(ime: String, s: String) -> void:
 	var f := FileAccess.open(dir + "/" + ime, FileAccess.WRITE)
 	f.store_string(s)
@@ -131,6 +179,9 @@ func _scenario() -> void:
 		return
 	_provera("hp_mana", hud.max_hp > 0 and hud.hp > 0 and hud.hp <= hud.max_hp and hud.mana >= 0 and hud.mana <= hud.max_mana and not hud.je_mrtav,
 		"hp=%d/%d mana=%d/%d mrtav=%s" % [hud.hp, hud.max_hp, hud.mana, hud.max_mana, hud.je_mrtav])
+	# 3b. action bar na pravom serveru (igrac1), odmah posle učitavanja: HP 60 iz reset_stanje.py, regen +2/s
+	if uloga == "igrac1":
+		await _action_bar(p, hud)
 	_pisi(uloga + "_ime", ime)
 
 	# 4. drugi igrač: nameplate sa njegovim imenom i HP-om koji server šalje (poredi se sa njegovim HUD-om)

@@ -36,6 +36,10 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
      Meri se kad server potvrdi poslednji unos sa W (prazan/noviji prediction buffer), ne posle fiksnog vremena.
    - `drugi_vidi_kretanje` (igrac2): tuđi lik se pomerio koliko je server javio.
    - screenshot `$OUT/pi_igrac1.png`: igrac1 se okrene ka drugom igraču pa snimi.
+   - action bar (igrac1, odmah posle učitavanja): `action_bar_napitak` (taster 1 = small_health_potion: HP 88-100,
+     slot pokazuje 2) i `action_bar_cooldown` (drugi pritisak čim server potvrdi prvi: "Još nije spremno", overlay
+     sa sekundama). Screenshot-ovi `$OUT/pi_igrac1_bar.png` (popunjen bar) i `$OUT/pi_igrac1_cooldown.png`.
+     Posle klijenata `run.sh`: `baza_posle_action_bara` (small_health_potion u bazi 3 -> 2, `reset_stanje.py --proveri 2`).
    - `WARN igracN:greska_predikcije` kad je najveća greška predikcije > 1 m (`GRESKA_WARN_M`), npr. snap
      pri prijavi kad se izgubi reset; WARN ne obara rezultat.
    Za vreme klijenata ide `ping -i 0.1` (`$OUT/ping.log`), najmanje ~100 uzoraka (posle klijenata radi do 11 s;
@@ -48,8 +52,10 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
 
 - `.env.test` (u `.gitignore`) se učitava samo u env procesa. Lozinke i tokeni nikad ne idu u
   argumente, ispis ni log; drajver čita `TEST_USER_n`/`TEST_PASS_n` preko `OS.get_environment`.
-- Samo nalozi sa prefiksom `agent_test` (proverava i `run.sh` i drajver). Ništa se ne briše u bazi;
-  test menja samo poziciju agent_test likova (snimanje pri odjavi). Na kraju klijent radi `/auth/logout`.
+- Samo nalozi sa prefiksom `agent_test` (proverava i `run.sh` i drajver). Ništa se ne briše u bazi.
+  `reset_stanje.py` na početku svakog pokretanja postavlja agent_test likove: fiksna pozicija, HP 60 i tačno 3
+  `small_health_potion` (`POST /players/{ime}/inventory/change`); ostale predmete ne dira (samo upozorenje), equipment
+  ne dira. Test menja još poziciju (snimanje pri odjavi) i troši jedan napitak (action bar). Na kraju klijent radi `/auth/logout`.
 - Drajver ne zove `GameState.prijavi()` da ne prepiše zapamćeno korisničko ime u `user://settings.cfg`.
 - Pi: `spy2901@100.79.170.67` (`PI=` za drugi), servis `mmorpg-game`, backend `mmorpg-api` na :8001.
 
