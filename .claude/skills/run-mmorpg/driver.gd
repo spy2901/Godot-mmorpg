@@ -123,6 +123,9 @@ func _process(d):
 			if uloga == "potion" or uloga == "prijava": # pravi login preko stub API-ja (token -> TestLik)
 				root.get_node("GameState").token = "potion-token"
 				root.get_node("GameState").ime_igraca = "TestLik"
+			elif uloga == "mover" or uloga == "observer": # server objavljuje lika ostalima tek posle učitavanja
+				root.get_node("GameState").token = uloga + "-token"
+				root.get_node("GameState").ime_igraca = "MoverLik" if uloga == "mover" else "ObserverLik"
 			change_scene_to_file("res://Scenes/UI/MultiplayerTest.tscn")
 			_faza = "scena"
 		return false
@@ -222,7 +225,27 @@ func _server(log: bool) -> bool:
 		return true
 	return t > _max_t
 
+# Pop-in: gde je observer PRVI PUT video svaki tuđi lik (čvor vidljiv u stablu). TestLik se iz baze učita na
+# TESTLIK_DB_POZ, pa ne sme da se pojavi na spawn tački; MoverLik je nov (0,0,0) i mora da se pojavi.
+const TESTLIK_DB_POZ := Vector3(6, 1, -7) # = stub_api PLAYERS["TestLik"]
+const POJAVA_TOLERANCIJA := 0.5
+var _prva_pojava := {} # ime čvora -> [pozicija pri prvom prikazu, poz_sync tada, ime_sync]
+func _prati_pojavu() -> void:
+	for n in get_nodes_in_group("player"):
+		if n.name == _id() or not n.is_inside_tree():
+			continue
+		if not _prva_pojava.has(n.name):
+			if n.is_visible_in_tree():
+				_prva_pojava[n.name] = [n.global_position, n.poz_sync, n.ime_sync]
+		elif _prva_pojava[n.name][2] == "":
+			_prva_pojava[n.name][2] = n.ime_sync
+func _pojava(ime: String) -> Array:
+	for v in _prva_pojava.values():
+		if v[2] == ime: return v
+	return []
+
 func _observer(log: bool, d: float) -> bool:
+	_prati_pojavu()
 	if not _spreman and _moj():
 		_spreman = true
 		print("OBSERVER_SPREMAN") # run.sh tek tada pokreće movera i potion klijenta
@@ -255,6 +278,13 @@ func _observer(log: bool, d: float) -> bool:
 		_provera("nameplate_samo_tudji", _samo_tudji, "tuđi ima vidljiv Nameplate, sopstveni nema")
 		_provera("mrtav_sync_i_respawn", _video_mrtvog and _video_respawn, "mrtav=%s respawn=%s" % [_video_mrtvog, _video_respawn])
 		_provera("nameplate_boje", _snimljeno.size() == 4 and not _snimljeno.values().has(false), "%s" % _snimljeno)
+		var tl := _pojava("TestLik")
+		var tl_razlika: float = tl[0].distance_to(TESTLIK_DB_POZ) if not tl.is_empty() else INF
+		_provera("prva_pojava_na_poziciji_iz_baze", tl_razlika < POJAVA_TOLERANCIJA,
+			"TestLik prvi put viđen na %s, baza %s, razlika %.2f m" % [tl[0] if not tl.is_empty() else "-", TESTLIK_DB_POZ, tl_razlika])
+		var ml := _pojava("MoverLik")
+		_provera("novi_lik_000_se_pojavljuje", not ml.is_empty() and ml[0].distance_to(ml[1]) < POJAVA_TOLERANCIJA,
+			"MoverLik (bez pozicije u bazi) prvi put viđen na %s, server %s" % [ml[0] if not ml.is_empty() else "-", ml[1] if not ml.is_empty() else "-"])
 		_provera("observer_korak_max_2x", _obs_kraci == 0, "prekoracenja=%d, max korak=%.2f x brzina*dt, snap-ova=%d" % [_obs_kraci, _obs_max, _obs_snap])
 		return true
 	return false

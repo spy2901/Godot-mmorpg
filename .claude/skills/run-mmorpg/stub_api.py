@@ -41,7 +41,11 @@ PLAYERS = {"TestLik": {
         {"slot": 4, "id": "apple", "kolicina": 2},
     ],
 }}
-TOKENI = {"potion-token": "TestLik"}
+# mover/observer: lik bez pozicije u bazi (0,0,0) -> ostaje na spawn tački; server ga objavi ostalima tek
+# posle učitavanja. Veliki HP: neprijatelji mogu da ga napadnu, a smrt (respawn) bi pomerila merenja.
+for _ime in ("MoverLik", "ObserverLik"):
+    PLAYERS[_ime] = dict(PLAYERS["TestLik"], ime=_ime, hp=100000, max_hp=100000, pos_x=0, pos_y=0, pos_z=0, inventory=[])
+TOKENI = {"potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik"}
 LOCK = threading.Lock()
 
 
