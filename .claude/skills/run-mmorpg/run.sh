@@ -9,7 +9,7 @@ G="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 D=res://.claude/skills/run-mmorpg/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/run-mmorpg}"
 echo "load average: $(sysctl -n vm.loadavg 2>/dev/null || cut -d' ' -f1-3 /proc/loadavg)"
-mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt "$OUT"/visi_id "$OUT"/izgubljeno_* "$OUT"/cilj_*
+mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt "$OUT"/visi_id "$OUT"/izgubljeno_* "$OUT"/cilj_* "$OUT"/drugi_*
 PORT="${STUB_PORT:-18765}"
 API="--server-url=http://127.0.0.1:$PORT"
 

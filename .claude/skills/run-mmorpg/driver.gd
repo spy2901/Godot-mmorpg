@@ -1223,10 +1223,11 @@ func _uloga_drugi() -> bool:
 	if not _drugi_krenuo and p and p.get_node("ui/Control")._ucitano:
 		_drugi_krenuo = true
 		_drugi_scenario(p)
-	return _drugi_kraj or t > MAX_T
+	# cilj stigne do napada tek posle ostalih faza (pod opterećenjem > 90 s); izlaz i kad server ode (nema mog lika)
+	return _drugi_kraj or t > 2 * MAX_T or (_drugi_krenuo and p == null)
 
 func _drugi_scenario(p) -> void:
-	await _cekaj(func(): return FileAccess.file_exists(dir + "/drugi_kreni"), 90.0)
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/drugi_kreni"), 2 * MAX_T)
 	var e = _nep("goblin_904")
 	var hp0: int = e.hp if e else -1
 	var odg := []
