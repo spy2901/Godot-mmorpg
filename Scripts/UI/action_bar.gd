@@ -167,7 +167,9 @@ func _obradi_red() -> void:
 	while not _red.is_empty():
 		var id: String = _red.pop_front()
 		var predmet: Dictionary = await ApiManager.get_item(id)
-		if predmet.is_empty() or predmet.has("error") or str(predmet.get("tip", "")) != "consumable":
+		if predmet.is_empty() or predmet.has("error"):
+			continue # API nedostupan: ne odbacuje se, pokušava ponovo pri sledećem stanju od servera
+		if str(predmet.get("tip", "")) != "consumable":
 			_odbaceni[id] = true
 			continue
 		var prazan := slotovi.find("")
