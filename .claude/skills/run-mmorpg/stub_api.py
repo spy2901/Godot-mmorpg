@@ -48,6 +48,12 @@ PLAYERS = {"TestLik": {
 for _ime, _poz in (("MoverLik", (0, 0, 0)), ("ObserverLik", (4, 1.16, 0))):
     PLAYERS[_ime] = dict(PLAYERS["TestLik"], ime=_ime, hp=100000, max_hp=100000,
                          pos_x=_poz[0], pos_y=_poz[1], pos_z=_poz[2], inventory=[])
+# ObserverLik ima nekoliko potrošnih predmeta: action bar na screenshot-u (--window) nije prazan
+PLAYERS["ObserverLik"]["inventory"] = [
+    {"slot": 0, "id": "small_health_potion", "kolicina": 5},
+    {"slot": 1, "id": "mana_potion", "kolicina": 2},
+    {"slot": 2, "id": "apple", "kolicina": 1},
+]
 TOKENI = {"potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik"}
 LOCK = threading.Lock()
 

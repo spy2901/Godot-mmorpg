@@ -43,9 +43,9 @@ pokreni server "$OUT/server.log" "$G" --headless --path . --script $D -- server 
 S=$PID
 sleep 1.5
 if [ "${1:-}" = "--window" ]; then # observer u prozoru snima nameplate TestLik-a: $OUT/nameplate_<stanje>.png
-  pokreni observer "$OUT/observer.log" "$G" --path . --resolution 1280x720 --script $D -- observer "dir=$OUT" "shot=$OUT/nameplate"
+  pokreni observer "$OUT/observer.log" "$G" --path . --resolution 1280x720 --script $D -- observer "dir=$OUT" "shot=$OUT/nameplate" "$API"
 else
-  pokreni observer "$OUT/observer.log" "$G" --headless --path . --script $D -- observer "dir=$OUT"
+  pokreni observer "$OUT/observer.log" "$G" --headless --path . --script $D -- observer "dir=$OUT" "$API"
 fi
 O=$PID
 # mover meri vreme od svog lika, a observer mora da ga vidi od početka: čekaj observer (prozor kasni ~8 s)
