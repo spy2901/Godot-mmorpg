@@ -71,6 +71,9 @@ echo "PASS reset_pozicije"
 
 # ---------------------------------------------------------------- 4. dva prava klijenta
 echo "== 4/4 dva klijenta protiv Pi-ja"
+# ping u pozadini za vreme celog testa klijenata (gubitak paketa baš dok se meri)
+ping -i 0.2 -q "${PI#*@}" > "$OUT/ping.log" 2>&1 &
+PING=$!; trap 'kill $PING 2>/dev/null' EXIT # ne ostavljaj ping ako skripta stane ranije
 ARG=("dir=$OUT" "host=$TEST_GAME_HOST" "port=$TEST_GAME_PORT" "--server-url=$TEST_API_URL")
 [ $REG = 1 ] && ARG+=("registruj=1")
 if [ $PROZOR = 1 ]; then
@@ -82,6 +85,8 @@ P1=$!
 "$G" --headless --path . --script $D -- igrac2 "${ARG[@]}" > "$OUT/igrac2.log" 2>&1 &
 P2=$!
 wait $P1 $P2
+kill -INT $PING 2>/dev/null; wait $PING 2>/dev/null
+echo "PING za vreme testa: $(grep -h 'packet loss' "$OUT/ping.log" | sed 's/^ *//') | $(grep -h 'round-trip' "$OUT/ping.log" | sed 's/.*= //')"
 
 grep -h '^PASS\|^FAIL\|^WARN\|screenshot' "$OUT"/igrac1.log "$OUT"/igrac2.log
 grep -h 'SCRIPT ERROR' "$OUT"/igrac*.log | sort | uniq -c
