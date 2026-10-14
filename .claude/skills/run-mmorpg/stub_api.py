@@ -43,8 +43,11 @@ PLAYERS = {"TestLik": {
 }}
 # mover/observer: lik bez pozicije u bazi (0,0,0) -> ostaje na spawn tački; server ga objavi ostalima tek
 # posle učitavanja. Veliki HP: neprijatelji mogu da ga napadnu, a smrt (respawn) bi pomerila merenja.
-for _ime in ("MoverLik", "ObserverLik"):
-    PLAYERS[_ime] = dict(PLAYERS["TestLik"], ime=_ime, hp=100000, max_hp=100000, pos_x=0, pos_y=0, pos_z=0, inventory=[])
+# MoverLik je nov (0,0,0 = bez pozicije, nasumičan spawn); ObserverLik ima svoju poziciju (x=4, dalje od
+# spawn-a ±2) da se dva lika ne stvore jedan na drugom (na_podu y=2.8: mover na glavi observera).
+for _ime, _poz in (("MoverLik", (0, 0, 0)), ("ObserverLik", (4, 1.16, 0))):
+    PLAYERS[_ime] = dict(PLAYERS["TestLik"], ime=_ime, hp=100000, max_hp=100000,
+                         pos_x=_poz[0], pos_y=_poz[1], pos_z=_poz[2], inventory=[])
 TOKENI = {"potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik"}
 LOCK = threading.Lock()
 

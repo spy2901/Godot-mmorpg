@@ -346,9 +346,11 @@ func _mover(log: bool) -> bool:
 			_cp[k] = p.server_poz  # pozicija koju javlja server
 			_cpp[k] = p.global_position  # predviđena
 			_kor[k] = p.korekcije_glatke + p.korekcije_snap
-			if k == 3.5:
-				var sudar = p.get_last_slide_collision()
-				_cp["podloga"] = [p.is_on_floor(), sudar.get_collider().name if sudar and sudar.get_collider() else "-", sudar.get_position() if sudar else Vector3.ZERO]
+			if k == 3.5: # udaljenost do ostalih likova: < 1 m = spawn kolizija (stoji na drugom liku)
+				var d := []
+				for o in get_nodes_in_group("player"):
+					if o != p: d.append("%s %.2f m" % [o.ime_sync if o.ime_sync != "" else str(o.name), o.global_position.distance_to(p.global_position)])
+				_cp["podloga"] = [p.is_on_floor(), d]
 	if log: print("[M t=%.1f] moj %s server=%s kor=%d/%d" % [t, _fmt(p), p.server_poz, p.korekcije_glatke, p.korekcije_snap])
 	if t > 43.0:
 		var z: Array = _cp["zakasneli"]
@@ -361,7 +363,9 @@ func _mover(log: bool) -> bool:
 		var w1: Vector3 = c[6.5] - c[3.5]
 		var w2: Vector3 = c[8.5] - c[6.5]
 		var pod: Array = c["podloga"]
-		_provera("na_podu", absf(c[3.5].y - 1.16) < 0.1, "y=%.2f, spawn %s, is_on_floor=%s, podloga '%s' u %s, čekanje poda %.2f s" % [c[3.5].y, _spawn[1], pod[0], pod[1], pod[2], _t0 - _spawn[0]])
+		var kolizija := false
+		for x in pod[1]: kolizija = kolizija or float(x.split(" ")[-2]) < 1.0
+		_provera("na_podu", absf(c[3.5].y - 1.16) < 0.1, "y=%.2f, spawn %s, is_on_floor=%s, ostali likovi %s%s, čekanje poda %.2f s" % [c[3.5].y, _spawn[1], pod[0], pod[1], " -> SPAWN KOLIZIJA" if kolizija else "", _t0 - _spawn[0]])
 		_provera("W_2s_napred", w1.z > 8.5 and w1.z < 11.5 and absf(w1.x) < 1.5, "delta=%s" % w1)
 		_provera("yaw_PI/2_ide_-x", w2.x < -4.0 and absf(w2.z) < 1.5, "delta=%s" % w2)
 		_provera("tudji_unos_ignorisan", c[12.0].distance_to(c[8.5]) < 0.05, "delta=%s" % (c[12.0] - c[8.5]))
