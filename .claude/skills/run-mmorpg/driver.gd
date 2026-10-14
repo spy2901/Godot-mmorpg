@@ -79,6 +79,7 @@ const MAX_T := 120.0    # zaštita od zaglavljivanja
 var _max_t := MAX_T     # server u repro_login.sh radi duže (maxt=)
 var _aktivnost := false # prijava: reliable zahtevi za predmet dok traje sesija
 var _izgubi_reset := false # prijava: klijent odbaci reset posle prijave (test hook)
+var _korak := 0           # raspored: 1 = menja raspored i odjavi se, 2 = ponovna prijava (novi proces)
 
 func _initialize():
 	var args := OS.get_cmdline_user_args()
@@ -96,6 +97,8 @@ func _initialize():
 			_aktivnost = true
 		if a == "izgubi_reset=1":
 			_izgubi_reset = true
+		if a.begins_with("korak="):
+			_korak = int(a.substr(6))
 
 func _nm(): return root.get_node("NetworkManager")
 func _world(): return current_scene.get_node_or_null("World") if current_scene else null
@@ -127,6 +130,9 @@ func _process(d):
 			elif uloga == "visi": # verify ovog tokena u stub-u visi: server mora da ga izbaci posle UCITAVANJE_TIMEOUT
 				root.get_node("GameState").token = "visi-token"
 				root.get_node("GameState").ime_igraca = "VisiLik"
+			elif uloga == "raspored":
+				root.get_node("GameState").token = "raspored-token"
+				root.get_node("GameState").ime_igraca = "RasporedLik"
 			elif uloga == "mover" or uloga == "observer": # server objavljuje lika ostalima tek posle učitavanja
 				root.get_node("GameState").token = uloga + "-token"
 				root.get_node("GameState").ime_igraca = "MoverLik" if uloga == "mover" else "ObserverLik"
@@ -149,6 +155,7 @@ func _process(d):
 		"potion": return _potion()
 		"prijava": return _prijava()
 		"visi": return _visi()
+		"raspored": return _raspored()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -801,3 +808,80 @@ func _prijava() -> bool:
 		print("PRIJAVA_KRAJ snap=%d glatke=%d greska_max=%.3f reset_izgubljen=%s server_poz=%s" % [p.korekcije_snap, p.korekcije_glatke, p.greska_max, p.test_reset_izgubljen, p.server_poz])
 		return true
 	return t > 30.0
+
+# ---------------------------------------------------------------- RASPORED ACTION BARA (RasporedLik, dva procesa)
+# Stub: small x2, mač, apple x1, mana x1, bez sačuvanog rasporeda. Korak 1: početni raspored iz inventara upisan u bazu,
+# mana premeštena u slot 7, nevažeći zahtevi odbijeni, apple potrošen (slot ostaje), kupljen medium (prvi prazan = 3).
+# Korak 2 (novi proces = ponovna prijava): isti raspored iz baze, apple i dalje u slotu 2 sa 0.
+
+const RASPORED_POCETNI := ["small_health_potion", "apple", "mana_potion", "", "", "", "", "", "", ""]
+const RASPORED_POMEREN := ["small_health_potion", "apple", "", "", "", "", "mana_potion", "", "", ""]
+const RASPORED_KRAJ := ["small_health_potion", "apple", "medium_health_potion", "", "", "", "mana_potion", "", "", ""]
+var _raspored_krenuo := false
+var _raspored_kraj := false
+
+func _raspored() -> bool:
+	var p = _moj()
+	if not _raspored_krenuo and p and p.has_node("ui/ActionBar") and p.get_node("ui/Control")._ucitano:
+		_raspored_krenuo = true
+		_raspored_scenario(p, p.get_node("ui/ActionBar"))
+	return _raspored_kraj or t > MAX_T
+
+# raspored u stub "bazi" (null -> ""); [] = nema sačuvan raspored
+func _raspored_baza() -> Array:
+	var ab = (await root.get_node("ApiManager").get_player("RasporedLik")).get("action_bar")
+	return ab.map(func(x): return "" if x == null else x) if ab is Array else []
+
+func _cekaj_bazu(ocekivano: Array, sek := 5.0) -> Array:
+	var kraj := Time.get_ticks_msec() + int(sek * 1000)
+	var ab: Array = await _raspored_baza()
+	while ab != ocekivano and Time.get_ticks_msec() < kraj:
+		await create_timer(0.2).timeout
+		ab = await _raspored_baza()
+	return ab
+
+func _raspored_scenario(p, bar) -> void:
+	var ima: bool = p.has_method("promeni_action_slot")
+	var prijema := [0] # koliko puta je server poslao raspored (i kad odbije zahtev)
+	if p.has_signal("action_bar_promenjen"):
+		p.action_bar_promenjen.connect(func(): prijema[0] += 1)
+	if _korak == 2:
+		await _cekaj(func(): return bar.slotovi == RASPORED_KRAJ, 5.0)
+		await create_timer(0.5).timeout # količine stižu posle rasporeda
+		_provera("raspored_prezivi_prijavu", bar.slotovi == RASPORED_KRAJ, "bar=%s" % [bar.slotovi])
+		_provera("potroseni_ne_pomera_slotove", bar.slotovi[1] == "apple" and bar.kolicina(1) == 0 and bar._prikaz[1].kolicina.text == "0" \
+			and bar.slotovi[0] == "small_health_potion" and bar.slotovi[6] == "mana_potion",
+			"slot2 '%s' x%s, slot1 '%s', slot7 '%s'" % [bar.slotovi[1], bar._prikaz[1].kolicina.text, bar.slotovi[0], bar.slotovi[6]])
+		_raspored_kraj = true
+		return
+
+	await _cekaj(func(): return bar.slotovi == RASPORED_POCETNI, 5.0)
+	var b: Array = await _cekaj_bazu(RASPORED_POCETNI)
+	_provera("pocetni_raspored_upisan", bar.slotovi == RASPORED_POCETNI and b == RASPORED_POCETNI, "bar=%s baza=%s" % [bar.slotovi, b])
+
+	# premeštanje: mana u slot 7 (stari slot 3 se prazni)
+	if ima: p.promeni_action_slot(7, "mana_potion")
+	await _cekaj(func(): return bar.slotovi == RASPORED_POMEREN, 5.0)
+	b = await _cekaj_bazu(RASPORED_POMEREN)
+	# nevažeći zahtevi: server odgovori rasporedom, ništa se ne menja
+	var n0: int = prijema[0]
+	if ima:
+		p.promeni_action_slot(0, "apple")
+		p.promeni_action_slot(11, "apple")
+		p.promeni_action_slot(5, "nepostoji")
+	await _cekaj(func(): return prijema[0] >= n0 + 3, 5.0)
+	await create_timer(0.5).timeout
+	var b2: Array = await _raspored_baza()
+	_provera("nevazeci_slot_item_odbijen", ima and prijema[0] == n0 + 3 and b == RASPORED_POMEREN and bar.slotovi == RASPORED_POMEREN and b2 == RASPORED_POMEREN,
+		"odgovora %d/3, bar=%s, baza pre=%s posle=%s" % [prijema[0] - n0, bar.slotovi, b, b2])
+
+	# apple potrošen (HP 50/100): slot 2 ostaje rezervisan sa 0
+	var r: Dictionary = await p.koristi_item_na_serveru("apple")
+	await _cekaj(func(): return bar.kolicina(1) == 0, 3.0)
+	# novi predmet ide u prvi prazan slot (3, ispražnjen premeštanjem)
+	var k: Dictionary = await p.kupi_na_serveru("medium_health_potion")
+	await _cekaj(func(): return bar.slotovi[2] != "" or bar.slotovi[3] != "", 5.0)
+	b = await _cekaj_bazu(RASPORED_KRAJ)
+	_provera("novi_predmet_prvi_prazan", bar.slotovi == RASPORED_KRAJ and b == RASPORED_KRAJ and bar.kolicina(1) == 0,
+		"apple=%s kupovina=%s bar=%s baza=%s" % [r.get("ok"), k.get("ok"), bar.slotovi, b])
+	_raspored_kraj = true

@@ -58,6 +58,13 @@ P=$PID
 sleep 0.3
 pokreni visi "$OUT/visi.log" "$G" --headless --path . --script $D -- visi "dir=$OUT"
 V=$PID
+sleep 0.3
+# raspored action bara: korak 1 menja raspored i odjavi se, korak 2 (novi proces) je ponovna prijava istog lika
+( pokreni raspored1 "$OUT/raspored1.log" "$G" --headless --path . --script $D -- raspored korak=1 "dir=$OUT" "$API"
+  wait $PID
+  pokreni raspored2 "$OUT/raspored2.log" "$G" --headless --path . --script $D -- raspored korak=2 "dir=$OUT" "$API"
+  wait $PID ) &
+R=$!
 
 # kad mover završi provere kretanja, ugasi server dok su klijenti još živi
 for _ in $(seq 240); do
@@ -65,11 +72,12 @@ for _ in $(seq 240); do
   kill -0 $M 2>/dev/null || break
   sleep 0.5
 done
+for _ in $(seq 120); do kill -0 $R 2>/dev/null || break; sleep 0.5; done # raspored mora da završi pre gašenja servera
 touch "$OUT/ugasi_server"
-wait $M $O $S $P $V
+wait $M $O $S $P $V $R
 
 echo "logovi: $OUT"
-grep -h '^PASS\|^FAIL\|^WARN \|screenshot\|korekcije' "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log "$OUT"/visi.log "$OUT"/server.log
+grep -h '^PASS\|^FAIL\|^WARN \|screenshot\|korekcije' "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log "$OUT"/visi.log "$OUT"/raspored1.log "$OUT"/raspored2.log "$OUT"/server.log
 if grep -q "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log; then
   echo "FAIL nema_greske_neaktivnog_peera  $(grep -ch "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log | paste -sd+ - | bc) linija"
 else
@@ -86,5 +94,5 @@ if [ -z "${RUN_PONOVLJEN:-}" ] && grep -qh '^FAIL seq_bez_rupa_bez_gubitka' "$OU
   kill $STUB 2>/dev/null; wait $STUB 2>/dev/null # port mora biti slobodan za novi stub
   RUN_PONOVLJEN=1 exec "$SKRIPTA" "$@"
 fi
-# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 46
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 46 ]
+# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 51
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 51 ]

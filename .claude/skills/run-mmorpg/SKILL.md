@@ -25,10 +25,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 46 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 46 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 51 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 51 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -61,11 +61,21 @@ Napitci (`potion` klijent, provere preko stanja: HUD hp, `prebroj_item`, količi
 Štetu i smrt zadaje server drajver na komandu iz `$OUT/potion_cmd` ("br steta N" / "br ubij").
 HP se regeneriše +2/s, pa se efekat proverava kao razlika uz toleranciju.
 
-Action bar (`Scenes/UI/ActionBar.tscn`, potion klijent, tasteri preko `Input.parse_input_event`): bar se puni iz
-servera (`primi_predmet`: količina i preostali cooldown), slot 1 = small HP, 2 = large, 3 = medium, 4 = apple, 10 prazan.
+Action bar (`Scenes/UI/ActionBar.tscn`, potion klijent, tasteri preko `Input.parse_input_event`): raspored drži server
+(`primi_action_bar`; TestLik nema sačuvan raspored, pa ga server popuni iz inventara), količina i cooldown iz
+`primi_predmet`. Slot 1 = small HP, 2 = large, 3 = medium, 4 = apple, 10 prazan.
 `action_slot_koristi_napitak` (taster 1: +30, baza -1), `action_cooldown_odbija` ("Još nije spremno", overlay sa
 sekundama), `action_prazan_slot_nista` (taster 0: nijedan zahtev), `action_kolicina_iz_servera` (slot 1 = baza,
 slot 2 = 0 jer je large potrošen mimo bara). Sve 4 padaju bez implementacije (provereno).
+
+Raspored action bara po liku (uloga `raspored`, lik `RasporedLik`: small x2, mač, apple x1, mana x1, bez sačuvanog
+rasporeda). Dva procesa jedan za drugim (`korak=1`, pa `korak=2` = ponovna prijava); server se gasi tek kad oba završe.
+Korak 1: `pocetni_raspored_upisan` (small, apple, mana u bar i u stub bazu), mana premeštena u slot 7
+(`promeni_action_slot`), `nevazeci_slot_item_odbijen` (slot 0, slot 11, nepostojeći item: server odgovori rasporedom,
+baza i bar nepromenjeni), apple potrošen, kupljen medium → `novi_predmet_prvi_prazan` (slot 3, ispražnjen
+premeštanjem, ne 4). Korak 2: `raspored_prezivi_prijavu` (isti raspored iz baze) i `potroseni_ne_pomera_slotove`
+(apple u slotu 2 sa 0, mana u 7). Svih 5 pada bez implementacije (provereno: stari bar posle prijave pomeri manu u slot 2).
+Stub: `POST /players/{ime}/action_bar` (10 slotova, predmeti postoje) i `POST /players/{ime}/shop/buy` (samo doda komad).
 
 Nameplate (observer gleda TestLik-a; server upisuje njegov "hp max mrtav" u `$OUT/server_hp`):
 `nameplate_sync_poklapa` (hp_sync/max_hp_sync/mrtav_sync/ime_sync = server), `hp_sync_prati_stetu`
@@ -168,10 +178,10 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
   istekne -> server izbaci peer-a, lik nikad ne postaje vidljiv. Uloga `visi` (token `visi-token`, stub ga drži
   40 s) proverava `ucitavanje_istek_izbacuje` (izbačen < 12 s) i `neucitan_lik_nevidljiv` (observer ga nikad ne vidi).
   `visi.log` sadrži `WARNING: ObjectDB instances leaked` (prekid usred scene), zato se WARN broji kao `^WARN `.
-- **Action bar: raspored se ne čuva (poznato ograničenje).** Slotovi se pune automatski po redosledu inventara
-  (redosled kojim server šalje `primi_predmet` posle učitavanja = redosled u bazi); novi potrošni predmet ide u prvi
-  prazan slot. Raspored po liku se ne snima u bazu, pa posle ponovne prijave bar opet prati redosled inventara.
-  Nema drag-and-drop-a. Kad se doda ručno raspoređivanje, raspored treba čuvati po liku (backend).
+- **Action bar: raspored se čuva po liku** (`players.action_bar`, backend migracija 005). Lik bez sačuvanog rasporeda
+  dobije potrošne predmete po redosledu inventara i to se upiše. Posle toga se iz inventara ništa ne dopunjuje: novi
+  predmet ide u prvi prazan slot samo kad ga server dodeli (loot, kupovina, nagrada), pa predmet dodat direktno u
+  bazi (npr. `inventory/change` mimo game servera) ne dobija slot. Nema drag-and-drop-a ni UI-ja za izmenu.
 - **Server radi bez `server_relay`** (`NetworkManager.hostuj`). Sa relay-em Godot pri odlasku peer-a A
   šalje `DEL_PEER` ostalima (kanal 0) pre nego što ENet ukloni peer-a B koji je otišao u istom paketu
   → `Unable to send packet on channel 0, max channels: 0` u journal-u (dva klijenta izađu zajedno).

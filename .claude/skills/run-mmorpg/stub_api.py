@@ -32,7 +32,7 @@ ITEMS = {i["id"]: i for i in [
 PLAYERS = {"TestLik": {
     "ime": "TestLik", "level": 1, "xp": 0, "max_xp": 100, "gold": 100, "napad_damage": 25,
     "hp": 50, "max_hp": 100, "mana": 100, "max_mana": 100, "pos_x": 6, "pos_y": 1, "pos_z": -7,  # van putanje movera, van aggro dometa
-    "aktivni_quest_id": None, "quest_progres": 0, "equipment": {},
+    "aktivni_quest_id": None, "quest_progres": 0, "equipment": {}, "action_bar": None,
     "inventory": [
         {"slot": 0, "id": "small_health_potion", "kolicina": 3},
         {"slot": 1, "id": "large_health_potion", "kolicina": 1},
@@ -54,7 +54,15 @@ PLAYERS["ObserverLik"]["inventory"] = [
     {"slot": 1, "id": "mana_potion", "kolicina": 2},
     {"slot": 2, "id": "apple", "kolicina": 1},
 ]
-TOKENI = {"potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik"}
+# RasporedLik: raspored action bara posle ponovne prijave (uloga raspored, korak 1 pa korak 2)
+PLAYERS["RasporedLik"] = dict(PLAYERS["TestLik"], ime="RasporedLik", pos_x=-6, pos_z=-5, inventory=[
+    {"slot": 0, "id": "small_health_potion", "kolicina": 2},
+    {"slot": 1, "id": "iron_sword", "kolicina": 1},
+    {"slot": 2, "id": "apple", "kolicina": 1},
+    {"slot": 3, "id": "mana_potion", "kolicina": 1},
+])
+TOKENI = {"potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
+          "raspored-token": "RasporedLik"}
 LOCK = threading.Lock()
 
 
@@ -106,6 +114,25 @@ class H(BaseHTTPRequestHandler):
                     if k in d:
                         pl[k] = d[k]
             return self._odgovor({"status": "ok"})
+        if m := re.fullmatch(r"/players/([\w-]+)/action_bar", p):  # kao backend: 10 slotova, predmeti postoje
+            sl = d.get("slotovi")
+            if not isinstance(sl, list) or len(sl) != 10:
+                return self._odgovor({"error": "action bar mora imati 10 slotova"})
+            if any(i is not None and i not in ITEMS for i in sl):
+                return self._odgovor({"error": "Item not found"})
+            with LOCK:
+                if m[1] not in PLAYERS:
+                    return self._odgovor({"error": "Player not found"})
+                PLAYERS[m[1]]["action_bar"] = sl
+            return self._odgovor({"status": "ok", "action_bar": sl})
+        if m := re.fullmatch(r"/players/([\w-]+)/shop/buy", p):  # bez golda: samo doda komad u novi stack
+            with LOCK:
+                pl = PLAYERS.get(m[1])
+                if not pl or str(d.get("item_id")) not in ITEMS:
+                    return self._odgovor({"error": "Player not found" if not pl else "Item not found"})
+                inv = pl["inventory"]
+                inv.append({"slot": max([e["slot"] for e in inv], default=-1) + 1, "id": d["item_id"], "kolicina": 1})
+                return self._odgovor({"status": "ok", "gold": pl["gold"], "inventory": inv})
         if m := re.fullmatch(r"/players/([\w-]+)/item/use", p):
             time.sleep(ITEM_USE_KASNJENJE)
             with LOCK:
