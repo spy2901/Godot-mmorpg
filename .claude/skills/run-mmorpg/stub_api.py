@@ -81,6 +81,9 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         p, d = self.path, self._telo()
         if p == "/auth/verify":
+            if d.get("token") == "visi-token":  # verify koji visi (duže od ApiManager 3x8 s): server mora sam da izbaci peer-a
+                time.sleep(40)
+                return self._odgovor({"error": "istek"}, 504)
             ime = TOKENI.get(str(d.get("token", "")))
             return self._odgovor({"status": "ok", "ime_lika": ime, "username": ime.lower()} if ime
                                  else {"error": "Nevazeci ili istekao token"}, 200 if ime else 401)

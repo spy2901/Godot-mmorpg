@@ -123,6 +123,9 @@ func _process(d):
 			if uloga == "potion" or uloga == "prijava": # pravi login preko stub API-ja (token -> TestLik)
 				root.get_node("GameState").token = "potion-token"
 				root.get_node("GameState").ime_igraca = "TestLik"
+			elif uloga == "visi": # verify ovog tokena u stub-u visi: server mora da ga izbaci posle UCITAVANJE_TIMEOUT
+				root.get_node("GameState").token = "visi-token"
+				root.get_node("GameState").ime_igraca = "VisiLik"
 			elif uloga == "mover" or uloga == "observer": # server objavljuje lika ostalima tek posle učitavanja
 				root.get_node("GameState").token = uloga + "-token"
 				root.get_node("GameState").ime_igraca = "MoverLik" if uloga == "mover" else "ObserverLik"
@@ -144,6 +147,7 @@ func _process(d):
 		"mover": return _mover(log)
 		"potion": return _potion()
 		"prijava": return _prijava()
+		"visi": return _visi()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -234,11 +238,12 @@ func _prati_pojavu() -> void:
 	for n in get_nodes_in_group("player"):
 		if n.name == _id() or not n.is_inside_tree():
 			continue
-		if not _prva_pojava.has(n.name):
+		var k := str(n.name)
+		if not _prva_pojava.has(k):
 			if n.is_visible_in_tree():
-				_prva_pojava[n.name] = [n.global_position, n.poz_sync, n.ime_sync]
-		elif _prva_pojava[n.name][2] == "":
-			_prva_pojava[n.name][2] = n.ime_sync
+				_prva_pojava[k] = [n.global_position, n.poz_sync, n.ime_sync]
+		elif _prva_pojava[k][2] == "":
+			_prva_pojava[k][2] = n.ime_sync
 func _pojava(ime: String) -> Array:
 	for v in _prva_pojava.values():
 		if v[2] == ime: return v
@@ -282,6 +287,9 @@ func _observer(log: bool, d: float) -> bool:
 		var tl_razlika: float = tl[0].distance_to(TESTLIK_DB_POZ) if not tl.is_empty() else INF
 		_provera("prva_pojava_na_poziciji_iz_baze", tl_razlika < POJAVA_TOLERANCIJA,
 			"TestLik prvi put viđen na %s, baza %s, razlika %.2f m" % [tl[0] if not tl.is_empty() else "-", TESTLIK_DB_POZ, tl_razlika])
+		var visi_id := FileAccess.get_file_as_string(dir + "/visi_id")
+		_provera("neucitan_lik_nevidljiv", visi_id != "" and not _prva_pojava.has(visi_id),
+			"lik %s (verify visi) %s" % [visi_id if visi_id != "" else "-", "viđen" if _prva_pojava.has(visi_id) else "nikad viđen"])
 		var ml := _pojava("MoverLik")
 		_provera("novi_lik_000_se_pojavljuje", not ml.is_empty() and ml[0].distance_to(ml[1]) < POJAVA_TOLERANCIJA,
 			"MoverLik (bez pozicije u bazi) prvi put viđen na %s, server %s" % [ml[0] if not ml.is_empty() else "-", ml[1] if not ml.is_empty() else "-"])
@@ -402,6 +410,27 @@ func _mover_ceka_gasenje() -> bool:
 	return false
 
 # ---------------------------------------------------------------- POTION (napitci preko stub API-ja)
+
+# visi: lik čije učitavanje (verify) nikad ne završi. Server ga posle UCITAVANJE_TIMEOUT izbaci (MainMenu sa
+# porukom o isteku); bez te zaštite ostaje povezan i nevidljiv do isteka ApiManager pokušaja (~25 s).
+var _visi_od := -1.0
+func _visi() -> bool:
+	var scena = current_scene
+	if _visi_od >= 0 and scena and scena.scene_file_path == "res://Scenes/UI/MainMenu.tscn":
+		var poruka: String = scena._error_label.text # main_menu prebaci GameState.poruka_logina u labelu i obriše je
+		var rok: float = 10.0 + 2.0 # Player_Movement.UCITAVANJE_TIMEOUT + slanje registracije i izbacivanje (0,2 s)
+		_provera("ucitavanje_istek_izbacuje", "istek" in poruka and t - _visi_od < rok,
+			"izbačen posle %.1f s (rok %.0f s), poruka '%s'" % [t - _visi_od, rok, poruka])
+		return true
+	if _visi_od < 0 and _moj():
+		_visi_od = t
+		var f := FileAccess.open(dir + "/visi_id", FileAccess.WRITE)
+		f.store_string(_id())
+		f.close()
+	if (_visi_od >= 0 and t - _visi_od > 20.0) or t > MAX_T:
+		_provera("ucitavanje_istek_izbacuje", false, "nije izbačen ni posle %.1f s" % (t - _visi_od))
+		return true
+	return false
 
 func _potion() -> bool:
 	if _moj() and not _moj().test_reset_izgubljen and not _potion_krenuo:
