@@ -25,10 +25,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 71 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 71 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 85 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 85 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -96,6 +96,19 @@ svoj `_cilj_srv` i odgovara `odgovor_napad` (signal `napad_odgovor`, HUD poruka)
 (server komanda `ubij_lik CiljLik`; R i klik → "Mrtav si"). Uloga `drugi` (`DrugiLik` na (-15, 1.16, -16), token
 `drugi-token`): kad CiljLik upiše `drugi_kreni`, klik u nebo + R → `drugi_ne_napada_tudji_cilj` ("Nema cilja", HP
 tuđeg cilja nepromenjen), pa upiše `drugi_gotov`. Svih 8 novih pada bez implementacije (provereno).
+
+AI neprijatelja (`Enemy.gd`: stanja MIROVANJE/JURENJE/POVRATAK, tabela pretnje, leash; prelazi u logu kao `[AI]`).
+Scenario vodi server drajver (`_ai_scenario`) nad test goblinom `goblin_950` na (20, 20) (meta `ai_test`, aggro 5 m,
+brzina 2); likove pomera `server_postavi_poziciju`, štetu zadaje `primi_damage(n, peer_id)`. Klijenti uloge `ai`
+(`korak=1` AiLik (14, 22), `korak=2` Ai2Lik (24, 14), HP 1000) slušaju `$OUT/ai_cmd_<ime>` (`cilj <id>|-`, `kraj` =
+odjava) i svaki frame upisuju `$OUT/ai_klijent_<ime>` (cilj|pretnja|ja_meta|okvir|traka|vrednost). Kraj: server
+upiše `$OUT/ai_gotov` (`run.sh` čeka i to pre gašenja). Provere: `ai_mirovanje_ne_napada`,
+`ai_jurenje_u_dometu_napada`, `ai_steta_pretnja_1_1`, `ai_posmatrac_ne_vidi_pretnju`, `ai_meta_tek_preko_110` (23 vs
+21 ostaje, 24 menja), `ai_traka_pretnje_sa_servera` (100/110, pa 88/100), `ai_traka_pretnje_sakrivena`,
+`ai_smrt_brise_pretnju` (Ai2Lik umre i odmah se odjavi, pre respawn-a na spawn-u), `ai_leash_povratak_ne_napada`,
+`ai_povratak_ne_jurenje`, `ai_povratak_stize_regen`, `ai_napadnut_van_dometa_jurenje`, `ai_respawn_mirovanje`
+(sopstvena spawn tačka (20, -20): test server ne pali tačke scene), `ai_odjava_brise_pretnju`. Svih 14 pada bez
+implementacije (provereno).
 
 Nameplate (observer gleda TestLik-a; server upisuje njegov "hp max mrtav" u `$OUT/server_hp`):
 `nameplate_sync_poklapa` (hp_sync/max_hp_sync/mrtav_sync/ime_sync = server), `hp_sync_prati_stetu`
@@ -170,9 +183,11 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
 - **Snimanje screenshot-a koči frame** (GPU readback). Zato prozor ima observer (ne mover): zastoj
   u moveru bi skratio W fazu i `W_2s_napred` bi pao (-8 umesto -10).
 - **Headless ne može screenshot** (dummy renderer). Za sliku koristi `--window`.
-- **Neprijatelji ne jure test likove**: server drajver svakom neprijatelju (grupa `neprijatelj`) postavlja
-  `aggro_range = 0`. Troll na (0, 0, 15) je ranije ume da priđe moveru i zaustavi ga (`yaw_PI/2_ide_-x`
-  -1.1 umesto -5). Borba se testira komandama servera nad TestLik-om (`potion_cmd`).
+- **Neprijatelji ne jure test likove**: server drajver svakom neprijatelju (grupa `neprijatelj`, osim mete `ai_test`)
+  postavlja `aggro_range = 0`, `brzina = 0` i `moze_napasti = false` (neprijatelj koga igrač udari ulazi u JURENJE
+  po pretnji, pa samo aggro 0 nije dovoljan). Test server ne pali spawn tačke scene (`hostuj()` bez
+  `pokreni_spawn_tacke`), pa sveta neprijatelja nema; postoje samo oni koje drajver napravi. Borba nad igračima se
+  testira komandama servera (`potion_cmd`, `cilj_cmd`).
 - **NPC stoji na (0, 2.7, -10)** (crna kapsula na screenshot-u) i blokira kretanje ka -z, pa se lik zaglavi zavisno od nasumičnog x spawna. Zato prva W faza ide ka +z.
 - **Spawn je nasumičan** (±2 oko (0,1,0)), pa lik ponekad zakači prepreku. Tolerancije
   bočnog pomeranja su 1.5.
