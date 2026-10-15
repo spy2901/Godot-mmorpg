@@ -16,6 +16,12 @@ const VISINA_TRAKE := 14           # px
 const BOJA_TRAKA := Color(0.75, 0.12, 0.12)
 const BOJA_TRAKA_POZADINA := Color(0.15, 0.03, 0.03, 0.85)
 
+# traka pretnje (ispod HP trake): moja pretnja kao % pretnje mete; puna = PRETNJA_MAX (prag promene mete)
+const VISINA_PRETNJE := 4          # px
+const PRETNJA_MAX := 110           # % (Enemy.PRAG_PROMENE_META)
+const BOJA_PRETNJA := Color(0.95, 0.8, 0.15)
+const BOJA_PRETNJA_POZADINA := Color(0.15, 0.12, 0.02, 0.85)
+
 # tekst (FONT = null -> podrazumevani font teme)
 const FONT: Font = null
 const FONT_IME := 14               # "Goblin  Lv.1"

@@ -12,6 +12,7 @@ var okvir: PanelContainer
 var ime: Label
 var traka: ProgressBar
 var hp_tekst: Label
+var pretnja: ProgressBar  # moja pretnja kod cilja (igrač.cilj_pretnja sa servera), sakrivena kad je nemam
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -42,27 +43,34 @@ func _napravi() -> void:
 	okvir.add_child(kolona)
 	ime = _label(STIL.FONT_IME)
 	kolona.add_child(ime)
-	traka = ProgressBar.new()
-	traka.show_percentage = false
-	traka.custom_minimum_size = Vector2(STIL.SIRINA, STIL.VISINA_TRAKE)
-	traka.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var puna := StyleBoxFlat.new()
-	puna.bg_color = STIL.BOJA_TRAKA
-	var prazna := StyleBoxFlat.new()
-	prazna.bg_color = STIL.BOJA_TRAKA_POZADINA
-	traka.add_theme_stylebox_override("fill", puna)
-	traka.add_theme_stylebox_override("background", prazna)
+	traka = _traka(STIL.VISINA_TRAKE, STIL.BOJA_TRAKA, STIL.BOJA_TRAKA_POZADINA)
 	kolona.add_child(traka)
 	hp_tekst = _label(STIL.FONT_HP)
 	hp_tekst.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hp_tekst.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	hp_tekst.set_anchors_preset(Control.PRESET_FULL_RECT)
 	traka.add_child(hp_tekst)
+	pretnja = _traka(STIL.VISINA_PRETNJE, STIL.BOJA_PRETNJA, STIL.BOJA_PRETNJA_POZADINA)
+	pretnja.max_value = STIL.PRETNJA_MAX
+	kolona.add_child(pretnja)
 	add_child(okvir)
 	# vrh ekrana, sredina
 	okvir.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP, Control.PRESET_MODE_MINSIZE)
 	okvir.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	okvir.position.y += STIL.MARGINA_VRH
+
+func _traka(visina: int, boja: Color, pozadina: Color) -> ProgressBar:
+	var t := ProgressBar.new()
+	t.show_percentage = false
+	t.custom_minimum_size = Vector2(STIL.SIRINA, visina)
+	t.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var puna := StyleBoxFlat.new()
+	puna.bg_color = boja
+	var prazna := StyleBoxFlat.new()
+	prazna.bg_color = pozadina
+	t.add_theme_stylebox_override("fill", puna)
+	t.add_theme_stylebox_override("background", prazna)
+	return t
 
 func _label(velicina: int) -> Label:
 	var l := Label.new()
@@ -111,3 +119,5 @@ func _osvezi() -> void:
 	traka.max_value = _cilj.max_hp
 	traka.value = _cilj.hp
 	hp_tekst.text = "%d / %d" % [_cilj.hp, _cilj.max_hp]
+	pretnja.visible = _igrac.cilj_pretnja >= 0
+	pretnja.value = _igrac.cilj_pretnja

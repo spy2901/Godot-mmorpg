@@ -1049,7 +1049,10 @@ const HISTEREZA_CILJA := 2.0   # m preko dometa pre nego što se cilj izgubi (da
 const DOMET_KLIKA := 200.0     # m, dužina zraka iz kamere (domet izbora proverava server)
 signal cilj_promenjen          # klijent: server javio cilj (i kad je zahtev odbijen)
 var cilj_id := ""              # klijent: cilj po serveru, "" = nema
+var cilj_pretnja := -1         # klijent: moja pretnja kod cilja kao % pretnje njegove mete, -1 = nemam pretnju
+var cilj_ja_meta := false      # klijent: ja sam meta cilja
 var _cilj_srv := ""            # server: cilj ovog igrača
+var _pretnja_poslata := -1     # server: poslednji procenat poslat vlasniku
 
 func neprijatelj_po_id(id: String) -> Node:
 	for e in get_tree().get_nodes_in_group("neprijatelj"):
@@ -1110,19 +1113,27 @@ func _server_proveri_cilj() -> void:
 	if e == null or e._mrtav or global_position.distance_to(e.global_position) > MAX_DOMET_CILJA + HISTEREZA_CILJA:
 		_cilj_srv = ""
 		_javi_cilj()
+	elif e.pretnja_procenat(get_multiplayer_authority()) != _pretnja_poslata:
+		_javi_cilj()
 
+# Vlasniku: cilj i samo njegova pretnja kod cilja (procenat i da li je meta), bez tuđe pretnje.
 func _javi_cilj() -> void:
 	var vlasnik := get_multiplayer_authority()
+	var e := neprijatelj_po_id(_cilj_srv) if _cilj_srv != "" else null
+	_pretnja_poslata = e.pretnja_procenat(vlasnik) if e else -1
+	var meta: bool = _pretnja_poslata >= 0 and e._meta_id == vlasnik
 	if vlasnik == multiplayer.get_unique_id():
-		primi_cilj(_cilj_srv)
+		primi_cilj(_cilj_srv, _pretnja_poslata, meta)
 	else:
-		primi_cilj.rpc_id(vlasnik, _cilj_srv)
+		primi_cilj.rpc_id(vlasnik, _cilj_srv, _pretnja_poslata, meta)
 
 @rpc("any_peer", "reliable")
-func primi_cilj(id: String) -> void:
+func primi_cilj(id: String, pretnja: int, ja_meta: bool) -> void:
 	if not _poziv_od_servera():
 		return
 	cilj_id = id
+	cilj_pretnja = pretnja
+	cilj_ja_meta = ja_meta
 	cilj_promenjen.emit()
 
 func _physics_process(_delta):
