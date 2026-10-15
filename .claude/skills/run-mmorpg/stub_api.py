@@ -31,7 +31,7 @@ ITEMS = {i["id"]: i for i in [
 
 PLAYERS = {"TestLik": {
     "ime": "TestLik", "level": 1, "xp": 0, "max_xp": 100, "gold": 100, "napad_damage": 25,
-    "hp": 50, "max_hp": 100, "mana": 100, "max_mana": 100, "pos_x": 6, "pos_y": 1, "pos_z": -7,  # van putanje movera, van aggro dometa
+    "hp": 50, "max_hp": 100, "mana": 100, "max_mana": 100, "pos_x": 9, "pos_y": 1, "pos_z": -7,  # van putanje movera, van aggro dometa
     "aktivni_quest_id": None, "quest_progres": 0, "equipment": {}, "action_bar": None,
     "inventory": [
         {"slot": 0, "id": "small_health_potion", "kolicina": 3},
@@ -45,7 +45,10 @@ PLAYERS = {"TestLik": {
 # posle učitavanja. Veliki HP: neprijatelji mogu da ga napadnu, a smrt (respawn) bi pomerila merenja.
 # MoverLik je nov (0,0,0 = bez pozicije, nasumičan spawn); ObserverLik ima svoju poziciju van putanje movera
 # (mover ide x -9..6, z -12..16): na (4, 0) mu je mover u speedhack fazi udarao u leđa (speedhack_max_1.2x 0.42x),
-# a na spawn-u bi se stvorili jedan na drugom. Odavde TestLik (6, -7) ostaje ispred kamere (screenshot --window).
+# a na spawn-u bi se stvorili jedan na drugom. Odavde TestLik (9, -7) ostaje ispred kamere (screenshot --window).
+# Svi pomoćni likovi imaju fiksnu poziciju van putanje movera (x -9..6, z -12..16) i bar 5 m jedan od drugog (domet
+# napada 3.5 m): TestLik (9, -7), ObserverLik (11, 4), RasporedLik (-14, -5), CiljLik (-20, -20), DrugiLik (-15, -16).
+# visi se nikad ne učita iz baze; server drajver ga skloni na (14, -14) (VISI_PARKING u driver.gd).
 for _ime, _poz in (("MoverLik", (0, 0, 0)), ("ObserverLik", (11, 1.16, 4))):
     PLAYERS[_ime] = dict(PLAYERS["TestLik"], ime=_ime, hp=100000, max_hp=100000,
                          pos_x=_poz[0], pos_y=_poz[1], pos_z=_poz[2], inventory=[])
@@ -56,7 +59,7 @@ PLAYERS["ObserverLik"]["inventory"] = [
     {"slot": 2, "id": "apple", "kolicina": 1},
 ]
 # RasporedLik: raspored action bara posle ponovne prijave (uloga raspored, korak 1 pa korak 2)
-PLAYERS["RasporedLik"] = dict(PLAYERS["TestLik"], ime="RasporedLik", pos_x=-6, pos_z=-5, inventory=[
+PLAYERS["RasporedLik"] = dict(PLAYERS["TestLik"], ime="RasporedLik", pos_x=-14, pos_z=-5, inventory=[
     {"slot": 0, "id": "small_health_potion", "kolicina": 2},
     {"slot": 1, "id": "iron_sword", "kolicina": 1},
     {"slot": 2, "id": "apple", "kolicina": 1},
@@ -65,7 +68,7 @@ PLAYERS["RasporedLik"] = dict(PLAYERS["TestLik"], ime="RasporedLik", pos_x=-6, p
 # CiljLik: ciljanje (uloga cilj), u uglu mape da test neprijatelji ne smetaju ostalima
 PLAYERS["CiljLik"] = dict(PLAYERS["TestLik"], ime="CiljLik", pos_x=-20, pos_y=1.16, pos_z=-20, inventory=[])
 # DrugiLik: drugi igrač pored CiljLik-ovog cilja (napad bez sopstvenog cilja)
-PLAYERS["DrugiLik"] = dict(PLAYERS["TestLik"], ime="DrugiLik", pos_x=-17, pos_y=1.16, pos_z=-16, inventory=[])
+PLAYERS["DrugiLik"] = dict(PLAYERS["TestLik"], ime="DrugiLik", pos_x=-15, pos_y=1.16, pos_z=-16, inventory=[])
 TOKENI = {"potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik"}
 LOCK = threading.Lock()

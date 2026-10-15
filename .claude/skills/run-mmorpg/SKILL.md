@@ -93,7 +93,7 @@ svoj `_cilj_srv` i odgovara `odgovor_napad` (signal `napad_odgovor`, HUD poruka)
 ~2.7 m i goblin_905 na ~2.5 m, oba u dometu 3.5 m): `napad_bez_cilja` ("Nema cilja"), `klik_bira_ne_steti`,
 `klik_preko_ui_ne_napada` (klik na action bar: ni odgovor ni šteta), `napad_samo_cilj` (904 -25, 905 netaknut),
 `napad_cooldown` ("Još nije spremno"), `napad_predaleko` (904 na ~6 m), `smrt_cilja_pa_nema_cilja`, `mrtav_ne_napada`
-(server komanda `ubij_lik CiljLik`; R i klik → "Mrtav si"). Uloga `drugi` (`DrugiLik` na (-17, 1.16, -16), token
+(server komanda `ubij_lik CiljLik`; R i klik → "Mrtav si"). Uloga `drugi` (`DrugiLik` na (-15, 1.16, -16), token
 `drugi-token`): kad CiljLik upiše `drugi_kreni`, klik u nebo + R → `drugi_ne_napada_tudji_cilj` ("Nema cilja", HP
 tuđeg cilja nepromenjen), pa upiše `drugi_gotov`. Svih 8 novih pada bez implementacije (provereno).
 
@@ -110,7 +110,7 @@ Stub (`stub_api.py`): `/auth/verify` (token `potion-token` → `TestLik`), `GET 
 `GET /items/{id}`, `/quests/completed/{ime}`, `POST /players/{ime}/save` (samo hp/mana/pozicija;
 inventar je autoritativan u stub-u), `POST /players/{ime}/item/use` (kašnjenje 0.3 s da se zahtevi
 preklope; brojač `item_use_br`). Nepoznate rute: 404 i linija u `$OUT/stub.log`. TestLik ima sačuvanu
-poziciju (6, 1, -7): van putanje movera i van aggro dometa neprijatelja (na spawn-u bi blokirao movera).
+poziciju (9, 1, -7): van putanje movera i van aggro dometa neprijatelja (na spawn-u bi blokirao movera).
 Mover i observer i dalje rade bez prijave (lažni token "x").
 
 Red unosa (server, `UNOS_RED_MAX`): `rafal_bez_rupa` (mover 34.0–34.4 s ne šalje, pa pošalje ~24 unosa
@@ -193,6 +193,10 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
 - **Server objavljuje lika ostalim klijentima tek posle učitavanja iz baze** (`public_visibility` sinhronizatora,
   važi i za spawn); do tada ga vidi samo vlasnik. Zato mover i observer imaju stub naloge (`MoverLik`,
   `ObserverLik`; MoverLik bez pozicije (0,0,0), ObserverLik na (11, 1.16, 4) van putanje movera; veliki HP): klijent bez učitavanja (token `"x"`) ostaje nevidljiv drugima.
+- **Pomoćni likovi stoje van putanje movera** (x -9..6, z -12..16), bar 5 m jedan od drugog: TestLik (9, -7), ObserverLik
+  (11, 4), RasporedLik (-14, -5), CiljLik (-20, -20), DrugiLik (-15, -16). Do učitavanja iz baze svaki lik stoji na
+  nasumičnom spawn-u (±2 oko 0,0); `visi` se nikad ne učita, pa ga server drajver odmah skloni na `VISI_PARKING`
+  (14, -14). Ranije je stajao ~12 s na spawn-u i mover bi naleteo na njega (`W_2s_napred` ~0.9 umesto ~10).
   Provere `prva_pojava_na_poziciji_iz_baze` i `novi_lik_000_se_pojavljuje`.
 - **Učitavanje ima rok** (`UCITAVANJE_TIMEOUT` 10 s od `registruj_lik`): verify ili čitanje lika koje ne uspe ili
   istekne -> server izbaci peer-a, lik nikad ne postaje vidljiv. Uloga `visi` (token `visi-token`, stub ga drži

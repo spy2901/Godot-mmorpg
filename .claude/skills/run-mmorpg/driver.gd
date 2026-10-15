@@ -15,6 +15,8 @@ var _cpp := {}          # mover: checkpoint -> predviđena (lokalna) pozicija
 var _kor := {}          # mover: checkpoint -> [glatke, snap]
 var _faza_rupe := {}    # server: faza -> preskočeni seq-ovi
 var _teleportovano := false
+var _visi_sklonjen := false
+const VISI_PARKING := Vector3(14, 1.16, -14) # van putanje movera (x -9..6, z -12..16), daleko od ostalih likova
 var _poslednja_faza := ""
 # test rafala: mover zadrži ~24 unosa (0.4 s) pa ih pošalje odjednom; red mora da ih primi i isprazni.
 # Višak od ~14 preko kofe se prazni brzinom 1.2*60 - 60 = 12/s -> ~1.2 s; granica sa rezervom:
@@ -214,6 +216,12 @@ func _server(log: bool) -> bool:
 		var mr = _world().get_node(f[1])
 		mr.server_postavi_poziciju(mr.global_position, true)
 		print("[S] reset ", f[1], " (test redundanse posle reset-a)")
+	# visi se nikad ne učita iz baze, pa bi ~12 s stajao na nasumičnom spawn-u (±2 oko 0,0) na putanji movera
+	var visi_id := FileAccess.get_file_as_string(dir + "/visi_id") if dir != "" else ""
+	if visi_id != "" and not _visi_sklonjen and _world() and _world().has_node(visi_id):
+		_visi_sklonjen = true
+		_world().get_node(visi_id).server_postavi_poziciju(VISI_PARKING, true)
+		print("[S] visi ", visi_id, " sklonjen na ", VISI_PARKING)
 	if faza == "teleport" and not _teleportovano and _world() and _world().has_node(f[1]):
 		_teleportovano = true
 		var m = _world().get_node(f[1])
@@ -262,7 +270,7 @@ func _server(log: bool) -> bool:
 
 # Pop-in: gde je observer PRVI PUT video svaki tuđi lik (čvor vidljiv u stablu). TestLik se iz baze učita na
 # TESTLIK_DB_POZ, pa ne sme da se pojavi na spawn tački; MoverLik je nov (0,0,0) i mora da se pojavi.
-const TESTLIK_DB_POZ := Vector3(6, 1, -7) # = stub_api PLAYERS["TestLik"]
+const TESTLIK_DB_POZ := Vector3(9, 1, -7) # = stub_api PLAYERS["TestLik"]
 const POJAVA_TOLERANCIJA := 0.5
 var _prva_pojava := {} # ime čvora -> [pozicija pri prvom prikazu, poz_sync tada, ime_sync]
 func _prati_pojavu() -> void:
