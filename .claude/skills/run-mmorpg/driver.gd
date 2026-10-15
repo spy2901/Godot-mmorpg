@@ -1346,6 +1346,15 @@ func _ai_scenario(a1, a2) -> void:
 	var id2: int = a2.get_multiplayer_authority()
 	await _cekaj(func(): return _ai_kl("AiLik")[0] != "" or _ai_kl("AiLik")[3] != "", 20.0) # klijenti učitani
 	await _cekaj(func(): return _ai_kl("Ai2Lik")[3] != "", 20.0)
+	# respawn: test server ne pali spawn tačke scene (troll na (0, 15) bi stajao na putanji movera), pa se pali samo
+	# sopstvena tačka u uglu (20, -20); neprijatelja sa nje drajver smiri kao i ostale
+	for tk in get_nodes_in_group("spawn_tacka"):
+		tk.remove_from_group("spawn_tacka")
+	var tacka := Marker3D.new()
+	tacka.set_script(load("res://Scripts/World/spawn_point.gd"))
+	tacka.position = Vector3(20, 2, -20)
+	_world().add_child(tacka)
+	_world()._aktivno = true
 	var w = _world().goblin_spawner.spawn({"vrsta": "goblin", "id": 950, "pos": AI_POCETAK})
 	var e = _telo(w)
 	e.set_meta("ai_test", true)
@@ -1458,9 +1467,6 @@ func _ai_scenario(a1, a2) -> void:
 		"AiLik na %.1f m (aggro %.1f): jurenje=%s, pretnja %.1f" % [d_van, e.aggro_range, jur2, _pr(e, a1)])
 
 	# respawn sa spawn tačke: nov neprijatelj u MIROVANJU, prazna tabela
-	var tacka = null
-	for tk in get_nodes_in_group("spawn_tacka"):
-		if tk.vrsta == "goblin": tacka = tk
 	var gw = _world()._zivi.get(tacka)
 	var g = _telo(gw) if is_instance_valid(gw) else null
 	var imao := false
