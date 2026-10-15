@@ -105,6 +105,8 @@ func _cilj(p) -> void:
 		_provera("cilj_na_pravom_serveru", false, "nema živog neprijatelja bliže od %.0f m" % (p.MAX_DOMET_CILJA - 5.0))
 		return
 	var id := str(e.get_parent().name)
+	var poz0: Vector3 = e.global_position
+	var t0 := Time.get_ticks_msec()
 	var kraj := Time.get_ticks_msec() + 1500
 	while Time.get_ticks_msec() < kraj and is_instance_valid(e): # okreni se ka njemu (kamera je iza lika)
 		var dv: Vector3 = e.global_position - p.global_position
@@ -126,11 +128,34 @@ func _cilj(p) -> void:
 	var hp_ok: bool = is_instance_valid(e) and okvir.hp_tekst.text == "%d / %d" % [e.hp, e.max_hp]
 	await _snimi("_cilj")
 	var tekst: String = okvir.ime.text + " " + okvir.hp_tekst.text
+	_provera("traka_pretnje_sakrivena_na_pravom_serveru", izabran and p.cilj_pretnja == -1 and not okvir.pretnja.visible,
+		"%s izabran=%s, moja pretnja %d, traka vidljiva=%s (screenshot _cilj)" % [id, izabran, p.cilj_pretnja, okvir.pretnja.visible])
+	_miruje_na_pocetku(e, poz0, t0)
 	await _napad_predaleko(p, e, izabran)
 	_pritisni(KEY_ESCAPE)
 	var skinut: bool = await _cekaj(func(): return p.cilj_id == "" and not okvir.okvir.visible, 5.0)
 	_provera("cilj_na_pravom_serveru", izabran and hp_ok and skinut,
 		"%s na %.1f m: izabran=%s okvir '%s' (hp ok=%s), Esc skinuo=%s" % [id, e.global_position.distance_to(p.server_poz) if is_instance_valid(e) else -1.0, izabran, tekst, hp_ok, skinut])
+
+# Neprijatelj daleko od svih likova (van aggro_range) stoji na svojoj spawn tački i ne pomera se (replicirana pozicija).
+func _miruje_na_pocetku(e, poz0: Vector3, t0: int) -> void:
+	if not is_instance_valid(e):
+		_provera("neprijatelj_miruje_na_pocetku", false, "neprijatelj nestao")
+		return
+	var tacka = null
+	for tk in get_nodes_in_group("spawn_tacka"):
+		if tk.vrsta == str(e.get_parent().name).get_slice("_", 0) and (tacka == null or _xz(tk.global_position, e.global_position) < _xz(tacka.global_position, e.global_position)):
+			tacka = tk
+	var od_tacke: float = _xz(tacka.global_position, e.global_position) if tacka else -1.0
+	var najblizi := INF
+	for pl in get_nodes_in_group("player"):
+		najblizi = minf(najblizi, pl.global_position.distance_to(e.global_position))
+	var pomeraj := _xz(poz0, e.global_position)
+	_provera("neprijatelj_miruje_na_pocetku", tacka != null and od_tacke < 1.0 and pomeraj < 0.05 and najblizi > e.aggro_range,
+		"%s %.1f m od spawn tačke, pomeraj %.2f m za %.1f s, najbliži lik %.1f m (aggro %.0f m)" % [e.get_parent().name, od_tacke, pomeraj, (Time.get_ticks_msec() - t0) / 1000.0, najblizi, e.aggro_range])
+
+func _xz(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x, a.z).distance_to(Vector2(b.x, b.z))
 
 # Jedan napad (R) na izabran cilj van dometa napada: server odbija sa "Predaleko", bez štete. Ne ubija neprijatelje
 # (XP i loot test naloga su u pravoj bazi), pa se R ne pritiska ako je cilj blizu.

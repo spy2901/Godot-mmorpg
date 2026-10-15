@@ -43,6 +43,10 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
    - `cilj_na_pravom_serveru` (igrac1 u prozoru, posle screenshot-a): okrene se ka najbližem živom neprijatelju bližem
      od 25 m, levi klik na njega → server potvrdi cilj, okvir pokazuje HP = replicirani hp; screenshot
      `$OUT/pi_igrac1_cilj.png`; Esc skida cilj.
+   - `traka_pretnje_sakrivena_na_pravom_serveru` (isti cilj, screenshot `_cilj`): bez pretnje nema ni procenta sa
+     servera ni žute trake. `neprijatelj_miruje_na_pocetku`: taj neprijatelj je < 1 m od svoje spawn tačke, ne pomeri
+     se dok se lik okreće i klikće (~2 s), a svi likovi su van njegovog aggro_range (MIROVANJE, bez aggro-a na
+     test likove).
    - `napad_predaleko_na_pravom_serveru` (pre Esc-a): tačno jedan napad (R) na izabran cilj van dometa napada (cilj
      mora biti dalje od 5.5 m, inače se R ne pritiska i provera pada): server odgovori "Predaleko", HP cilja
      nepromenjen; screenshot `$OUT/pi_igrac1_napad.png`. Test ne ubija neprijatelje (XP i loot test naloga su u
