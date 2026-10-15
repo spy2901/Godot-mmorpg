@@ -28,12 +28,25 @@ var hp = 100:
 @onready var ime_label = $ImeLabel
 @onready var hp_label = $HpLabel
 
-var player: Node3D = null
+var player: Node3D = null  # server: trenutna meta (igrač sa najvećom pretnjom)
 var napadaci: Array = []  # peer ID-jevi koji su naneli damage (dobijaju XP)
 var _mrtav := false
 
-const RETARGET_INTERVAL := 0.5
-var _retarget_timer := 0.0
+# AI (samo server): stanja i tabela pretnje. Sve konstante AI-ja su ovde.
+enum Stanje { MIROVANJE, JURENJE, POVRATAK }
+const POCETNA_PRETNJA := 1.0      # igrač uđe u aggro_range
+const PRAG_PROMENE_META := 1.1    # nova meta tek kad drugi pređe 110% pretnje trenutne (da meta ne treperi)
+const LEASH_OD_POCETKA := 25.0    # m: neprijatelj dalje od početne tačke -> POVRATAK
+const LEASH_OD_META := 15.0       # m: meta dalje -> POVRATAK; ostali igrači dalje -> brišu se iz tabele
+const REGEN_POSLE_POVRATKA := 10.0 # HP/s u MIROVANJU posle povratka, do punog
+const STIGAO_NA_POCETAK := 0.5    # m (horizontalno)
+
+var stanje: Stanje = Stanje.MIROVANJE
+var pretnja := {}       # peer_id -> pretnja
+var _meta_id := 0       # peer_id mete, 0 = nema
+var _pocetak := Vector3.ZERO
+var _regen := false
+var _regen_akum := 0.0
 
 func _ready():
 	add_to_group("neprijatelj")
@@ -44,11 +57,7 @@ func _ready():
 	hp_label.position = Vector3(0, 2.0, 0)
 	hp_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	_osvezi_hp_label()
-
-	if _je_multiplayer_aktivan():
-		player = _nadji_najblizeg_igraca()
-	else:
-		player = get_tree().get_first_node_in_group("player")
+	_pocetak = global_position
 
 func _je_multiplayer_aktivan() -> bool:
 	return multiplayer.multiplayer_peer != null
@@ -57,18 +66,6 @@ func _ja_sam_autoritet() -> bool:
 	if not _je_multiplayer_aktivan():
 		return true
 	return multiplayer.is_server()
-
-func _nadji_najblizeg_igraca() -> Node3D:
-	var najblizi: Node3D = null
-	var min_dist = INF
-	for p in get_tree().get_nodes_in_group("player"):
-		if p.mrtav:
-			continue
-		var d = global_position.distance_to(p.global_position)
-		if d < min_dist:
-			min_dist = d
-			najblizi = p
-	return najblizi
 
 func _nadji_igraca_po_id(peer_id: int) -> Node:
 	for p in get_tree().get_nodes_in_group("player"):
@@ -83,64 +80,121 @@ func _osvezi_hp_label() -> void:
 func _physics_process(delta):
 	if not _ja_sam_autoritet():
 		return
-
-	_retarget_timer -= delta
-	if _retarget_timer <= 0.0:
-		_retarget_timer = RETARGET_INTERVAL
-		player = _nadji_najblizeg_igraca_u_aggro()
-
-	if player == null or not is_instance_valid(player):
-		velocity.x = 0
-		velocity.z = 0
-		if not is_on_floor():
-			velocity.y -= 9.8 * delta
-		move_and_slide()
-		return
-
-	var distanca = global_position.distance_to(player.global_position)
-
+	velocity.x = 0
+	velocity.z = 0
 	if not is_on_floor():
 		velocity.y -= 9.8 * delta
-
-	if distanca <= aggro_range:
-		var smer = (player.global_position - global_position).normalized()
-		if distanca > napad_range:
-			velocity.x = smer.x * brzina
-			velocity.z = smer.z * brzina
-		else:
-			velocity.x = 0
-			velocity.z = 0
-			if moze_napasti:
-				napadni_igraca()
-	else:
-		velocity.x = 0
-		velocity.z = 0
-
+	match stanje:
+		Stanje.MIROVANJE: _mirovanje(delta)
+		Stanje.JURENJE: _jurenje()
+		Stanje.POVRATAK: _povratak()
 	move_and_slide()
 
-# Najbliži živi igrač unutar aggro_range, ili null (mrtvi se ignorišu)
-func _nadji_najblizeg_igraca_u_aggro() -> Node3D:
-	var najblizi: Node3D = null
-	var min_dist = aggro_range
+# Stoji na početnoj tački; posle povratka regeneriše HP do punog. Igrač u aggro_range -> JURENJE.
+func _mirovanje(delta: float) -> void:
+	if _regen:
+		_regen_akum += REGEN_POSLE_POVRATKA * delta
+		var n := int(_regen_akum)
+		_regen_akum -= n
+		hp = mini(hp + n, max_hp)
+		_regen = hp < max_hp
+	_dodaj_aggro()
+	if not pretnja.is_empty():
+		_promeni_stanje(Stanje.JURENJE)
+
+# Juri igrača sa najvećom pretnjom i napada ga u dometu.
+func _jurenje() -> void:
+	var meta := _nadji_igraca_po_id(_meta_id)
+	if (meta and global_position.distance_to(meta.global_position) > LEASH_OD_META) \
+			or _xz_daljina(global_position, _pocetak) > LEASH_OD_POCETKA:
+		_promeni_stanje(Stanje.POVRATAK)
+		return
+	_ocisti_pretnju()
+	_dodaj_aggro()
+	meta = _izaberi_metu()
+	if meta == null:
+		_promeni_stanje(Stanje.POVRATAK)
+		return
+	player = meta
+	var distanca = global_position.distance_to(meta.global_position)
+	if distanca > napad_range:
+		var smer = (meta.global_position - global_position).normalized()
+		velocity.x = smer.x * brzina
+		velocity.z = smer.z * brzina
+	elif moze_napasti:
+		napadni_igraca()
+
+# Ide na početnu tačku; ne napada i ne reaguje na aggro ni štetu dok ne stigne.
+func _povratak() -> void:
+	if _xz_daljina(global_position, _pocetak) <= STIGAO_NA_POCETAK:
+		_promeni_stanje(Stanje.MIROVANJE)
+		return
+	var smer := _pocetak - global_position
+	smer.y = 0
+	smer = smer.normalized()
+	velocity.x = smer.x * brzina
+	velocity.z = smer.z * brzina
+
+func _promeni_stanje(novo: Stanje) -> void:
+	if novo != Stanje.JURENJE:
+		pretnja.clear()
+		_meta_id = 0
+		player = null
+	_regen = novo == Stanje.MIROVANJE and stanje == Stanje.POVRATAK
+	_regen_akum = 0.0
+	print("[AI] %s %s -> %s" % [get_parent().name, Stanje.keys()[stanje], Stanje.keys()[novo]])
+	stanje = novo
+
+# Živi igrači u aggro_range koji još nisu u tabeli dobiju početnu pretnju.
+func _dodaj_aggro() -> void:
 	for p in get_tree().get_nodes_in_group("player"):
-		if p.mrtav:
-			continue
-		var d = global_position.distance_to(p.global_position)
-		if d <= min_dist:
-			min_dist = d
-			najblizi = p
-	return najblizi
+		var id: int = p.get_multiplayer_authority()
+		if not p.mrtav and not pretnja.has(id) and global_position.distance_to(p.global_position) <= aggro_range:
+			pretnja[id] = POCETNA_PRETNJA
+
+# Mrtav, odjavljen (nije više u grupi player) ili dalji od leash-a -> van tabele.
+func _ocisti_pretnju() -> void:
+	for id in pretnja.keys():
+		var p := _nadji_igraca_po_id(id)
+		if p == null or p.mrtav or global_position.distance_to(p.global_position) > LEASH_OD_META:
+			pretnja.erase(id)
+
+# Najveća pretnja; trenutna meta ostaje dok je drugi ne pređe za PRAG_PROMENE_META.
+func _izaberi_metu() -> Node:
+	var naj := 0
+	for id in pretnja:
+		if naj == 0 or pretnja[id] > pretnja[naj]:
+			naj = id
+	if pretnja.has(_meta_id) and pretnja[naj] <= pretnja[_meta_id] * PRAG_PROMENE_META:
+		naj = _meta_id
+	_meta_id = naj
+	return _nadji_igraca_po_id(naj) if naj != 0 else null
+
+# Server, za traku pretnje vlasnika: pretnja igrača kao % pretnje trenutne mete; -1 = nema pretnje (ili nema mete).
+func pretnja_procenat(peer_id: int) -> int:
+	if stanje != Stanje.JURENJE or not pretnja.has(peer_id) or not pretnja.has(_meta_id):
+		return -1
+	return roundi(100.0 * pretnja[peer_id] / pretnja[_meta_id])
+
+func _xz_daljina(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x, a.z).distance_to(Vector2(b.x, b.z))
 
 func primi_damage(kolicina, napadac_id: int = 0):
 	if not _ja_sam_autoritet() or _mrtav:
 		return
 	if napadac_id != 0 and not napadaci.has(napadac_id):
 		napadaci.append(napadac_id)
+	if napadac_id != 0 and stanje != Stanje.POVRATAK: # šteta = pretnja 1:1; u povratku se ne računa
+		pretnja[napadac_id] = pretnja.get(napadac_id, 0.0) + kolicina
+		if stanje == Stanje.MIROVANJE:
+			_promeni_stanje(Stanje.JURENJE)
 	hp -= kolicina
 	hp = max(hp, 0)
 	print("[HIT] ", ime, " -", kolicina, " -> hp ", hp)
 	if hp == 0:
 		_mrtav = true
+		pretnja.clear()
+		_meta_id = 0
 		print("[DEATH] ", ime)
 		if _je_multiplayer_aktivan():
 			_isplati_personal_loot()
