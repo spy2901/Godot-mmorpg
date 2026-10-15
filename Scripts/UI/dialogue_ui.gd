@@ -158,13 +158,13 @@ func _build_frame(title: String, portret: Texture2D) -> void:
 	_sections.add_theme_constant_override("separation", int(6 * S))
 	add_child(_sections)
 
-	_title_label.text = title
+	_title_label.text = tr(title)
 
 # ---------------------------------------------------------------- HELPERS
 
 func _header(text: String) -> Label:
 	var l := Label.new()
-	l.text = text
+	l.text = tr(text)
 	l.add_theme_font_override("font", FONT)
 	l.add_theme_color_override("font_color", GOLD)
 	l.add_theme_font_size_override("font_size", _fs(22))
@@ -175,7 +175,7 @@ func _header(text: String) -> Label:
 
 func _body(text: String, color: Color = TEXT) -> Label:
 	var l := Label.new()
-	l.text = text
+	l.text = tr(text)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.add_theme_color_override("font_color", color)
 	l.add_theme_font_size_override("font_size", _fs(15))
@@ -210,13 +210,13 @@ func _objective_text(quest: Dictionary) -> String:
 	var cilj = quest.get("cilj", "")
 	var kolicina = int(quest.get("kolicina", 1))
 	if tip == "kill":
-		return "Ubij %s (%d)" % [cilj, kolicina]
+		return tr("Kill %s (%d)") % [cilj, kolicina]
 	elif tip == "fetch":
-		return "Donesi %s (%d)" % [cilj, kolicina]
+		return tr("Bring %s (%d)") % [cilj, kolicina]
 	return ""
 
 func _fill_quest_sections(quest: Dictionary, done: bool) -> void:
-	_sections.add_child(_header("Ciljevi zadatka"))
+	_sections.add_child(_header("Quest objectives"))
 	var obj := _objective_text(quest)
 	if done:
 		_sections.add_child(_body("✓ " + obj, Color(0.45, 1.0, 0.45)))
@@ -231,7 +231,7 @@ func _fill_quest_sections(quest: Dictionary, done: bool) -> void:
 	if item_id == "" and gold <= 0 and xp <= 0:
 		return
 
-	_sections.add_child(_header("Nagrade"))
+	_sections.add_child(_header("Rewards"))
 
 	if item_id != "":
 		var item: Dictionary = await ApiManager.get_item(item_id)
@@ -261,9 +261,9 @@ func _fill_quest_sections(quest: Dictionary, done: bool) -> void:
 			_sections.add_child(box)
 
 	if gold > 0:
-		_sections.add_child(_body("Zlato:  %s 🪙" % _fmt(gold)))
+		_sections.add_child(_body(tr("Gold:  %s 🪙") % _fmt(gold)))
 	if xp > 0:
-		_sections.add_child(_body("Iskustvo:  %s XP" % _fmt(xp)))
+		_sections.add_child(_body(tr("Experience:  %s XP") % _fmt(xp)))
 
 	_sections.add_child(_spacer(14))
 
@@ -272,7 +272,7 @@ func _add_buttons(labels: Array, callbacks: Array) -> void:
 	row.add_theme_constant_override("separation", int(12 * S))
 	for i in labels.size():
 		var b := Button.new()
-		b.text = labels[i]
+		b.text = tr(labels[i])
 		b.custom_minimum_size = Vector2(130 * S, 36 * S)
 		b.add_theme_font_size_override("font_size", _fs(15))
 		b.pressed.connect(callbacks[i])
@@ -287,18 +287,18 @@ func _add_hint() -> void:
 	_sections.add_child(_hint_label)
 
 func _show_page() -> void:
-	_text_label.text = str(_pages[_index])
+	_text_label.text = tr(str(_pages[_index])) # NPC replike su ključevi; opis questa iz baze prolazi neprevedeno
 	_page_label.text = "%d/%d" % [_index + 1, _pages.size()] if _pages.size() > 1 else ""
 	_update_hint()
 
 func _update_hint() -> void:
 	if _index < _pages.size() - 1:
-		_hint_label.text = "[F] dalje"
+		_hint_label.text = tr("[F] Next")
 		return
 	match _mode:
-		"offer": _hint_label.text = "[F] Prihvati    [Esc] Odbij"
-		"turnin": _hint_label.text = "[F] Predaj"
-		_: _hint_label.text = "[F] zatvori"
+		"offer": _hint_label.text = tr("[F] Accept    [Esc] Decline")
+		"turnin": _hint_label.text = tr("[F] Turn in")
+		_: _hint_label.text = tr("[F] Close")
 
 # ---------------------------------------------------------------- OPEN
 
@@ -328,7 +328,7 @@ func open_quest_offer(npc_name: String, quest: Dictionary, on_accept: Callable, 
 	visible = true
 	await _build_frame(_safe_str(quest.get("naziv", npc_name)), portret)
 	await _fill_quest_sections(quest, false)
-	_add_buttons(["Prihvati", "Odbij"], [_confirm_quest_accept, _confirm_quest_decline])
+	_add_buttons(["Accept", "Decline"], [_confirm_quest_accept, _confirm_quest_decline])
 	_add_hint()
 	_show_page()
 	_active = true
@@ -336,12 +336,12 @@ func open_quest_offer(npc_name: String, quest: Dictionary, on_accept: Callable, 
 func open_quest_turnin(npc_name: String, quest: Dictionary, on_turnin: Callable, portret: Texture2D = null) -> void:
 	_mode = "turnin"
 	_pending_turnin = on_turnin
-	_pages = ["Odlično obavljeno! Evo tvoje nagrade."]
+	_pages = ["Well done! Here is your reward."]
 	_index = 0
 	visible = true
 	await _build_frame(_safe_str(quest.get("naziv", npc_name)), portret)
 	await _fill_quest_sections(quest, true)
-	_add_buttons(["Predaj"], [_confirm_quest_turnin])
+	_add_buttons(["Turn in"], [_confirm_quest_turnin])
 	_add_hint()
 	_show_page()
 	_active = true

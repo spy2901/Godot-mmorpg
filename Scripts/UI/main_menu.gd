@@ -20,7 +20,7 @@ func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_build()
 	_name_input.text = GameState.korisnicko_ime
-	_error_label.text = GameState.poruka_logina
+	_error_label.text = tr(GameState.poruka_logina)
 	GameState.poruka_logina = ""
 	if _name_input.text == "":
 		_name_input.grab_focus()
@@ -52,14 +52,14 @@ func _build() -> void:
 
 	box.add_child(_spacer(20))
 
-	box.add_child(_label("Korisničko ime"))
-	_name_input = _polje("npr. Spajko")
+	box.add_child(_label(tr("Username")))
+	_name_input = _polje(tr("e.g. Player1"))
 	_name_input.max_length = 16
 	_name_input.text_submitted.connect(func(_t): _pass_input.grab_focus())
 	box.add_child(_name_input)
 
-	box.add_child(_label("Lozinka"))
-	_pass_input = _polje("najmanje 8 znakova")
+	box.add_child(_label(tr("Password")))
+	_pass_input = _polje(tr("at least 8 characters"))
 	_pass_input.secret = true
 	_pass_input.text_submitted.connect(func(_t): _on_login())
 	box.add_child(_pass_input)
@@ -71,20 +71,20 @@ func _build() -> void:
 	box.add_child(_error_label)
 
 	_login_btn = Button.new()
-	_login_btn.text = "Prijava"
+	_login_btn.text = tr("Log in")
 	_login_btn.custom_minimum_size = Vector2(0, 48)
 	_login_btn.add_theme_font_size_override("font_size", 20)
 	_login_btn.pressed.connect(_on_login)
 	box.add_child(_login_btn)
 
 	_register_btn = Button.new()
-	_register_btn.text = "Registracija"
+	_register_btn.text = tr("Register")
 	_register_btn.custom_minimum_size = Vector2(0, 40)
 	_register_btn.pressed.connect(_on_register)
 	box.add_child(_register_btn)
 
 	_quit_btn = Button.new()
-	_quit_btn.text = "Izlaz"
+	_quit_btn.text = tr("Quit")
 	_quit_btn.custom_minimum_size = Vector2(0, 40)
 	_quit_btn.pressed.connect(func(): get_tree().quit())
 	box.add_child(_quit_btn)
@@ -110,13 +110,13 @@ func _spacer(h: int) -> Control:
 
 func _validacija(ime: String, lozinka: String) -> String:
 	if ime.length() < 3 or ime.length() > 16:
-		return "Korisničko ime mora imati 3-16 znakova."
+		return tr("Username must be 3-16 characters.")
 	var regex := RegEx.new()
 	regex.compile("^[A-Za-z0-9_]+$")
 	if regex.search(ime) == null:
-		return "Dozvoljena su samo slova, brojevi i _."
+		return tr("Only letters, numbers and _ are allowed.")
 	if lozinka.length() < 8:
-		return "Lozinka mora imati bar 8 znakova."
+		return tr("Password must be at least 8 characters.")
 	return ""
 
 func _zauzet(da: bool) -> void:
@@ -144,14 +144,14 @@ func _posalji(registracija: bool) -> void:
 	if registracija:
 		var reg: Dictionary = await ApiManager.register(ime, lozinka)
 		if reg.get("status", "") != "ok":
-			_error_label.text = str(reg.get("error", "Registracija nije uspela."))
+			_error_label.text = tr(str(reg.get("error", "Registration failed.")))
 			_zauzet(false)
 			return
 	var r: Dictionary = await ApiManager.login(ime, lozinka)
 	if r.get("status", "") != "ok" or str(r.get("token", "")) == "":
-		_error_label.text = str(r.get("error", "Prijava nije uspela."))
+		_error_label.text = tr(str(r.get("error", "Login failed.")))
 		_zauzet(false)
 		return
 	GameState.prijavi(r)
-	_login_btn.text = "Učitavam..."
+	_login_btn.text = tr("Loading...")
 	get_tree().change_scene_to_file(GAME_SCENE)

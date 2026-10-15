@@ -40,13 +40,13 @@ func prihvati_quest(quest: Dictionary) -> void:
 		return
 	if _online():
 		var igrac = _igrac()
-		var o: Dictionary = {"ok": false, "poruka": "Igrač nije pronađen"}
+		var o: Dictionary = {"ok": false, "poruka": "Character not found"}
 		if igrac:
 			o = await igrac.prihvati_quest_na_serveru(str(quest.get("id", "")))
 		if not o.get("ok", false):
 			zadnja_greska = str(o.get("poruka", ""))
 			print("[QUEST] Prihvat odbijen: %s" % zadnja_greska)
-			DialogueUI.open("Zadatak", [zadnja_greska])
+			DialogueUI.open("Quest", [zadnja_greska])
 			return
 	_lokalno_prihvati(quest)
 
@@ -120,7 +120,7 @@ func predaj_quest() -> Dictionary:
 	if _online():
 		# server proverava i isplaćuje; ovde je samo lokalno ogledalo
 		var igrac = _igrac()
-		var o: Dictionary = {"ok": false, "poruka": "Igrač nije pronađen"}
+		var o: Dictionary = {"ok": false, "poruka": "Character not found"}
 		if igrac:
 			o = await igrac.predaj_quest_na_serveru(quest_id)
 		if not o.get("ok", false):

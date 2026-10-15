@@ -36,7 +36,7 @@ func _build_ui() -> void:
 	vbox.add_child(header)
 
 	_title = Label.new()
-	_title.text = "Prodavnica"
+	_title.text = tr("Shop")
 	_title.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
 	_title.add_theme_font_size_override("font_size", 22)
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -66,10 +66,10 @@ func _build_ui() -> void:
 
 func open(npc_name: String) -> void:
 	_active = true
-	_title.text = "%s — Prodavnica" % npc_name
+	_title.text = tr("%s — Shop") % tr(npc_name)
 	_clear_list()
 	var loading := Label.new()
-	loading.text = "Učitavam..."
+	loading.text = tr("Loading...")
 	loading.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
 	_list.add_child(loading)
 	visible = true
@@ -83,7 +83,7 @@ func open(npc_name: String) -> void:
 
 	_clear_list()
 	if items.is_empty():
-		_show_error("Nema dostupnih itema (ili server ne radi)")
+		_show_error(tr("No items available (or the server is down)"))
 		return
 	for item in items:
 		_add_item_row(item)
@@ -110,7 +110,7 @@ func _add_item_row(item: Dictionary) -> void:
 	row.add_child(price_label)
 
 	var buy_btn := Button.new()
-	buy_btn.text = "Kupi"
+	buy_btn.text = tr("Buy")
 	buy_btn.pressed.connect(_on_buy.bind(item))
 	row.add_child(buy_btn)
 
@@ -139,17 +139,17 @@ func _on_buy(item: Dictionary) -> void:
 		if o.get("ok", false):
 			hud.postavi_gold(int(o.get("gold", hud.gold)))
 			hud.inventory_ui.dodaj_item_u_slot(item_id)
-			_pokazi_feedback("Kupljeno: %s" % item.get("ime", item_id), true)
+			_pokazi_feedback(tr("Bought: %s") % item.get("ime", item_id), true)
 		else:
-			_pokazi_feedback(str(o.get("poruka", "Kupovina nije uspela.")), false)
+			_pokazi_feedback(tr(str(o.get("poruka", "Purchase failed."))), false)
 		return
 
 	# Offline: lokalno
 	if not hud.potrosi_gold(cijena):
-		_pokazi_feedback("Nedovoljno golda! Treba: %d 🪙" % cijena, false)
+		_pokazi_feedback(tr("Not enough gold! Need: %d 🪙") % cijena, false)
 		return
 	hud.inventory_ui.dodaj_item_u_slot(item_id)
-	_pokazi_feedback("Kupljeno: %s" % item.get("ime", item_id), true)
+	_pokazi_feedback(tr("Bought: %s") % item.get("ime", item_id), true)
 
 func _pokazi_feedback(tekst: String, uspjeh: bool) -> void:
 	_feedback_label.text = tekst

@@ -2,7 +2,7 @@ extends CharacterBody3D
 
 # ENEMY BASE CLASS
 
-@export var ime = "Neprijatelj"
+@export var ime = "Enemy"
 @export var max_hp = 100
 @export var nivo = 1  # prikazuje se u okviru cilja
 @export var brzina = 2.0
@@ -51,7 +51,7 @@ var _regen_akum := 0.0
 func _ready():
 	add_to_group("neprijatelj")
 	hp = max_hp
-	ime_label.text = ime
+	ime_label.text = tr(ime)
 	ime_label.position = Vector3(0, 2.2, 0)
 	ime_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	hp_label.position = Vector3(0, 2.0, 0)

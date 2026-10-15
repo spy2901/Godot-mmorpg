@@ -52,7 +52,7 @@ func _ready():
 	add_to_group("hud")
 	get_tree().auto_accept_quit = false
 
-	label_ime.text = ime_igraca + "  Lv." + str(level)
+	label_ime.text = tr("%s  Lv.%d") % [ime_igraca, level]
 	label_ime.position = Vector2(20, 5)
 
 	# HP bar
@@ -122,7 +122,7 @@ func _ready():
 	add_child(quest_tracker)
 
 	quest_abandon_btn = Button.new()
-	quest_abandon_btn.text = "✕ Odustani"
+	quest_abandon_btn.text = "✕ " + tr("Abandon")
 	quest_abandon_btn.position = Vector2(screen_w - 340, 100)
 	quest_abandon_btn.size = Vector2(110, 26)
 	quest_abandon_btn.add_theme_font_size_override("font_size", 12)
@@ -162,7 +162,7 @@ func prikazi_poruku(tekst: String) -> void:
 		_poruka_label.position = Vector2(w / 2 - 200, 260)
 		_poruka_label.size = Vector2(400, 40)
 		add_child(_poruka_label)
-	_poruka_label.text = tekst
+	_poruka_label.text = tr(tekst) # poruke servera stižu kao engleski ključevi
 	_poruka_label.visible = true
 	_poruka_br += 1
 	var br := _poruka_br
@@ -215,7 +215,7 @@ func primeni_lik(p: Dictionary) -> void:
 	hp_bar.max_value = max_hp
 	mana_bar.max_value = max_mana
 	xp_bar.max_value = max_xp
-	label_ime.text = ime_igraca + "  Lv." + str(level)
+	label_ime.text = tr("%s  Lv.%d") % [ime_igraca, level]
 
 	await get_tree().process_frame
 	await inventory_ui.ucitaj(p.get("inventory", []), p.get("equipment", {}))
@@ -247,15 +247,15 @@ func _osvezi_barove() -> void:
 
 	var hp_lbl = hp_bar.get_node_or_null("HPLabel")
 	if hp_lbl:
-		hp_lbl.text = "HP: %d / %d" % [hp, max_hp]
+		hp_lbl.text = tr("HP: %d / %d") % [hp, max_hp]
 
 	var mana_lbl = mana_bar.get_node_or_null("ManaLabel")
 	if mana_lbl:
-		mana_lbl.text = "Mana: %d / %d" % [mana, max_mana]
+		mana_lbl.text = tr("Mana: %d / %d") % [mana, max_mana]
 
 	var xp_lbl = xp_bar.get_node_or_null("XPLabel")
 	if xp_lbl:
-		xp_lbl.text = "XP: %d / %d  |  Lv.%d" % [xp, max_xp, level]
+		xp_lbl.text = tr("XP: %d / %d  |  Lv.%d") % [xp, max_xp, level]
 
 func _osvezi_gold() -> void:
 	gold_label.text = "🪙 %d" % gold
@@ -269,9 +269,9 @@ func _osvezi_quest_tracker() -> void:
 	var naziv = str(q.get("naziv", ""))
 	var cilj = str(q.get("cilj", ""))
 	var kolicina = int(q.get("kolicina", 1))
-	var glagol = "Ubij" if q.get("tip", "") == "kill" else "Donesi"
+	var glagol = tr("Kill") if q.get("tip", "") == "kill" else tr("Bring")
 	if QuestManager.je_quest_zavrsen():
-		quest_tracker.text = "📜 %s\n   ✓ Završeno — vrati se NPC-u" % naziv
+		quest_tracker.text = "📜 %s\n   ✓ %s" % [naziv, tr("Complete: return to the quest giver")]
 		quest_tracker.add_theme_color_override("font_color", Color(0.4, 1.0, 0.4))
 	else:
 		quest_tracker.text = "📜 %s\n   %s %s  %d/%d" % [naziv, glagol, cilj, QuestManager.progres, kolicina]
@@ -317,7 +317,7 @@ func primeni_stats(s: Dictionary) -> void:
 	hp_bar.max_value = max_hp
 	mana_bar.max_value = max_mana
 	xp_bar.max_value = max_xp
-	label_ime.text = ime_igraca + "  Lv." + str(level)
+	label_ime.text = tr("%s  Lv.%d") % [ime_igraca, level]
 	_osvezi_barove()
 
 # samo za offline režim (online XP dodaje server)
@@ -352,7 +352,7 @@ func level_up():
 	if player:
 		player.napad_damage = int(player.napad_damage * 1.1)
 
-	label_ime.text = ime_igraca + "  Lv." + str(level)
+	label_ime.text = tr("%s  Lv.%d") % [ime_igraca, level]
 	_osvezi_barove()
 	print("LEVEL UP! Lv.%d | Max HP: %d | Max Mana: %d | Damage: %d" % [
 		level, max_hp, max_mana, player.napad_damage if player else 0
@@ -398,7 +398,7 @@ func _osvezi_smrt_ekran() -> void:
 	smrt_ekran.visible = je_mrtav
 	if je_mrtav:
 		var ostalo := maxf(RESPAWN_DELAY - (Time.get_ticks_msec() - _smrt_pocetak_ms) / 1000.0, 0.0)
-		smrt_label.text = "Poginuo si\nRespawn za %d s" % int(ceil(ostalo))
+		smrt_label.text = tr("You died\nRespawn in %d s") % int(ceil(ostalo))
 
 func dodaj_item(ime):
 	inventory_ui.dodaj_item_u_slot(ime)

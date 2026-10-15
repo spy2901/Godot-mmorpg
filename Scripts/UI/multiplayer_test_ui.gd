@@ -41,7 +41,7 @@ func _sakrij_meni() -> void:
 	_menu.visible = false
 
 func _on_konekcija_neuspesna() -> void:
-	_status_label.text = "Konekcija neuspešna."
+	_status_label.text = tr("Connection failed.")
 	_host_btn.disabled = false
 	_join_btn.disabled = false
 	_menu.visible = true
@@ -71,14 +71,14 @@ func _build() -> void:
 	center.add_child(box)
 
 	var title := Label.new()
-	title.text = "Multiplayer Test"
+	title.text = tr("Multiplayer Test")
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 28)
 	title.add_theme_color_override("font_color", Color(1.0, 0.82, 0.25))
 	box.add_child(title)
 
 	_host_btn = Button.new()
-	_host_btn.text = "Hostuj (port 7777)"
+	_host_btn.text = tr("Host (port 7777)")
 	_host_btn.custom_minimum_size = Vector2(0, 44)
 	_host_btn.pressed.connect(func():
 		_host_btn.disabled = true
@@ -90,7 +90,7 @@ func _build() -> void:
 	box.add_child(_host_btn)
 
 	var lbl := Label.new()
-	lbl.text = "IP servera"
+	lbl.text = tr("Server IP")
 	box.add_child(lbl)
 
 	_ip_input = LineEdit.new()
@@ -99,7 +99,7 @@ func _build() -> void:
 	box.add_child(_ip_input)
 
 	_join_btn = Button.new()
-	_join_btn.text = "Pridruži se"
+	_join_btn.text = tr("Join")
 	_join_btn.custom_minimum_size = Vector2(0, 44)
 	_join_btn.pressed.connect(func():
 		_host_btn.disabled = true
@@ -109,19 +109,19 @@ func _build() -> void:
 	box.add_child(_join_btn)
 
 	var goblin_btn := Button.new()
-	goblin_btn.text = "Spawnuj goblina (samo server)"
+	goblin_btn.text = tr("Spawn goblin (server only)")
 	goblin_btn.custom_minimum_size = Vector2(0, 40)
 	goblin_btn.pressed.connect(func(): $World.spawn_goblin())
 	box.add_child(goblin_btn)
 
 	var odjava_btn := Button.new()
-	odjava_btn.text = "Odjava"
+	odjava_btn.text = tr("Log out")
 	odjava_btn.custom_minimum_size = Vector2(0, 40)
 	odjava_btn.pressed.connect(_odjava)
 	box.add_child(odjava_btn)
 
 	_status_label = Label.new()
-	_status_label.text = "Nepovezan."
+	_status_label.text = tr("Not connected.")
 	_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(_status_label)
 
@@ -132,9 +132,9 @@ func _build() -> void:
 
 func _osvezi() -> void:
 	var moj_id = multiplayer.get_unique_id()
-	var uloga = "SERVER" if NetworkManager.je_server() else "KLIJENT"
-	_status_label.text = "Povezan kao %s (ID %d)" % [uloga, moj_id]
-	_peers_label.text = "Peers: %s" % str(multiplayer.get_peers())
+	var uloga = tr("SERVER") if NetworkManager.je_server() else tr("CLIENT")
+	_status_label.text = tr("Connected as %s (ID %d)") % [uloga, moj_id]
+	_peers_label.text = tr("Peers: %s") % str(multiplayer.get_peers())
 
 func _odjava() -> void:
 	var hud = get_tree().get_first_node_in_group("hud")

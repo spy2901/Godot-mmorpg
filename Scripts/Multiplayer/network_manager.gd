@@ -72,7 +72,7 @@ func _on_server_disconnected() -> void:
 	print("[NET] Veza sa serverom je prekinuta")
 	prekini()
 	GameState.token = ""
-	GameState.poruka_logina = "Veza sa serverom je prekinuta"
+	GameState.poruka_logina = "Lost connection to the server"
 	get_tree().change_scene_to_file("res://Scenes/UI/MainMenu.tscn")
 
 func _on_peer_connected(id: int) -> void:

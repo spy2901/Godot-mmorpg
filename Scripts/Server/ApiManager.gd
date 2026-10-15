@@ -50,20 +50,20 @@ func _jedan_zahtev(path: String, method: int, body: Dictionary, dodatni_headeri:
 
 func register(username: String, password: String) -> Dictionary:
 	var r = await _zahtev("/auth/register", HTTPClient.METHOD_POST, {"username": username, "password": password}, 1, [], false)
-	return r if r is Dictionary else {"error": "Server nedostupan"}
+	return r if r is Dictionary else {"error": "Server unavailable"}
 
 func login(username: String, password: String) -> Dictionary:
 	var r = await _zahtev("/auth/login", HTTPClient.METHOD_POST, {"username": username, "password": password}, 1, [], false)
-	return r if r is Dictionary else {"error": "Server nedostupan"}
+	return r if r is Dictionary else {"error": "Server unavailable"}
 
 func logout(token: String) -> Dictionary:
 	var r = await _zahtev("/auth/logout", HTTPClient.METHOD_POST, {}, 1, ["Authorization: Bearer " + token], false)
-	return r if r is Dictionary else {"error": "Server nedostupan"}
+	return r if r is Dictionary else {"error": "Server unavailable"}
 
 # Zaštićeno (X-Server-Key): zove samo game server
 func verify_token(token: String) -> Dictionary:
 	var r = await _zahtev("/auth/verify", HTTPClient.METHOD_POST, {"token": token})
-	return r if r is Dictionary else {"error": "Auth server nedostupan"}
+	return r if r is Dictionary else {"error": "Login server unavailable"}
 
 # ---------------------------------------------------------------- ITEMS
 

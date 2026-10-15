@@ -115,7 +115,7 @@ func _osvezi() -> void:
 	okvir.visible = ima
 	if not ima:
 		return
-	ime.text = "%s  Lv.%d" % [_cilj.ime, _cilj.nivo]
+	ime.text = tr("%s  Lv.%d") % [tr(_cilj.ime), _cilj.nivo]
 	traka.max_value = _cilj.max_hp
 	traka.value = _cilj.hp
 	hp_tekst.text = "%d / %d" % [_cilj.hp, _cilj.max_hp]

@@ -60,7 +60,7 @@ func _napravi_ui():
 	glavni_panel.add_theme_stylebox_override("panel", panel_style)
 
 	var naslov = Label.new()
-	naslov.text = "⚔  INVENTORY"
+	naslov.text = "⚔  " + tr("INVENTORY")
 	naslov.position = Vector2(20, 15)
 	naslov.add_theme_color_override("font_color", Color(0.9, 0.8, 0.3))
 	naslov.add_theme_font_size_override("font_size", 24)
@@ -143,7 +143,7 @@ func _napravi_equipment_slotove():
 		var y_pos = panel_height * info[2]
 
 		var label = Label.new()
-		label.text = info[1]
+		label.text = tr(info[1])
 		label.position = Vector2(10, y_pos - 20)
 		label.add_theme_font_size_override("font_size", 13)
 		label.add_theme_color_override("font_color", Color(0.7, 0.6, 0.3))
@@ -159,7 +159,7 @@ func _napravi_equipment_slotove():
 
 		var slot_label = Label.new()
 		slot_label.name = "SlotLabel"
-		slot_label.text = "Empty"
+		slot_label.text = tr("Empty")
 		slot_label.set_anchors_preset(Control.PRESET_FULL_RECT)
 		slot_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		slot_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -188,7 +188,7 @@ func _napravi_kategorije(parent: Control):
 
 	for i in range(kategorije.size()):
 		var btn = Button.new()
-		btn.text = kategorije[i][1]
+		btn.text = tr(kategorije[i][1])
 		btn.position = Vector2(10 + i * btn_width, 10)
 		btn.size = Vector2(btn_width - 5, 30)
 		btn.add_theme_font_size_override("font_size", 12)
@@ -377,8 +377,8 @@ func _koristi_item(item_id: String) -> void:
 	if r.get("ok", false):
 		ukloni_item(item_id, 1)
 		var delovi: PackedStringArray = []
-		if int(r.get("hp_efekat", 0)) > 0: delovi.append("+%d HP" % int(r.hp_efekat))
-		if int(r.get("mana_efekat", 0)) > 0: delovi.append("+%d Mana" % int(r.mana_efekat))
+		if int(r.get("hp_efekat", 0)) > 0: delovi.append(tr("+%d HP") % int(r.hp_efekat))
+		if int(r.get("mana_efekat", 0)) > 0: delovi.append(tr("+%d Mana") % int(r.mana_efekat))
 		poruka = "  ".join(delovi)
 	var hud = get_tree().get_first_node_in_group("hud")
 	if hud:
@@ -436,7 +436,7 @@ func _prikazi_opremu(eq_slot: String, item: Dictionary):
 	var slot_panel = equipment_slots[eq_slot]
 	var slot_label = slot_panel.get_node("SlotLabel")
 	if item.is_empty():
-		slot_label.text = "Empty"
+		slot_label.text = tr("Empty")
 		slot_label.add_theme_color_override("font_color", Color(0.4, 0.4, 0.4))
 		var stil = _napravi_stil(Color(0.12, 0.12, 0.18), Color(0.5, 0.4, 0.2), 1, 4)
 		slot_panel.add_theme_stylebox_override("panel", stil)
@@ -458,7 +458,7 @@ func _on_slot_hover(index: int):
 
 	var hovered_item = inventory_data[index]
 	var tip_boja = _boja_po_tipu(hovered_item.get("tip", ""))
-	tooltip_label.text = "%s  %s\nTip: %s  |  Vrednost: %s gold  |  Stack: %s/%s" % [
+	tooltip_label.text = tr("%s  %s\nType: %s  |  Value: %s gold  |  Stack: %s/%s") % [
 		hovered_item.get("ikonica", ""),
 		hovered_item.get("ime", ""),
 		str(hovered_item.get("tip", "")).to_upper(),
@@ -469,8 +469,8 @@ func _on_slot_hover(index: int):
 	var hp_e := int(hovered_item.get("hp_efekat", 0))
 	var mana_e := int(hovered_item.get("mana_efekat", 0))
 	if hovered_item.get("tip", "") == "consumable" and hp_e + mana_e > 0:
-		tooltip_label.text += "\nKlik: %s%s  |  cooldown %.0f s" % [
-			"+%d HP " % hp_e if hp_e > 0 else "", "+%d Mana" % mana_e if mana_e > 0 else "",
+		tooltip_label.text += tr("\nClick: %s%s  |  cooldown %.0f s") % [
+			tr("+%d HP") % hp_e + " " if hp_e > 0 else "", tr("+%d Mana") % mana_e if mana_e > 0 else "",
 			int(hovered_item.get("cooldown_ms", 0)) / 1000.0]
 	tooltip_label.add_theme_color_override("font_color", tip_boja)
 	tooltip_panel.visible = true

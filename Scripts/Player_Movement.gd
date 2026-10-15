@@ -220,15 +220,15 @@ func zatrazi_napad() -> void:
 # Server: napad na cilj koji je server zapamtio za ovog igrača.
 func _napadni_cilj() -> Dictionary:
 	if mrtav:
-		return {"ok": false, "poruka": "Mrtav si"}
+		return {"ok": false, "poruka": "You are dead"}
 	var e := neprijatelj_po_id(_cilj_srv) if _cilj_srv != "" else null
 	if e == null or e._mrtav:
-		return {"ok": false, "poruka": "Nema cilja"}
+		return {"ok": false, "poruka": "No target"}
 	if global_position.distance_to(e.global_position) > DOMET_NAPADA:
-		return {"ok": false, "poruka": "Predaleko"}
+		return {"ok": false, "poruka": "Too far"}
 	var sada := Time.get_ticks_msec()
 	if sada < _napad_spreman_ms:
-		return {"ok": false, "poruka": "Još nije spremno"}
+		return {"ok": false, "poruka": "Not ready yet"}
 	_napad_spreman_ms = sada + int(napad_cooldown * 1000)
 	e.primi_damage(izracunaj_damage(), get_multiplayer_authority())
 	return {"ok": true}
@@ -240,7 +240,7 @@ func odgovor_napad(d: Dictionary) -> void:
 	napad_odgovor.emit(d)
 	var hud = get_tree().get_first_node_in_group("hud")
 	if hud and not d.get("ok", false):
-		hud.prikazi_poruku(str(d.get("poruka", "")))
+		hud.prikazi_poruku(str(d.get("poruka", ""))) # prikazi_poruku prevodi
 
 # ---------------------------------------------------------------- LIK -> SERVER
 
@@ -277,16 +277,16 @@ func registruj_lik(token: String) -> void:
 		return
 	var ime := str(r.get("ime_lika", ""))
 	if r.get("status", "") != "ok" or ime == "":
-		var razlog := str(r.get("error", "neispravan odgovor"))
+		var razlog := str(r.get("error", "invalid response"))
 		print("[AUTH] Odbijen peer ", peer_id, ": ", razlog)
-		_odbij(peer_id, "Prijava odbijena: " + razlog)
+		_odbij(peer_id, "Login rejected: %s", razlog)
 		return
 	# Isti lik već u igri -> starog izbaci
 	for p in get_tree().get_nodes_in_group("player"):
 		if p != self and p.ime_lika == ime:
 			print("[AUTH] ", ime, " je već prijavljen (peer ", p.get_multiplayer_authority(), "), izbacujem starog")
 			p.ime_lika = ""
-			p._odbij(p.get_multiplayer_authority(), "Prijavljen si sa drugog mesta")
+			p._odbij(p.get_multiplayer_authority(), "Logged in from another location")
 	ime_lika = ime
 	_sync_nameplate()
 	print("[AUTH] Peer ", peer_id, " -> ", ime)
@@ -296,25 +296,27 @@ func _istek_ucitavanja() -> void:
 	if _objavljen or _odbijen:
 		return
 	print("[AUTH] Peer ", get_multiplayer_authority(), ": učitavanje lika nije završeno za ", UCITAVANJE_TIMEOUT, " s, izbacujem")
-	_odbij(get_multiplayer_authority(), "Učitavanje lika nije uspelo (istek vremena)")
+	_odbij(get_multiplayer_authority(), "Loading the character failed (timed out)")
 
-# Server: javi peer-u razlog pa ga diskonektuj (host koji igra: lokalni poziv)
-func _odbij(peer_id: int, poruka: String) -> void:
+# Server: javi peer-u razlog pa ga diskonektuj (host koji igra: lokalni poziv). poruka je engleski ključ (može sa %s),
+# detalj (npr. greška backenda) se prevodi posebno.
+func _odbij(peer_id: int, poruka: String, detalj := "") -> void:
 	_odbijen = true
 	if peer_id == multiplayer.get_unique_id():
-		registracija_odbijena(poruka)
+		registracija_odbijena(poruka, detalj)
 		return
-	registracija_odbijena.rpc_id(peer_id, poruka)
+	registracija_odbijena.rpc_id(peer_id, poruka, detalj)
 	NetworkManager.izbaci_peer(peer_id)
 
 @rpc("any_peer", "reliable")
-func registracija_odbijena(poruka: String) -> void:
+func registracija_odbijena(poruka: String, detalj: String) -> void:
 	if not _poziv_od_servera():
 		return
-	print("[AUTH] ", poruka)
+	var sablon := "%s" in poruka
+	print("[AUTH] ", poruka % detalj if sablon else poruka)
 	NetworkManager.prekini()
 	GameState.token = ""
-	GameState.poruka_logina = poruka
+	GameState.poruka_logina = tr(poruka) % tr(detalj) if sablon else tr(poruka)
 	get_tree().change_scene_to_file("res://Scenes/UI/MainMenu.tscn")
 
 func _ucitaj_statistike_sa_servera(ime: String) -> void:
@@ -323,7 +325,7 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 		return
 	if p.is_empty() or p.has("error"):
 		print("[SERVER] Ne mogu da učitam lik: ", ime)
-		_odbij(get_multiplayer_authority(), "Učitavanje lika nije uspelo")
+		_odbij(get_multiplayer_authority(), "Loading the character failed")
 		return
 	napad_damage = int(p.get("napad_damage", napad_damage))
 
@@ -793,7 +795,7 @@ func odustani_quest_na_serveru() -> void:
 # Kasni odgovor posle timeouta nema više slušaoca, pa se ignoriše.
 func _posalji_i_cekaj(tip: String, odgovor_signal: Signal, zahtev: Callable, arg: String) -> Dictionary:
 	if _zahtevi_u_toku.get(tip, false):
-		return {"ok": false, "poruka": "Zahtev je u toku"}
+		return {"ok": false, "poruka": "Request in progress"}
 	_zahtevi_u_toku[tip] = true
 	var stanje := {"odgovor": null}
 	var primi := func(d: Dictionary): stanje.odgovor = d
@@ -808,7 +810,7 @@ func _posalji_i_cekaj(tip: String, odgovor_signal: Signal, zahtev: Callable, arg
 	odgovor_signal.disconnect(primi)
 	_zahtevi_u_toku.erase(tip)
 	if stanje.odgovor == null:
-		return {"ok": false, "poruka": "Server ne odgovara"}
+		return {"ok": false, "poruka": "Server not responding"}
 	return stanje.odgovor
 
 # --- server
@@ -828,13 +830,13 @@ func _odgovori(odgovor: Callable, d: Dictionary) -> void:
 # Zajedničke provere za zahteve; vraća poruku greške ili "" ako sme da se izvrši.
 func _greska_zahteva(tip: String) -> String:
 	if ime_lika == "":
-		return "Lik nije registrovan"
+		return "Character not registered"
 	if _server_zauzet.get(tip, false):
-		return "Zahtev je u toku"
+		return "Request in progress"
 	return ""
 
 func _neuspeh(r: Dictionary) -> Dictionary:
-	return {"ok": false, "poruka": str(r.get("error", "Server nedostupan"))}
+	return {"ok": false, "poruka": str(r.get("error", "Server unavailable"))}
 
 @rpc("any_peer", "reliable")
 func zatrazi_kupovinu(item_id: String) -> void:
@@ -874,7 +876,7 @@ func zatrazi_prihvat_questa(quest_id: String) -> void:
 	_odgovori(odgovor_prihvat, {
 		"ok": ok,
 		"quest": r.get("quest", {}),
-		"poruka": "" if ok else str(r.get("error", "Server nedostupan"))
+		"poruka": "" if ok else str(r.get("error", "Server unavailable"))
 	})
 
 @rpc("any_peer", "reliable")
@@ -942,13 +944,13 @@ func zatrazi_koriscenje_itema(item_id: String) -> void:
 
 func _greska_itema(item_id: String) -> String:
 	if not _stanje_ucitano:
-		return "Lik nije registrovan"
+		return "Character not registered"
 	if mrtav:
-		return "Mrtav si"
+		return "You are dead"
 	if not posjeduje(item_id):
-		return "Nemaš taj predmet"
+		return "You don't have that item"
 	if Time.get_ticks_msec() < _item_cd_do_ms.get(item_id, 0):
-		return "Još nije spremno"
+		return "Not ready yet"
 	return ""
 
 func _iskoristi_item(item_id: String) -> Dictionary:
@@ -956,11 +958,11 @@ func _iskoristi_item(item_id: String) -> Dictionary:
 	var hp_e := int(item.get("hp_efekat", 0))
 	var mana_e := int(item.get("mana_efekat", 0))
 	if item.is_empty() or item.has("error") or str(item.get("tip", "")) != "consumable" or hp_e + mana_e <= 0:
-		return {"ok": false, "poruka": "Predmet se ne može koristiti"}
+		return {"ok": false, "poruka": "This item can't be used"}
 	if mrtav:
-		return {"ok": false, "poruka": "Mrtav si"}
+		return {"ok": false, "poruka": "You are dead"}
 	if not ((hp_e > 0 and hp < max_hp) or (mana_e > 0 and mana < max_mana)):
-		return {"ok": false, "poruka": "Već si pun"}
+		return {"ok": false, "poruka": "Already at full health" if hp_e > 0 else "Already at full mana"}
 	var ime := ime_lika
 	var r: Dictionary = await ApiManager.koristi_item(ime, item_id)
 	if r.get("status", "") != "ok":
@@ -1607,7 +1609,7 @@ func _napravi_traku(ime: String, boja: Color, prioritet: int) -> MeshInstance3D:
 func _osvezi_nameplate() -> void:
 	if _nameplate == null:
 		return
-	_ime_label.text = ime_sync + (" (mrtav)" if mrtav_sync else "")
+	_ime_label.text = tr("%s (dead)") % ime_sync if mrtav_sync else ime_sync
 	_ime_label.modulate = BOJA_IME_MRTAV if mrtav_sync else Color.WHITE
 	_hp_traka.visible = not mrtav_sync
 	_nameplate.get_node("Pozadina").visible = not mrtav_sync

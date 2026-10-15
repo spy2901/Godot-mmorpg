@@ -1,1 +1,137 @@
 keys,en,sr
+Username,Username,Korisničko ime
+e.g. Player1,e.g. Player1,npr. Spajko
+Password,Password,Lozinka
+at least 8 characters,at least 8 characters,najmanje 8 znakova
+Log in,Log in,Prijava
+Register,Register,Registracija
+Quit,Quit,Izlaz
+Username must be 3-16 characters.,Username must be 3-16 characters.,Korisničko ime mora imati 3-16 znakova.
+"Only letters, numbers and _ are allowed.","Only letters, numbers and _ are allowed.","Dozvoljena su samo slova, brojevi i _."
+Password must be at least 8 characters.,Password must be at least 8 characters.,Lozinka mora imati bar 8 znakova.
+Registration failed.,Registration failed.,Registracija nije uspela.
+Login failed.,Login failed.,Prijava nije uspela.
+Loading...,Loading...,Učitavam...
+Lost connection to the server,Lost connection to the server,Veza sa serverom je prekinuta
+Server unavailable,Server unavailable,Server nedostupan
+Login server unavailable,Login server unavailable,Auth server nedostupan
+Connection failed.,Connection failed.,Konekcija neuspešna.
+Multiplayer Test,Multiplayer Test,Multiplayer Test
+Host (port 7777),Host (port 7777),Hostuj (port 7777)
+Server IP,Server IP,IP servera
+Join,Join,Pridruži se
+Spawn goblin (server only),Spawn goblin (server only),Spawnuj goblina (samo server)
+Log out,Log out,Odjava
+Not connected.,Not connected.,Nepovezan.
+SERVER,SERVER,SERVER
+CLIENT,CLIENT,KLIJENT
+Connected as %s (ID %d),Connected as %s (ID %d),Povezan kao %s (ID %d)
+Peers: %s,Peers: %s,Peers: %s
+%s  Lv.%d,%s  Lv.%d,%s  Lv.%d
+Abandon,Abandon,Odustani
+HP: %d / %d,HP: %d / %d,HP: %d / %d
+Mana: %d / %d,Mana: %d / %d,Mana: %d / %d
+XP: %d / %d  |  Lv.%d,XP: %d / %d  |  Lv.%d,XP: %d / %d  |  Lv.%d
+Kill,Kill,Ubij
+Bring,Bring,Donesi
+Complete: return to the quest giver,Complete: return to the quest giver,Završeno — vrati se NPC-u
+"You died
+Respawn in %d s","You died
+Respawn in %d s","Poginuo si
+Respawn za %d s"
+INVENTORY,INVENTORY,INVENTORY
+🪖 Head,🪖 Head,🪖 Head
+🛡 Chest,🛡 Chest,🛡 Chest
+👖 Legs,👖 Legs,👖 Legs
+👢 Boots,👢 Boots,👢 Boots
+⚔ Weapon,⚔ Weapon,⚔ Weapon
+🛡 Shield,🛡 Shield,🛡 Shield
+All,All,All
+⚔ Weapons,⚔ Weapons,⚔ Weapons
+🛡 Armor,🛡 Armor,🛡 Armor
+🧪 Consumables,🧪 Consumables,🧪 Consumables
+🪨 Materials,🪨 Materials,🪨 Materials
+📜 Quest,📜 Quest,📜 Quest
+Empty,Empty,Empty
+"%s  %s
+Type: %s  |  Value: %s gold  |  Stack: %s/%s","%s  %s
+Type: %s  |  Value: %s gold  |  Stack: %s/%s","%s  %s
+Tip: %s  |  Vrednost: %s gold  |  Stack: %s/%s"
+"
+Click: %s%s  |  cooldown %.0f s","
+Click: %s%s  |  cooldown %.0f s","
+Klik: %s%s  |  cooldown %.0f s"
++%d HP,+%d HP,+%d HP
++%d Mana,+%d Mana,+%d Mana
+Shop,Shop,Prodavnica
+%s — Shop,%s — Shop,%s — Prodavnica
+No items available (or the server is down),No items available (or the server is down),Nema dostupnih itema (ili server ne radi)
+Buy,Buy,Kupi
+Bought: %s,Bought: %s,Kupljeno: %s
+Purchase failed.,Purchase failed.,Kupovina nije uspela.
+Not enough gold! Need: %d 🪙,Not enough gold! Need: %d 🪙,Nedovoljno golda! Treba: %d 🪙
+Kill %s (%d),Kill %s (%d),Ubij %s (%d)
+Bring %s (%d),Bring %s (%d),Donesi %s (%d)
+Quest objectives,Quest objectives,Ciljevi zadatka
+Rewards,Rewards,Nagrade
+[F] Next,[F] Next,[F] dalje
+[F] Accept    [Esc] Decline,[F] Accept    [Esc] Decline,[F] Prihvati    [Esc] Odbij
+[F] Turn in,[F] Turn in,[F] Predaj
+[F] Close,[F] Close,[F] zatvori
+Accept,Accept,Prihvati
+Decline,Decline,Odbij
+Turn in,Turn in,Predaj
+Well done! Here is your reward.,Well done! Here is your reward.,Odlično obavljeno! Evo tvoje nagrade.
+"Greetings, traveler!","Greetings, traveler!","Pozdrav, putniče!"
+Quest Giver,Quest Giver,Quest Giver
+Merchant,Merchant,Merchant
+[F] Talk,[F] Talk,[F] Razgovor
+[F] Shop,[F] Shop,[F] Prodavnica
+[F] Turn in quest,[F] Turn in quest,[F] Predaj zadatak
+[F] Quest,[F] Quest,[F] Zadatak
+[F] Training,[F] Training,[F] Trening
+Ready to train?,Ready to train?,Spreman za trening?
+(Training is coming later),(Training is coming later),(Trener sistem dolazi kasnije)
+I have no quest for you right now.,I have no quest for you right now.,Nemam trenutno zadatak za tebe.
+Turning in the quest failed.,Turning in the quest failed.,Predaja nije uspela.
+You haven't finished the quest yet.,You haven't finished the quest yet.,Još nisi završio zadatak.
+Progress: %d/%d,Progress: %d/%d,Progres: %d/%d
+Finish your current quest first.,Finish your current quest first.,Prvo završi zadatak koji već imaš.
+You've already helped me with everything. Thank you.,You've already helped me with everything. Thank you.,Već si mi pomogao oko svega. Hvala ti.
+Character not found,Character not found,Igrač nije pronađen
+Quest,Quest,Zadatak
+Goblin,Goblin,Goblin
+Skeleton,Skeleton,Skeleton
+Troll,Troll,Troll
+%s (dead),%s (dead),%s (mrtav)
+You are dead,You are dead,Mrtav si
+No target,No target,Nema cilja
+Too far,Too far,Predaleko
+Not ready yet,Not ready yet,Još nije spremno
+You don't have that item,You don't have that item,Nemaš taj predmet
+This item can't be used,This item can't be used,Predmet se ne može koristiti
+Already at full health,Already at full health,Već si pun
+Already at full mana,Already at full mana,Već si pun
+Request in progress,Request in progress,Zahtev je u toku
+Server not responding,Server not responding,Server ne odgovara
+Character not registered,Character not registered,Lik nije registrovan
+invalid response,invalid response,neispravan odgovor
+Login rejected: %s,Login rejected: %s,Prijava odbijena: %s
+Logged in from another location,Logged in from another location,Prijavljen si sa drugog mesta
+Loading the character failed (timed out),Loading the character failed (timed out),Učitavanje lika nije uspelo (istek vremena)
+Loading the character failed,Loading the character failed,Učitavanje lika nije uspelo
+Pogresno ime ili lozinka,Wrong username or password,Pogresno ime ili lozinka
+Ime je zauzeto,Username is taken,Ime je zauzeto
+"Previse registracija, pokusaj kasnije","Too many registrations, try again later","Previse registracija, pokusaj kasnije"
+"Previse neuspelih pokusaja, sacekaj par minuta","Too many failed attempts, wait a few minutes","Previse neuspelih pokusaja, sacekaj par minuta"
+"Ime mora imati 3-16 znakova: slova, brojevi, _","Username must be 3-16 characters: letters, numbers, _","Ime mora imati 3-16 znakova: slova, brojevi, _"
+Lozinka mora imati 8-128 znakova,Password must be 8-128 characters,Lozinka mora imati 8-128 znakova
+Nevazeci ili istekao token,Invalid or expired session,Nevazeci ili istekao token
+Nedovoljno golda,Not enough gold,Nedovoljno golda
+Inventory pun,Inventory full,Inventory pun
+Item nije na prodaju,Item is not for sale,Item nije na prodaju
+Vec imas aktivan quest,You already have an active quest,Vec imas aktivan quest
+Quest nije zavrsen,Quest not finished,Quest nije zavrsen
+Gold:  %s 🪙,Gold:  %s 🪙,Zlato:  %s 🪙
+Experience:  %s XP,Experience:  %s XP,Iskustvo:  %s XP
+Enemy,Enemy,Neprijatelj

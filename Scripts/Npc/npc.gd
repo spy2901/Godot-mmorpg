@@ -4,7 +4,7 @@ enum InteractionType { DIALOGUE, MERCHANT, QUEST_GIVER, TRAINER }
 
 @export var npc_name: String = "NPC"
 @export var interaction_type: InteractionType = InteractionType.DIALOGUE
-@export_multiline var dialogue_lines: Array[String] = ["Pozdrav, putniče!"]
+@export_multiline var dialogue_lines: Array[String] = ["Greetings, traveler!"]
 @export var quest_id: String = ""  # pocetak lanca za QUEST_GIVER
 @export var portret: Texture2D = null
 
@@ -15,10 +15,10 @@ var player_in_range: bool = false
 var current_player: Node3D = null
 
 func _ready() -> void:
-	label.text = npc_name
+	label.text = tr(npc_name)
 
 	prompt = Label3D.new()
-	prompt.text = "[F] Razgovor"
+	prompt.text = tr("[F] Talk")
 	prompt.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	prompt.no_depth_test = true
 	prompt.fixed_size = true
@@ -56,16 +56,16 @@ func _input(event: InputEvent) -> void:
 func _update_prompt_text() -> void:
 	match interaction_type:
 		InteractionType.MERCHANT:
-			prompt.text = "[F] Prodavnica"
+			prompt.text = tr("[F] Shop")
 		InteractionType.QUEST_GIVER:
 			if _ovaj_quest_je_aktivan() and QuestManager.je_quest_zavrsen():
-				prompt.text = "[F] Predaj zadatak"
+				prompt.text = tr("[F] Turn in quest")
 			else:
-				prompt.text = "[F] Zadatak"
+				prompt.text = tr("[F] Quest")
 		InteractionType.TRAINER:
-			prompt.text = "[F] Trening"
+			prompt.text = tr("[F] Training")
 		_:
-			prompt.text = "[F] Razgovor"
+			prompt.text = tr("[F] Talk")
 
 func interact() -> void:
 	if not player_in_range:
@@ -78,7 +78,7 @@ func interact() -> void:
 		InteractionType.QUEST_GIVER:
 			await _handle_quest_giver()
 		InteractionType.TRAINER:
-			DialogueUI.open(npc_name, ["Spreman za trening?", "(Trener sistem dolazi kasnije)"], portret)
+			DialogueUI.open(npc_name, ["Ready to train?", "(Training is coming later)"], portret)
 
 # ---------------------------------------------------------------- QUEST GIVER
 
@@ -114,7 +114,7 @@ func _sinhronizuj_lanac() -> void:
 
 func _handle_quest_giver() -> void:
 	if quest_id == "":
-		DialogueUI.open(npc_name, ["Nemam trenutno zadatak za tebe."], portret)
+		DialogueUI.open(npc_name, ["I have no quest for you right now."], portret)
 		return
 
 	await _sinhronizuj_lanac()
@@ -126,7 +126,7 @@ func _handle_quest_giver() -> void:
 			DialogueUI.open_quest_turnin(npc_name, quest, func():
 				var nagrada = await QuestManager.predaj_quest()
 				if nagrada.is_empty():
-					var poruka = QuestManager.zadnja_greska if QuestManager.zadnja_greska != "" else "Predaja nije uspela."
+					var poruka = QuestManager.zadnja_greska if QuestManager.zadnja_greska != "" else "Turning in the quest failed."
 					DialogueUI.open(npc_name, [poruka], portret)
 					return
 				_isplati_nagradu(nagrada)
@@ -134,25 +134,25 @@ func _handle_quest_giver() -> void:
 			, portret)
 		else:
 			DialogueUI.open(npc_name, [
-				"Još nisi završio zadatak.",
-				"Progres: %d/%d" % [QuestManager.progres, QuestManager.aktivni_quest.get("kolicina", 1)]
+				"You haven't finished the quest yet.",
+				tr("Progress: %d/%d") % [QuestManager.progres, QuestManager.aktivni_quest.get("kolicina", 1)]
 			], portret)
 		return
 
 	# Igrac ima neki drugi aktivan quest
 	if QuestManager.ima_aktivan_quest():
-		DialogueUI.open(npc_name, ["Prvo završi zadatak koji već imaš."], portret)
+		DialogueUI.open(npc_name, ["Finish your current quest first."], portret)
 		return
 
 	# Ceo lanac zavrsen
 	if QuestManager.je_quest_vec_zavrsen(quest_id):
-		DialogueUI.open(npc_name, ["Već si mi pomogao oko svega. Hvala ti."], portret)
+		DialogueUI.open(npc_name, ["You've already helped me with everything. Thank you."], portret)
 		return
 
 	# Ponudi quest
 	var quest: Dictionary = await ApiManager.get_quest(quest_id)
 	if quest.is_empty() or quest.has("error"):
-		DialogueUI.open(npc_name, ["Nemam trenutno zadatak za tebe."], portret)
+		DialogueUI.open(npc_name, ["I have no quest for you right now."], portret)
 		return
 
 	DialogueUI.open_quest_offer(npc_name, quest,
