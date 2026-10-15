@@ -25,6 +25,11 @@ DialogueUI="*res://Scripts/UI/dialogue_ui.tscn"
 MerchantUI="*res://Scripts/UI/merchant_ui.tscn"
 QuestManager="*uid://vor7ksgqk5dt"
 
+[internationalization]
+
+locale/translations=PackedStringArray("res://translations/teksti.en.translation", "res://translations/teksti.sr.translation")
+locale/fallback="en"
+
 [display]
 
 window/size/viewport_width=1920

@@ -7,7 +7,12 @@ var token: String = ""           # samo u memoriji, nikad u settings.cfg
 var korisnicko_ime: String = ""  # pamti se samo za popunjavanje polja na loginu
 var poruka_logina: String = ""   # poruka za login ekran (npr. posle odbijene registracije)
 
+# Jezik igre: tekstovi idu kroz tr() iz translations/teksti.csv (ključ = engleski tekst). Podrazumevano engleski,
+# bez obzira na jezik sistema.
+const JEZIK := "en"
+
 func _ready() -> void:
+	TranslationServer.set_locale(JEZIK)
 	_ucitaj()
 
 func prijavi(odgovor: Dictionary) -> void:

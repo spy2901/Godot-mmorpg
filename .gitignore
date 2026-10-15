@@ -1,6 +1,7 @@
 .godot/
 *.import
 export/
+translations/*.translation
 
 .DS_Store
 .env.test
