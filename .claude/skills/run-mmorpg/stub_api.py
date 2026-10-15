@@ -69,7 +69,12 @@ PLAYERS["RasporedLik"] = dict(PLAYERS["TestLik"], ime="RasporedLik", pos_x=-14, 
 PLAYERS["CiljLik"] = dict(PLAYERS["TestLik"], ime="CiljLik", pos_x=-20, pos_y=1.16, pos_z=-20, inventory=[])
 # DrugiLik: drugi igrač pored CiljLik-ovog cilja (napad bez sopstvenog cilja)
 PLAYERS["DrugiLik"] = dict(PLAYERS["TestLik"], ime="DrugiLik", pos_x=-15, pos_y=1.16, pos_z=-16, inventory=[])
-TOKENI = {"potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
+# AiLik / Ai2Lik: AI neprijatelja (uloga ai, server vodi scenario oko test goblina na (20, 20), aggro 5 m): oba van
+# aggro-a na početku (6.3 m i 7.2 m), u uglu van putanje movera i ostalih likova. HP 1000: goblin ih udara tokom testa.
+for _ime, _poz in (("AiLik", (14, 22)), ("Ai2Lik", (24, 14))):
+    PLAYERS[_ime] = dict(PLAYERS["TestLik"], ime=_ime, hp=1000, max_hp=1000, pos_x=_poz[0], pos_y=1.16, pos_z=_poz[1],
+                         inventory=[])
+TOKENI = {"ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik"}
 LOCK = threading.Lock()
 

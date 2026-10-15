@@ -140,6 +140,10 @@ func _process(d):
 				root.size = Vector2i(1280, 720) # kao cilj: u 64x64 bi action bar progutao klik
 				root.get_node("GameState").token = "drugi-token"
 				root.get_node("GameState").ime_igraca = "DrugiLik"
+			elif uloga == "ai": # korak=1 AiLik, korak=2 Ai2Lik
+				var ime := "AiLik" if _korak == 1 else "Ai2Lik"
+				root.get_node("GameState").token = ime.to_lower() + "-token"
+				root.get_node("GameState").ime_igraca = ime
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
 				root.get_node("GameState").ime_igraca = "RasporedLik"
@@ -168,15 +172,20 @@ func _process(d):
 		"raspored": return _raspored()
 		"cilj": return _cilj()
 		"drugi": return _uloga_drugi()
+		"ai": return _uloga_ai()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
 func _server(log: bool) -> bool:
 	# test stabilnost: neprijatelji ne jure test likove (troll na (0,0,15) je ~3 m od putanje movera i ume da
 	# ga zaustavi); borba se testira komandama servera nad TestLik-om, ne preko neprijatelja
+	# Pored aggro-a i brzina 0 i bez napada: neprijatelj koga igrač udari (napad tests) ulazi u jurenje po pretnji, a ne
+	# sme da se pomeri ni da udari. Izuzetak je test goblin AI scenarija (meta "ai_test").
 	for e in get_nodes_in_group("neprijatelj"):
-		if e.aggro_range != 0.0:
+		if not e.has_meta("ai_test") and (e.aggro_range != 0.0 or e.brzina != 0.0):
 			e.aggro_range = 0.0
+			e.brzina = 0.0
+			e.moze_napasti = false
 			e.player = null
 	if log and _world():
 		for p in _world().get_children():
@@ -239,6 +248,7 @@ func _server(log: bool) -> bool:
 					fh.store_string(st)
 					fh.close()
 	_server_cilj()
+	_server_ai()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -1250,3 +1260,224 @@ func _drugi_scenario(p) -> void:
 		"goblin_904 (cilj CiljLik-a) hp %d->%d, odgovor %s, moj cilj '%s'" % [hp0, hp1, odg[0] if odg.size() > 0 else "-", p.get("cilj_id")])
 	_pisi("drugi_gotov", "1")
 	_drugi_kraj = true
+
+# ---------------------------------------------------------------- AI NEPRIJATELJA
+# Server vodi scenario nad test goblinom goblin_950 (početak AI_POCETAK, aggro 5 m, brzina 2 da povratak traje dovoljno
+# dugo za provere). AiLik i Ai2Lik (uloga ai, korak=1/2) samo slušaju komande (dir/ai_cmd_<ime>: cilj, kraj) i
+# svaki frame upisuju šta vide (dir/ai_klijent_<ime>: cilj|pretnja|ja_meta|okvir vidljiv|traka vidljiva|vrednost trake).
+const AI_POCETAK := Vector3(20, 2, 20)
+const AI_ID := "goblin_950"
+const AI_STANJA := ["MIROVANJE", "JURENJE", "POVRATAK"]
+var _ai_krenuo := false
+var _ai_cmd_br := 0
+var _ai_cmd_izvrsen := ""
+var _ai_ucitan := false
+
+func _uloga_ai() -> bool:
+	var p = _moj()
+	if p == null or not p.get_node("ui/Control")._ucitano:
+		return (_ai_ucitan and p == null) or t > 3 * MAX_T # server otišao ili zaglavljen
+	_ai_ucitan = true
+	var ime: String = root.get_node("GameState").ime_igraca
+	var cmd := FileAccess.get_file_as_string(dir + "/ai_cmd_" + ime)
+	if cmd != "" and cmd != _ai_cmd_izvrsen:
+		_ai_cmd_izvrsen = cmd
+		var c := cmd.split(" ")
+		print("[AI-K] ", ime, " komanda: ", cmd)
+		if c[1] == "kraj":
+			return true # odjava (proces izlazi, server dobije peer_disconnected)
+		if c[1] == "cilj":
+			p.izaberi_cilj(c[2] if c[2] != "-" else "")
+	var o = p.get_node("ui/OkvirCilja")
+	var tr = o.get("pretnja")
+	var pr = p.get("cilj_pretnja")
+	_pisi("ai_klijent_" + ime, "%s|%s|%s|%s|%s|%d" % [p.cilj_id, str(pr) if pr != null else "-1", str(p.get("cilj_ja_meta")),
+		o.okvir.is_visible_in_tree(), tr != null and tr.is_visible_in_tree(), int(tr.value) if tr != null else -1])
+	return t > 3 * MAX_T
+
+func _ai_kl(ime: String) -> PackedStringArray:
+	var s := FileAccess.get_file_as_string(dir + "/ai_klijent_" + ime).split("|")
+	while s.size() < 6: s.append("")
+	return s
+
+func _ai_cmd(ime: String, cmd: String) -> void:
+	_ai_cmd_br += 1
+	_pisi("ai_cmd_" + ime, "%d %s" % [_ai_cmd_br, cmd])
+
+func _ai_lik(ime: String):
+	if _world() == null: return null
+	for p in _world().get_children():
+		if p.is_in_group("player") and p.ime_lika == ime: return p
+	return null
+
+func _telo(w):
+	for n in w.get_children():
+		if n.is_in_group("neprijatelj"): return n
+	return null
+
+func _st(e) -> String:
+	var s = e.get("stanje")
+	return AI_STANJA[s] if s is int else "-"
+
+func _tab(e) -> Dictionary:
+	var t_ = e.get("pretnja")
+	return t_ if t_ is Dictionary else {}
+
+func _pr(e, p) -> float:
+	return float(_tab(e).get(p.get_multiplayer_authority(), -1.0))
+
+func _meta(e) -> int:
+	var m = e.get("_meta_id")
+	return m if m is int else -1
+
+func _xz(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x, a.z).distance_to(Vector2(b.x, b.z))
+
+func _server_ai() -> void:
+	if _ai_krenuo or dir == "": return
+	var a1 = _ai_lik("AiLik")
+	var a2 = _ai_lik("Ai2Lik")
+	if a1 and a2:
+		_ai_krenuo = true
+		_ai_scenario(a1, a2)
+
+func _ai_scenario(a1, a2) -> void:
+	var id1: int = a1.get_multiplayer_authority()
+	var id2: int = a2.get_multiplayer_authority()
+	await _cekaj(func(): return _ai_kl("AiLik")[0] != "" or _ai_kl("AiLik")[3] != "", 20.0) # klijenti učitani
+	await _cekaj(func(): return _ai_kl("Ai2Lik")[3] != "", 20.0)
+	var w = _world().goblin_spawner.spawn({"vrsta": "goblin", "id": 950, "pos": AI_POCETAK})
+	var e = _telo(w)
+	e.set_meta("ai_test", true)
+	e.brzina = 2.0
+	print("[S-AI] start, AiLik=%d Ai2Lik=%d, %s aggro %.1f" % [id1, id2, AI_ID, e.aggro_range])
+	await create_timer(0.5).timeout
+	_ai_cmd("AiLik", "cilj " + AI_ID)
+	_ai_cmd("Ai2Lik", "cilj " + AI_ID)
+	await _cekaj(func(): return _ai_kl("AiLik")[0] == AI_ID and _ai_kl("Ai2Lik")[0] == AI_ID, 5.0)
+	var hp1: int = a1.hp
+	var hp2: int = a2.hp
+	await create_timer(2.0).timeout
+	var d1 := _xz(a1.global_position, e.global_position)
+	var d2 := _xz(a2.global_position, e.global_position)
+	_provera("ai_mirovanje_ne_napada", _st(e) == "MIROVANJE" and _tab(e).is_empty() and _xz(e.global_position, AI_POCETAK) < 0.3
+		and a1.hp == hp1 and a2.hp == hp2 and d1 > e.aggro_range and d2 > e.aggro_range,
+		"stanje %s, pretnja %s, od početka %.2f m, igrači na %.1f / %.1f m, hp %d->%d / %d->%d" % [_st(e), _tab(e), _xz(e.global_position, AI_POCETAK), d1, d2, hp1, a1.hp, hp2, a2.hp])
+	var k_bez := _ai_kl("AiLik") # cilj izabran, pretnje nema: traka sakrivena
+
+	# u aggro dometu: JURENJE sa početnom pretnjom, pa napad
+	a1.server_postavi_poziciju(Vector3(20, 1.16, 17), true)
+	var jur: bool = await _cekaj(func(): return _st(e) == "JURENJE", 2.0)
+	var pr0 := _pr(e, a1)
+	var napao: bool = await _cekaj(func(): return a1.hp < hp1, 6.0)
+	_provera("ai_jurenje_u_dometu_napada", jur and is_equal_approx(pr0, 1.0) and _meta(e) == id1 and napao,
+		"jurenje=%s, početna pretnja %.1f, meta %d (AiLik %d), napao=%s (hp %d->%d)" % [jur, pr0, _meta(e), id1, napao, hp1, a1.hp])
+
+	# šteta 1:1; Ai2Lik (cilj isti, bez pretnje) ne vidi tuđu pretnju
+	e.primi_damage(20, id1)
+	_provera("ai_steta_pretnja_1_1", is_equal_approx(_pr(e, a1), 21.0), "pretnja AiLik %.1f (1 + 20)" % _pr(e, a1))
+	await _cekaj(func(): return _ai_kl("AiLik")[1] == "100", 2.0)
+	await create_timer(0.3).timeout
+	var k1 := _ai_kl("AiLik")
+	var k2 := _ai_kl("Ai2Lik")
+	_provera("ai_posmatrac_ne_vidi_pretnju", k1[1] == "100" and k2[0] == AI_ID and k2[1] == "-1" and k2[4] == "false",
+		"AiLik vidi %s%%, Ai2Lik (isti cilj '%s', bez pretnje) vidi %s, traka vidljiva=%s" % [k1[1], k2[0], k2[1], k2[4]])
+
+	# promena mete tek preko 110%: 23 nije > 21*1.1 = 23.1, 24 jeste
+	var ep: Vector3 = e.global_position
+	a2.server_postavi_poziciju(Vector3(ep.x + 2.0, 1.16, ep.z), true)
+	await _cekaj(func(): return is_equal_approx(_pr(e, a2), 1.0), 2.0)
+	e.primi_damage(22, id2)
+	await create_timer(0.5).timeout
+	var ostao := _meta(e) == id1 and is_equal_approx(_pr(e, a2), 23.0)
+	var meta_pre := _meta(e)
+	await _cekaj(func(): return _ai_kl("Ai2Lik")[1] == "110", 2.0)
+	var pre := [_ai_kl("AiLik"), _ai_kl("Ai2Lik")]
+	e.primi_damage(1, id2)
+	var promenjen: bool = await _cekaj(func(): return _meta(e) == id2, 1.0)
+	_provera("ai_meta_tek_preko_110", ostao and promenjen,
+		"pretnja AiLik %.1f, Ai2Lik 23: meta %d (AiLik %d); Ai2Lik 24: promenjena=%s" % [_pr(e, a1), meta_pre, id1, promenjen])
+	await _cekaj(func(): return _ai_kl("AiLik")[1] == "88" and _ai_kl("Ai2Lik")[1] == "100", 2.0)
+	var posle := [_ai_kl("AiLik"), _ai_kl("Ai2Lik")]
+	var ok_pre: bool = pre[0][1] == "100" and pre[0][2] == "true" and pre[0][4] == "true" and pre[0][5] == "100" \
+		and pre[1][1] == "110" and pre[1][2] == "false" and pre[1][4] == "true" and pre[1][5] == "110"
+	var ok_posle: bool = posle[0][1] == "88" and posle[0][2] == "false" and posle[0][4] == "true" and posle[0][5] == "88" \
+		and posle[1][1] == "100" and posle[1][2] == "true" and posle[1][5] == "100"
+	_provera("ai_traka_pretnje_sa_servera", ok_pre and ok_posle,
+		"meta AiLik: AiLik %s, Ai2Lik %s; meta Ai2Lik: AiLik %s, Ai2Lik %s (pretnja|meta|traka|vrednost)" % ["|".join(pre[0].slice(1)), "|".join(pre[1].slice(1)), "|".join(posle[0].slice(1)), "|".join(posle[1].slice(1))])
+	_ai_cmd("AiLik", "cilj -")
+	await _cekaj(func(): return _ai_kl("AiLik")[0] == "", 2.0)
+	var k_nema := _ai_kl("AiLik")
+	_ai_cmd("AiLik", "cilj " + AI_ID)
+	_provera("ai_traka_pretnje_sakrivena", pre[0][4] == "true" and k_bez[0] == AI_ID and k_bez[4] == "false" and k_nema[0] == "" and k_nema[4] == "false",
+		"bez pretnje (cilj '%s'): traka=%s; bez cilja: traka=%s; sa pretnjom: traka=%s" % [k_bez[0], k_bez[4], k_nema[4], pre[0][4]])
+
+	# smrt igrača briše njegovu pretnju (Ai2Lik se odmah odjavi, pre respawn-a na spawn tački)
+	a2.server_primi_damage(100000)
+	var obrisan: bool = await _cekaj(func(): return _pr(e, a2) < 0 and _meta(e) == id1, 1.0)
+	_ai_cmd("Ai2Lik", "kraj")
+	_provera("ai_smrt_brise_pretnju", a2.mrtav and obrisan and _pr(e, a1) > 0,
+		"Ai2Lik mrtav=%s, pretnja %s, meta %d (AiLik %d)" % [a2.mrtav, _tab(e), _meta(e), id1])
+
+	# leash: odvuci goblina od početka (~10 m), pa AiLik pobegne 17 m od njega
+	a1.server_postavi_poziciju(Vector3(20, 1.16, 8), true)
+	await _cekaj(func(): return e.global_position.z < 11.0, 8.0)
+	ep = e.global_position
+	a1.server_postavi_poziciju(Vector3(ep.x, 1.16, ep.z - 17.0), true)
+	var pov: bool = await _cekaj(func(): return _st(e) == "POVRATAK", 1.0)
+	var tab_pov := _tab(e).duplicate()
+	var hp_l: int = a1.hp
+	await create_timer(1.0).timeout
+	_provera("ai_leash_povratak_ne_napada", pov and tab_pov.is_empty() and a1.hp == hp_l and _xz(e.global_position, AI_POCETAK) < _xz(ep, AI_POCETAK) - 0.5,
+		"goblin %.1f m od početka, AiLik 17 m: povratak=%s, pretnja %s, hp AiLik %d->%d, od početka %.1f -> %.1f m" % [_xz(ep, AI_POCETAK), pov, tab_pov, hp_l, a1.hp, _xz(ep, AI_POCETAK), _xz(e.global_position, AI_POCETAK)])
+
+	# povratak: ni aggro (AiLik 1.5 m od njega) ni šteta ne vraćaju u JURENJE
+	ep = e.global_position
+	a1.server_postavi_poziciju(Vector3(ep.x + 1.5, 1.16, ep.z), true)
+	await create_timer(0.3).timeout
+	e.primi_damage(1, id1)
+	var hp_p: int = a1.hp
+	await create_timer(0.7).timeout
+	_provera("ai_povratak_ne_jurenje", _st(e) == "POVRATAK" and _tab(e).is_empty() and a1.hp == hp_p,
+		"AiLik 1.5 m + šteta 1: stanje %s, pretnja %s, hp AiLik %d->%d" % [_st(e), _tab(e), hp_p, a1.hp])
+	a1.server_postavi_poziciju(Vector3(14, 1.16, 22), true) # van aggro-a početne tačke (6.3 m)
+
+	# stiže na početak i regeneriše do punog
+	var stigao: bool = await _cekaj(func(): return _st(e) == "MIROVANJE", 12.0)
+	var d_poc := _xz(e.global_position, AI_POCETAK)
+	var hp_e: int = e.hp
+	var pun: bool = await _cekaj(func(): return e.hp == e.max_hp, 10.0)
+	_provera("ai_povratak_stize_regen", stigao and d_poc < 0.6 and hp_e < e.max_hp and pun,
+		"mirovanje=%s na %.2f m od početka, hp %d -> %d/%d" % [stigao, d_poc, hp_e, e.hp, e.max_hp])
+
+	# napadnut van aggro dometa: JURENJE, pretnja = šteta
+	var d_van := _xz(a1.global_position, e.global_position)
+	e.primi_damage(1, id1)
+	var jur2: bool = await _cekaj(func(): return _st(e) == "JURENJE", 1.0)
+	_provera("ai_napadnut_van_dometa_jurenje", jur2 and d_van > e.aggro_range and is_equal_approx(_pr(e, a1), 1.0),
+		"AiLik na %.1f m (aggro %.1f): jurenje=%s, pretnja %.1f" % [d_van, e.aggro_range, jur2, _pr(e, a1)])
+
+	# respawn sa spawn tačke: nov neprijatelj u MIROVANJU, prazna tabela
+	var tacka = null
+	for tk in get_nodes_in_group("spawn_tacka"):
+		if tk.vrsta == "goblin": tacka = tk
+	var gw = _world()._zivi.get(tacka)
+	var g = _telo(gw) if is_instance_valid(gw) else null
+	var imao := false
+	var staro := ""
+	if g:
+		staro = str(gw.name)
+		g.primi_damage(1, id1)
+		imao = not _tab(g).is_empty()
+		g.primi_damage(100000, id1)
+	var nov: bool = await _cekaj(func(): var n = _world()._zivi.get(tacka); return is_instance_valid(n) and str(n.name) != staro, 10.0)
+	var ng = _telo(_world()._zivi.get(tacka)) if nov else null
+	_provera("ai_respawn_mirovanje", imao and ng != null and _st(ng) == "MIROVANJE" and _tab(ng).is_empty() and ng.get("stanje") != null,
+		"%s pretnja pre smrti=%s, respawn %s: stanje %s, pretnja %s" % [staro, imao, _world()._zivi.get(tacka).name if nov else "-", _st(ng) if ng else "-", _tab(ng) if ng else {}])
+
+	# odjava briše pretnju
+	var pr_pre := _pr(e, a1)
+	_ai_cmd("AiLik", "kraj")
+	var ob: bool = await _cekaj(func(): return _tab(e).is_empty() and _st(e) != "JURENJE", 5.0)
+	_provera("ai_odjava_brise_pretnju", pr_pre > 0 and ob, "pretnja AiLik pre odjave %.1f, posle: %s, stanje %s" % [pr_pre, _tab(e), _st(e)])
+	_pisi("ai_gotov", "1")
