@@ -25,7 +25,7 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 85 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 85 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 87 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 87 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -55,8 +55,8 @@ Deo B (predikcija + reconciliation), nastavak iste vremenske ose:
 
 Napitci (`potion` klijent, provere preko stanja: HUD hp, `prebroj_item`, količina u stub "bazi"):
 `potion_lik_ucitan`, `napitak_leci` (+30, količina -1 u bazi i UI-ju, poruka "+30 HP"),
-`napitak_clamp_max` (+150 na 80/100 → 100), `pun_hp_odbija` ("Već si pun", ne troši),
-`cooldown_odbija` ("Još nije spremno"), `nema_predmet_odbija`, `nepotrosni_odbija` (mač),
+`napitak_clamp_max` (+150 na 80/100 → 100), `pun_hp_odbija` ("Already at full health", ne troši),
+`cooldown_odbija` ("Not ready yet"), `nema_predmet_odbija`, `nepotrosni_odbija` (mač),
 `dva_istovremena_jedan_komad` (2 direktna RPC-a → 1 ok, backend trošio 1×), `mrtav_ne_moze`.
 Štetu i smrt zadaje server drajver na komandu iz `$OUT/potion_cmd` ("br steta N" / "br ubij").
 HP se regeneriše +2/s, pa se efekat proverava kao razlika uz toleranciju.
@@ -64,7 +64,7 @@ HP se regeneriše +2/s, pa se efekat proverava kao razlika uz toleranciju.
 Action bar (`Scenes/UI/ActionBar.tscn`, potion klijent, tasteri preko `Input.parse_input_event`): raspored drži server
 (`primi_action_bar`; TestLik nema sačuvan raspored, pa ga server popuni iz inventara), količina i cooldown iz
 `primi_predmet`. Slot 1 = small HP, 2 = large, 3 = medium, 4 = apple, 10 prazan.
-`action_slot_koristi_napitak` (taster 1: +30, baza -1), `action_cooldown_odbija` ("Još nije spremno", overlay sa
+`action_slot_koristi_napitak` (taster 1: +30, baza -1), `action_cooldown_odbija` ("Not ready yet", overlay sa
 sekundama), `action_prazan_slot_nista` (taster 0: nijedan zahtev), `action_kolicina_iz_servera` (slot 1 = baza,
 slot 2 = 0 jer je large potrošen mimo bara). Sve 4 padaju bez implementacije (provereno).
 
@@ -90,11 +90,11 @@ serveru u `$OUT/cilj_server`. Klik = `InputEventMouseButton` na `kamera.unprojec
 
 Napad (taster **R**; desni klik drži kameru, F je `interact`). Klijent šalje samo `zatrazi_napad` bez mete; server napada
 svoj `_cilj_srv` i odgovara `odgovor_napad` (signal `napad_odgovor`, HUD poruka). Provere (CiljLik, goblin_904 na
-~2.7 m i goblin_905 na ~2.5 m, oba u dometu 3.5 m): `napad_bez_cilja` ("Nema cilja"), `klik_bira_ne_steti`,
+~2.7 m i goblin_905 na ~2.5 m, oba u dometu 3.5 m): `napad_bez_cilja` ("No target"), `klik_bira_ne_steti`,
 `klik_preko_ui_ne_napada` (klik na action bar: ni odgovor ni šteta), `napad_samo_cilj` (904 -25, 905 netaknut),
-`napad_cooldown` ("Još nije spremno"), `napad_predaleko` (904 na ~6 m), `smrt_cilja_pa_nema_cilja`, `mrtav_ne_napada`
-(server komanda `ubij_lik CiljLik`; R i klik → "Mrtav si"). Uloga `drugi` (`DrugiLik` na (-15, 1.16, -16), token
-`drugi-token`): kad CiljLik upiše `drugi_kreni`, klik u nebo + R → `drugi_ne_napada_tudji_cilj` ("Nema cilja", HP
+`napad_cooldown` ("Not ready yet"), `napad_predaleko` (904 na ~6 m), `smrt_cilja_pa_nema_cilja`, `mrtav_ne_napada`
+(server komanda `ubij_lik CiljLik`; R i klik → "You are dead"). Uloga `drugi` (`DrugiLik` na (-15, 1.16, -16), token
+`drugi-token`): kad CiljLik upiše `drugi_kreni`, klik u nebo + R → `drugi_ne_napada_tudji_cilj` ("No target", HP
 tuđeg cilja nepromenjen), pa upiše `drugi_gotov`. Svih 8 novih pada bez implementacije (provereno).
 
 AI neprijatelja (`Enemy.gd`: stanja MIROVANJE/JURENJE/POVRATAK, tabela pretnje, leash; prelazi u logu kao `[AI]`).
@@ -150,7 +150,7 @@ Pozicije u proverama su `server_poz` (poslednje stanje koje je server poslao), a
 Posle toga mover ispiše `CEKAM_GASENJE`, a `run.sh` napravi `$OUT/ugasi_server`. Server
 (`stop=` argument) to vidi i sam se ugasi (`quit()`, da ENet odmah pošalje disconnect; `kill`
 bi čekao ENet timeout). Klijenti su još živi. Provere: `server_prekid_vraca_na_login` (MainMenu
-sa porukom "Veza sa serverom je prekinuta", token obrisan) i `nema_greske_neaktivnog_peera`
+sa porukom "Lost connection to the server", token obrisan) i `nema_greske_neaktivnog_peera`
 (`run.sh` grep-uje mover/observer log za "isn't currently active" i "No multiplayer peer is
 assigned").
 
@@ -159,6 +159,15 @@ koju zna server koristi `p.server_poz`; `p.global_position` vlasnika je predviđ
 
 Brza provera da se skripte kompajliraju (sa autoload-ovima): pokreni `run.sh`. Greška u
 skripti se vidi kao `SCRIPT ERROR` u izlazu.
+
+Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
+igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u
+`GameState.JEZIK`); server šalje engleske ključeve, klijent ih prevodi pri prikazu. `run.sh` na početku radi
+`--import` (CSV -> `.translation`, ne idu u git). `backend_poruke_u_csv`: svaka poruka greške iz `~/mmorpg-server`
+(`BACKEND_DIR`) osim internih (`INTERNE` u skripti) ima red u CSV-u, ključ tačno kao backend. `bez_srpskog_u_prikazu`:
+stringovi u `Scripts/*.gd` (bez komentara, print/push_error/_dbg_seq i `[DEBUG]` prefiksa; jedna reč malim slovom se
+preskače) i tekstovi u `.tscn` bez č ć š ž đ i tipičnih srpskih reči. Na starom kodu (main pre prevoda) nalazi 75
+stringova; bez reda `Inventory pun` u CSV-u pada i prva.
 
 ## Pokretanje (čovek)
 

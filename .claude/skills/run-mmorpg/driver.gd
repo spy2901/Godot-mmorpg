@@ -478,7 +478,7 @@ func _mover_ceka_gasenje() -> bool:
 		_menu_t = t
 	# još 1 s u meniju, da se u logu vidi ima li grešaka posle prekida
 	if _menu_t >= 0 and t - _menu_t > 1.0:
-		var ok: bool = current_scene.get("_error_label") != null and current_scene._error_label.text == "Veza sa serverom je prekinuta"
+		var ok: bool = current_scene.get("_error_label") != null and current_scene._error_label.text == "Lost connection to the server"
 		_provera("server_prekid_vraca_na_login", ok, "scena=%s poruka='%s' token='%s'" % [scena, current_scene._error_label.text, root.get_node("GameState").token])
 		return true
 	if t - _ceka_gasenje >= 30.0:
@@ -496,7 +496,7 @@ func _visi() -> bool:
 	if _visi_od >= 0 and scena and scena.scene_file_path == "res://Scenes/UI/MainMenu.tscn":
 		var poruka: String = scena._error_label.text # main_menu prebaci GameState.poruka_logina u labelu i obriše je
 		var rok: float = 10.0 + 2.0 # Player_Movement.UCITAVANJE_TIMEOUT + slanje registracije i izbacivanje (0,2 s)
-		_provera("ucitavanje_istek_izbacuje", "istek" in poruka and t - _visi_od < rok,
+		_provera("ucitavanje_istek_izbacuje", "timed out" in poruka and t - _visi_od < rok,
 			"izbačen posle %.1f s (rok %.0f s), poruka '%s'" % [t - _visi_od, rok, poruka])
 		return true
 	if _visi_od < 0 and _moj():
@@ -565,7 +565,7 @@ func _potion_scenario() -> void:
 	# cooldown: drugi pokušaj odmah po potvrdi prvog (HP nije pun, pa je jedini razlog cooldown)
 	var r: Dictionary = await p.koristi_item_na_serveru("small_health_potion")
 	b = await _baza("small_health_potion")
-	_provera("cooldown_odbija", hud.hp < hud.max_hp and r.get("poruka") == "Još nije spremno" and b == 2, "hp=%d r=%s baza=%d" % [hud.hp, r, b])
+	_provera("cooldown_odbija", hud.hp < hud.max_hp and r.get("poruka") == "Not ready yet" and b == 2, "hp=%d r=%s baza=%d" % [hud.hp, r, b])
 
 	# 2. +150 na 80/100 -> clamp na 100
 	r = await p.koristi_item_na_serveru("large_health_potion")
@@ -576,7 +576,7 @@ func _potion_scenario() -> void:
 	# 3. pun HP: odbijeno, ne troši
 	r = await p.koristi_item_na_serveru("medium_health_potion")
 	b = await _baza("medium_health_potion")
-	_provera("pun_hp_odbija", not r.get("ok", true) and r.get("poruka") == "Već si pun" and b == 3, "r=%s baza=%d" % [r, b])
+	_provera("pun_hp_odbija", not r.get("ok", true) and r.get("poruka") == "Already at full health" and b == 3, "r=%s baza=%d" % [r, b])
 
 	# 4. šteta: HP ispod maksimuma za test dva istovremena zahteva
 	_komanda("steta 40")
@@ -589,10 +589,10 @@ func _potion_scenario() -> void:
 
 	# 5. predmet koji nema; 6. nepotrošni
 	r = await p.koristi_item_na_serveru("mana_potion")
-	_provera("nema_predmet_odbija", r.get("poruka") == "Nemaš taj predmet", "r=%s" % r)
+	_provera("nema_predmet_odbija", r.get("poruka") == "You don't have that item", "r=%s" % r)
 	r = await p.koristi_item_na_serveru("iron_sword")
 	b = await _baza("iron_sword")
-	_provera("nepotrosni_odbija", r.get("poruka") == "Predmet se ne može koristiti" and b == 1, "r=%s baza=%d" % [r, b])
+	_provera("nepotrosni_odbija", r.get("poruka") == "This item can't be used" and b == 1, "r=%s baza=%d" % [r, b])
 
 	# 7. dva istovremena zahteva (direktni RPC, mimo klijentske zaštite) -> jedan komad
 	var pre: Dictionary = await api.get_player("TestLik")
@@ -624,7 +624,7 @@ func _potion_scenario() -> void:
 	await _cekaj(func(): return hud.je_mrtav, 3.0)
 	r = await p.koristi_item_na_serveru("apple")
 	b = await _baza("apple")
-	_provera("mrtav_ne_moze", hud.je_mrtav and r.get("poruka") == "Mrtav si" and b == 2, "mrtav=%s r=%s baza=%d" % [hud.je_mrtav, r, b])
+	_provera("mrtav_ne_moze", hud.je_mrtav and r.get("poruka") == "You are dead" and b == 2, "mrtav=%s r=%s baza=%d" % [hud.je_mrtav, r, b])
 	await _snimak("mrtav")
 	# respawn (server, 3 s) pa sačekaj da ga observer vidi pre odjave
 	await _cekaj(func(): return not hud.je_mrtav, 6.0)
@@ -671,7 +671,7 @@ func _action_bar_provere(p, hud) -> void:
 	var b2: int = await _baza("small_health_potion")
 	var cd_txt: String = bar._prikaz[0].cd.text if ima else ""
 	var overlay: bool = ima and bar._prikaz[0].overlay.visible
-	_provera("action_cooldown_odbija", ima and odgovori.size() == 2 and odgovori[1].get("poruka") == "Još nije spremno" and b2 == b1 and overlay and cd_txt.is_valid_int() and int(cd_txt) > 0 and hud.hp <= hp1 + 4,
+	_provera("action_cooldown_odbija", ima and odgovori.size() == 2 and odgovori[1].get("poruka") == "Not ready yet" and b2 == b1 and overlay and cd_txt.is_valid_int() and int(cd_txt) > 0 and hud.hp <= hp1 + 4,
 		"odgovor=%s baza=%d overlay=%s sekundi='%s' hp %d->%d" % [odgovori[1] if odgovori.size() > 1 else "-", b2, overlay, cd_txt, hp1, hud.hp])
 
 	# prazan slot (taster 0): bez zahteva serveru
@@ -1156,7 +1156,7 @@ func _cilj_scenario(p) -> void:
 	_pritisni(KEY_R)
 	await _cekaj(func(): return odg.size() >= 1, 3.0)
 	await create_timer(0.5).timeout
-	_provera("napad_bez_cilja", cilj.call() == "" and poruka.call(0) == "Nema cilja" and hp.call(g4) == 50 and hp.call(g5) == 50,
+	_provera("napad_bez_cilja", cilj.call() == "" and poruka.call(0) == "No target" and hp.call(g4) == 50 and hp.call(g5) == 50,
 		"cilj '%s', odgovor '%s', hp 904=%d 905=%d" % [cilj.call(), poruka.call(0), hp.call(g4), hp.call(g5)])
 
 	# b) klik na neprijatelja bira cilj, ali ne šteti
@@ -1186,7 +1186,7 @@ func _cilj_scenario(p) -> void:
 	_pritisni(KEY_R)
 	await _cekaj(func(): return odg.size() > n0, 3.0)
 	await create_timer(0.3).timeout
-	_provera("napad_cooldown", poruka.call(n0) == "Još nije spremno" and hp.call(g4) == 25,
+	_provera("napad_cooldown", poruka.call(n0) == "Not ready yet" and hp.call(g4) == 25,
 		"odgovor '%s', hp 904=%d" % [poruka.call(n0), hp.call(g4)])
 
 	# g) drugi igrač (DrugiLik 2.5 m od goblin_904, bez cilja): klik + R ne štete tuđem cilju
@@ -1201,7 +1201,7 @@ func _cilj_scenario(p) -> void:
 	_pritisni(KEY_R)
 	await _cekaj(func(): return odg.size() > n0, 3.0)
 	await create_timer(0.3).timeout
-	_provera("napad_predaleko", poruka.call(n0) == "Predaleko" and cilj.call() == "goblin_904" and hp.call(g4) == hp_pre,
+	_provera("napad_predaleko", poruka.call(n0) == "Too far" and cilj.call() == "goblin_904" and hp.call(g4) == hp_pre,
 		"odgovor '%s', cilj '%s', hp 904 %d->%d" % [poruka.call(n0), cilj.call(), hp_pre, hp.call(g4)])
 
 	# h) smrt cilja skida cilj, naredni napad: "Nema cilja"
@@ -1211,7 +1211,7 @@ func _cilj_scenario(p) -> void:
 	_pritisni(KEY_R)
 	await _cekaj(func(): return odg.size() > n0, 3.0)
 	await create_timer(0.3).timeout
-	_provera("smrt_cilja_pa_nema_cilja", cilj.call() == "" and poruka.call(n0) == "Nema cilja" and hp.call(g5) == 50,
+	_provera("smrt_cilja_pa_nema_cilja", cilj.call() == "" and poruka.call(n0) == "No target" and hp.call(g5) == 50,
 		"cilj '%s', odgovor '%s', hp 905=%d" % [cilj.call(), poruka.call(n0), hp.call(g5)])
 
 	# i) mrtav igrač ne napada (cilj goblin_905 u dometu)
@@ -1226,7 +1226,7 @@ func _cilj_scenario(p) -> void:
 	_klik(p.kamera.unproject_position(g5.global_position) if is_instance_valid(g5) else bar_poz) # stari napad
 	await _cekaj(func(): return odg.size() > n0, 3.0)
 	await create_timer(0.5).timeout
-	_provera("mrtav_ne_napada", hud.je_mrtav and poruka.call(n0) == "Mrtav si" and hp.call(g5) == 50,
+	_provera("mrtav_ne_napada", hud.je_mrtav and poruka.call(n0) == "You are dead" and hp.call(g5) == 50,
 		"mrtav=%s cilj '%s', odgovor '%s', hp 905=%d" % [hud.je_mrtav, cilj.call(), poruka.call(n0), hp.call(g5)])
 	_cilj_kraj = true
 
@@ -1256,7 +1256,7 @@ func _drugi_scenario(p) -> void:
 	await _cekaj(func(): return odg.size() >= 1, 3.0)
 	await create_timer(1.5).timeout
 	var hp1: int = e.hp if is_instance_valid(e) else 0
-	_provera("drugi_ne_napada_tudji_cilj", e != null and hp0 == 25 and hp1 == hp0 and odg.size() == 1 and str(odg[0].get("poruka", "")) == "Nema cilja",
+	_provera("drugi_ne_napada_tudji_cilj", e != null and hp0 == 25 and hp1 == hp0 and odg.size() == 1 and str(odg[0].get("poruka", "")) == "No target",
 		"goblin_904 (cilj CiljLik-a) hp %d->%d, odgovor %s, moj cilj '%s'" % [hp0, hp1, odg[0] if odg.size() > 0 else "-", p.get("cilj_id")])
 	_pisi("drugi_gotov", "1")
 	_drugi_kraj = true

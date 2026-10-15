@@ -37,7 +37,7 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
    - `drugi_vidi_kretanje` (igrac2): tuđi lik se pomerio koliko je server javio.
    - screenshot `$OUT/pi_igrac1.png`: igrac1 se okrene ka drugom igraču pa snimi.
    - action bar (igrac1, odmah posle učitavanja): `action_bar_napitak` (taster 1 = small_health_potion: HP 88-100,
-     slot pokazuje 2) i `action_bar_cooldown` (drugi pritisak čim server potvrdi prvi: "Još nije spremno", overlay
+     slot pokazuje 2) i `action_bar_cooldown` (drugi pritisak čim server potvrdi prvi: "Not ready yet", overlay
      sa sekundama). Screenshot-ovi `$OUT/pi_igrac1_bar.png` (popunjen bar) i `$OUT/pi_igrac1_cooldown.png`.
      Posle klijenata `run.sh`: `baza_posle_action_bara` (small_health_potion u bazi 3 -> 2, `reset_stanje.py --proveri 2`).
    - `cilj_na_pravom_serveru` (igrac1 u prozoru, posle screenshot-a): okrene se ka najbližem živom neprijatelju bližem
@@ -48,7 +48,7 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
      se dok se lik okreće i klikće (~2 s), a svi likovi su van njegovog aggro_range (MIROVANJE, bez aggro-a na
      test likove).
    - `napad_predaleko_na_pravom_serveru` (pre Esc-a): tačno jedan napad (R) na izabran cilj van dometa napada (cilj
-     mora biti dalje od 5.5 m, inače se R ne pritiska i provera pada): server odgovori "Predaleko", HP cilja
+     mora biti dalje od 5.5 m, inače se R ne pritiska i provera pada): server odgovori "Too far", HP cilja
      nepromenjen; screenshot `$OUT/pi_igrac1_napad.png`. Test ne ubija neprijatelje (XP i loot test naloga su u
      pravoj bazi).
    - `WARN igracN:greska_predikcije` kad je najveća greška predikcije > 1 m (`GRESKA_WARN_M`), npr. snap

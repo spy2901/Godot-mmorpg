@@ -6,6 +6,8 @@ set -u
 SKRIPTA="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/../../.." || exit 1
 G="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
+# uvoz resursa (translations/teksti.csv -> .translation): bez ovoga posle izmene CSV-a igra koristi stare prevode
+"$G" --headless --path . --import > /dev/null 2>&1 || true
 D=res://.claude/skills/run-mmorpg/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/run-mmorpg}"
 echo "load average: $(sysctl -n vm.loadavg 2>/dev/null || cut -d' ' -f1-3 /proc/loadavg)"
@@ -98,6 +100,8 @@ if grep -q "isn't currently active\|No multiplayer peer is assigned" "$OUT"/move
 else
   echo "PASS nema_greske_neaktivnog_peera"
 fi | tee "$OUT/run.log"
+# tekstovi (bez Godot-a): poruke backenda u translations/teksti.csv, bez srpskog u prikazu
+python3 .claude/skills/run-mmorpg/proveri_tekstove.py > "$OUT/tekstovi.log" 2>&1; cat "$OUT/tekstovi.log"
 grep -h 'SCRIPT ERROR' "$OUT"/*.log | sort | uniq -c
 # seq_bez_rupa_bez_gubitka ume da padne kad neki klijent zastane pod opterećenjem mašine: posle zastoja
 # Godot nadoknađuje tick-ove brže od 1.2x i token bucket (UNOS_BURST) ih odbaci. Ako je to JEDINI FAIL,
@@ -109,5 +113,5 @@ if [ -z "${RUN_PONOVLJEN:-}" ] && grep -qh '^FAIL seq_bez_rupa_bez_gubitka' "$OU
   kill $STUB 2>/dev/null; wait $STUB 2>/dev/null # port mora biti slobodan za novi stub
   RUN_PONOVLJEN=1 exec "$SKRIPTA" "$@"
 fi
-# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 85
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 85 ]
+# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 87
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 87 ]

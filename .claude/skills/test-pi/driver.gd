@@ -91,7 +91,7 @@ func _action_bar(p, hud) -> void:
 	_provera("action_bar_napitak", spreman and potvrda and odg[0].get("ok", false) and hud.hp >= 88 and hud.hp <= 100 \
 		and bar.kolicina(0) == 2 and bar._prikaz[0].kolicina.text == "2",
 		"bar=%s slot1 '%s' x%s, hp %d->%d, odgovor=%s" % [ima, bar._prikaz[0].oznaka.text if ima else "-", bar._prikaz[0].kolicina.text if ima else "-", hp0, hud.hp, odg[0] if odg.size() > 0 else "-"])
-	_provera("action_bar_cooldown", odg.size() == 2 and odg[1].get("poruka") == "Još nije spremno" and overlay and cd_txt.is_valid_int() and int(cd_txt) > 0,
+	_provera("action_bar_cooldown", odg.size() == 2 and odg[1].get("poruka") == "Not ready yet" and overlay and cd_txt.is_valid_int() and int(cd_txt) > 0,
 		"odgovor=%s overlay=%s sekundi='%s'" % [odg[1] if odg.size() > 1 else "-", overlay, cd_txt])
 	await _snimi("_cooldown")
 
@@ -172,7 +172,7 @@ func _napad_predaleko(p, e, izabran: bool) -> void:
 	await create_timer(0.5).timeout # da bi se video eventualni drugi odgovor ili šteta
 	await _snimi("_napad")
 	var hp1: int = e.hp if is_instance_valid(e) else -1
-	_provera("napad_predaleko_na_pravom_serveru", odg.size() == 1 and odg[0].get("poruka") == "Predaleko" and hp1 == hp0,
+	_provera("napad_predaleko_na_pravom_serveru", odg.size() == 1 and odg[0].get("poruka") == "Too far" and hp1 == hp0,
 		"cilj na %.1f m, odgovor %s, hp %d->%d" % [d, odg[0] if odg.size() > 0 else "-", hp0, hp1])
 
 func _pisi(ime: String, s: String) -> void:
