@@ -40,6 +40,10 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
      slot pokazuje 2) i `action_bar_cooldown` (drugi pritisak čim server potvrdi prvi: "Not ready yet", overlay
      sa sekundama). Screenshot-ovi `$OUT/pi_igrac1_bar.png` (popunjen bar) i `$OUT/pi_igrac1_cooldown.png`.
      Posle klijenata `run.sh`: `baza_posle_action_bara` (small_health_potion u bazi 3 -> 2, `reset_stanje.py --proveri 2`).
+   - `statistike_na_pravom_serveru` (oba igrača, samo čitanje, bez opremanja): server posle učitavanja pošalje
+     statistike; agent_test likovi nemaju opremu, pa je attack = osnovni napad iz baze, armor 0, max HP = HUD, a
+     sažetak u inventaru "Attack: … Armor: … Max HP: …". igrac1 snimi `$OUT/pi_igrac1_inventar.png` (inventar
+     otvoren pa zatvoren).
    - `cilj_na_pravom_serveru` (igrac1 u prozoru, posle screenshot-a): okrene se ka najbližem živom neprijatelju bližem
      od 25 m, levi klik na njega → server potvrdi cilj, okvir pokazuje HP = replicirani hp; screenshot
      `$OUT/pi_igrac1_cilj.png`; Esc skida cilj.

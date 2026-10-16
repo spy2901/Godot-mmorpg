@@ -95,6 +95,22 @@ func _action_bar(p, hud) -> void:
 		"odgovor=%s overlay=%s sekundi='%s'" % [odg[1] if odg.size() > 1 else "-", overlay, cd_txt])
 	await _snimi("_cooldown")
 
+# Statistike lika iz prave baze, samo čitanje (bez opremanja): server ih pošalje posle učitavanja. agent_test
+# likovi nemaju opremu, pa je attack = osnovni napad iz baze, armor 0, max HP = maksimum iz baze. igrac1 snimi
+# inventar sa sažetkom statistika (pa ga zatvori).
+func _statistike(p, hud) -> void:
+	var inv = p.get_node("ui/InventoryUI")
+	var stigle: bool = await _cekaj(func(): return p.stat_max_hp > 0, 10.0)
+	var bez_opreme: bool = inv.equipped_items.values().all(func(x): return x.is_empty())
+	var ocek := "Attack: %d   Armor: %d   Max HP: %d" % [p.napad_damage, 0, hud.max_hp]
+	_provera("statistike_na_pravom_serveru", stigle and bez_opreme and p.stat_attack == p.napad_damage and p.stat_armor == 0
+		and p.stat_max_hp == hud.max_hp and inv.stat_label.text == ocek,
+		"attack %d (osnovni %d), armor %d, max HP %d (HUD %d), oprema prazna=%s, sažetak '%s'" % [p.stat_attack, p.napad_damage, p.stat_armor, p.stat_max_hp, hud.max_hp, bez_opreme, inv.stat_label.text])
+	if shot != "" and uloga == "igrac1":
+		inv.visible = true
+		await _snimi("_inventar")
+		inv.visible = false
+
 func _cilj(p) -> void:
 	var e = null
 	for n in get_nodes_in_group("neprijatelj"):
@@ -254,6 +270,7 @@ func _scenario() -> void:
 	# pozicija iz baze stiže kao reset 2 (reset 1 = spawn); bez ovoga merenja počinju sa spawn tačke
 	var reset_baze: bool = await _cekaj(func(): return p._reset_id_prim >= 2, 10.0)
 	_provera("lik_ucitan_iz_baze", ucitan and reset_baze and hud.ime_igraca == ime, "lv=%d hp=%d/%d mana=%d/%d gold=%d poz=%s reset_id=%d" % [hud.level, hud.hp, hud.max_hp, hud.mana, hud.max_mana, hud.gold, p.server_poz, p._reset_id_prim])
+	await _statistike(p, hud)
 	if not ucitan:
 		await _zavrsi()
 		return

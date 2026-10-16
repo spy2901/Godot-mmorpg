@@ -25,10 +25,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 87 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 87 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 100 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 100 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -159,6 +159,19 @@ koju zna server koristi `p.server_poz`; `p.global_position` vlasnika je predviđ
 
 Brza provera da se skripte kompajliraju (sa autoload-ovima): pokreni `run.sh`. Greška u
 skripti se vidi kao `SCRIPT ERROR` u izlazu.
+
+Oprema i statistike (`Player_Movement`: server drži `oprema` i računa attack = `napad_damage` + damage oružja,
+armor = zbir, max HP = osnovni + hp_bonus; primljena šteta = max(1, šteta·100/(100+armor)); zahtev
+`zatrazi_opremanje(slot, item_id)`, "" = skidanje). Uloga `oprema`: `korak=1` OpremaLik (8 komada opreme u stub-u,
+osnovno 25/0/100) oprema kroz inventar (`_on_slot_klik`, `_skini_opremu`) i direktnim zahtevima; server drajver
+upisuje statistike po serveru u `$OUT/oprema_server` i izvršava `$OUT/oprema_cmd` ("steta N" u istom frame-u ->
+`$OUT/oprema_steta`, "hp N"). `korak=2` je ponovna prijava, `korak=3` Oprema2Lik šalje zahtev za tuđi lik. Provere:
+`oprema_osnovne_vrednosti`, `oruzje_povecava_stetu`, `oklop_68_smanjuje_stetu_25_na_14`,
+`max_hp_predmet_podize_maksimum`, `skidanje_max_hp_ogranicava_hp`, `odbija_predmet_koji_nije_u_inventaru`,
+`odbija_pogresan_slot`, `odbija_isti_predmet_dvaput`, `iron_gloves_se_ne_oprema` (klik ne šalje zahtev, opis "Can't be
+equipped"), `skidanje_vraca_stare_vrednosti`, `drugi_igrac_ne_oprema_tudji_predmet`, `statistike_prezive_prijavu`,
+`hp_iznad_osnovnog_prezivi_prijavu`. Svih 13 pada bez implementacije (provereno). Stub `/save` čuva inventar i opremu
+samo kad se broj komada slaže (kao backend). Mover čeka gašenje servera do 70 s (`run.sh` čeka uloge do 60 s).
 
 Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
 igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u
