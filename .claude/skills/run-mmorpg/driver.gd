@@ -1692,6 +1692,7 @@ func _oprema_prijava(p, inv) -> void:
 	# HP se regeneriše (+2/s), pa je posle prijave >= 140; bitno je da je iznad osnovnog maksimuma (100)
 	_provera("hp_iznad_osnovnog_prezivi_prijavu", int(d.get("hp", -1)) >= 140 and int(d.get("hp", -1)) <= 150 and int(d.get("max_hp", -1)) == 150,
 		"HP %s / %s (osnovni max 100, pre odjave 140)" % [d.get("hp"), d.get("max_hp")])
+	await _kamera_fp_pa_nazad(p)
 	_opr_kraj = true
 
 func _oprema_tudji(p) -> void:
@@ -1704,3 +1705,51 @@ func _oprema_tudji(p) -> void:
 	await create_timer(0.3).timeout
 	_pisi("oprema_tudji_poslato", "1")
 	_opr_kraj = true
+
+# Kamera: zum do first person-a, pogled gore/dole do granice i nazad istim pokretom, odzum. Posle toga kamera mora biti
+# kao pre ulaska (pitch, yaw/roll, offset i model vidljiv); kretanje miša bez granice je i ranije bilo reverzibilno.
+func _kamera_fp_pa_nazad(p) -> void:
+	var k: Camera3D = p.kamera
+	var model: Node3D = p.get_node("CharacterMain")
+	var pre_rot := k.rotation
+	var pre_off: Vector3 = p._kamera_poz
+	var dogadjaj := func(e: InputEvent) -> void:
+		Input.parse_input_event(e)
+		await process_frame
+		await process_frame
+	var tocak := func(gore: bool) -> void:
+		var e := InputEventMouseButton.new()
+		e.button_index = MOUSE_BUTTON_WHEEL_UP if gore else MOUSE_BUTTON_WHEEL_DOWN
+		e.pressed = true
+		await dogadjaj.call(e)
+	var desni := func(dole: bool) -> void:
+		var e := InputEventMouseButton.new()
+		e.button_index = MOUSE_BUTTON_RIGHT
+		e.pressed = dole
+		await dogadjaj.call(e)
+	var mis := func(dy: float) -> void:
+		var e := InputEventMouseMotion.new()
+		e.relative = Vector2(0, dy)
+		await dogadjaj.call(e)
+	for i in 4: await tocak.call(true) # do kraja: first person
+	var fp: bool = not model.visible and p._kamera_poz.z <= 0.1
+	await desni.call(true)
+	for i in 20: await mis.call(-40) # gore preko granice
+	var gore_ok := absf(rad_to_deg(k.rotation.x) - 60.0) < 0.5
+	for i in 40: await mis.call(40)  # dole preko granice
+	var dole_ok := absf(rad_to_deg(k.rotation.x) + 60.0) < 0.5
+	for i in 20: await mis.call(-40) # nazad isto koliko je išlo gore
+	await desni.call(false)
+	var posle_fp_pogleda := k.rotation
+	while model.visible == false or p._kamera_poz.z < pre_off.z - 0.001: # odzum dok se ne vrati na početni offset (ili do kraja)
+		var z: float = p._kamera_poz.z
+		await tocak.call(false)
+		if p._kamera_poz.z == z:
+			break
+	var razlika := (k.rotation - pre_rot) * 180.0 / PI
+	var u_opsegu := absf(rad_to_deg(k.rotation.x)) <= 60.0
+	_provera("kamera_fp_pa_nazad_isti_ugao_i_offset", fp and gore_ok and dole_ok and razlika.length() < 0.05 and u_opsegu
+		and p._kamera_poz.is_equal_approx(pre_off) and model.visible,
+		"first person=%s, granice gore/dole=%s/%s, rot pre %s posle %s (razlika %s stepeni), offset pre %s posle %s, model=%s" % [
+			fp, gore_ok, dole_ok, (pre_rot * 180.0 / PI).snapped(Vector3.ONE * 0.01), (k.rotation * 180.0 / PI).snapped(Vector3.ONE * 0.01),
+			razlika.snapped(Vector3.ONE * 0.01), pre_off.snapped(Vector3.ONE * 0.001), p._kamera_poz.snapped(Vector3.ONE * 0.001), model.visible])
