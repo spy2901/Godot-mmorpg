@@ -106,7 +106,7 @@ var _sat_pomak := 0.0        # lokalno vreme - serversko vreme (usrednjeno)
 
 #ATTACK
 var napad_damage = 25  # na serveru: učitano iz baze preko registruj_lik
-var bonus_oruzja = 0   # na serveru: damage iz items.damage za opremljeno oružje
+var bonus_oruzja = 0   # na serveru: attack opremljenog oružja (items.damage)
 var napad_cooldown = 1.0
 const DOMET_NAPADA := 3.5  # m, od SERVER pozicije igrača do cilja
 var _napad_spreman_ms := 0 # server: od kada sme sledeći napad
@@ -125,19 +125,28 @@ const HP_REGEN := 2
 const MANA_REGEN := 3
 const RESPAWN_DELAY := 3.0
 const NEOSJETLJIVOST_MS := 2000
-const SLOTOVI_OKLOPA := ["head", "chest", "legs", "boots", "shield"]
+const SLOTOVI_OPREME := ["head", "chest", "legs", "boots", "weapon", "shield"]
+const MAX_SLOTOVA_INVENTARA := 24 # = backend MAX_SLOTOVA i inventar klijenta (6 x 4)
 
 var hp := 100
 var max_hp := 100
 var mana := 100
 var max_mana := 100
 var mrtav := false # server: pravi status; klijent: ogledalo za blokiranje unosa
-var armor := 0 # samo na serveru: zbir oklopa iz opreme
+var armor := 0 # samo na serveru: zbir armor-a opreme
+var hp_bonus := 0 # samo na serveru: zbir hp_bonus-a opreme; max_hp = max_hp_osnovni + hp_bonus
+var max_hp_osnovni := 100 # samo na serveru: iz baze (raste sa nivoom)
+var oprema := {} # samo na serveru: slot -> item_id; jedini izvor opreme (klijent šalje samo zahteve)
+var _predmeti := {} # samo na serveru: item_id -> podaci predmeta iz API-ja (statistike i slot se ne menjaju)
+var _oprema_u_toku := false # samo na serveru
+signal oprema_odgovor(odgovor: Dictionary) # klijent: odgovor na zahtev za opremanje/skidanje
+signal statistike_promenjene # klijent: stigle statistike od servera
+var stat_attack := 0 # klijent: statistike lika po serveru (samo za prikaz)
+var stat_armor := 0
+var stat_max_hp := 0
 var _stanje_ucitano := false # samo na serveru: hp/mana učitani iz baze
 var _neosjetljiv_do_ms := 0 # samo na serveru
 var _regen_akum := 0.0 # samo na serveru
-var _oklop_kljuc := "" # samo na serveru: koja oprema je već uračunata
-var _oklop_verzija := 0 # samo na serveru
 
 #NAMEPLATE (ime + HP traka iznad tuđih igrača; samo na klijentima)
 const MAX_PRIKAZ_DALJINA := 40.0 # m od kamere lokalnog igrača
@@ -340,16 +349,26 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 		var id := str(eq[slot])
 		if id != "":
 			vlasnistvo[id] = vlasnistvo.get(id, 0) + 1
-
-	await _primeni_oruzje(str(eq.get("weapon", "")))
-	await _primeni_oklop(eq)
+	var inventar: Array = p.get("inventory", []).duplicate(true)
+	# oprema iz baze važi samo ako predmet ide baš u taj slot; ostalo se vraća u inventar
+	oprema.clear()
+	for slot in eq:
+		var id := str(eq[slot])
+		if id == "":
+			continue
+		if slot in SLOTOVI_OPREME and str((await _predmet(id)).get("slot", "")) == slot:
+			oprema[slot] = id
+		else:
+			print("[OPREMA] ", ime, ": ", id, " ne ide u slot ", slot, ", vraćen u inventar")
+			_inv_vrati(inventar, id)
 	var ab_sacuvan := await _ucitaj_action_bar(p.get("action_bar"), p.get("inventory", []))
 	var zavrseni: Array = await ApiManager.get_completed_quests(ime)
 	if ime_lika != ime:  # izbačen dok smo čekali backend
 		return
 
-	# HP i mana: od sada ih drži server
-	max_hp = int(p.get("max_hp", 100))
+	# HP i mana: od sada ih drži server; maksimum HP-a = osnovni iz baze + hp_bonus opreme
+	max_hp_osnovni = int(p.get("max_hp", 100))
+	_preracunaj_statistike()
 	max_mana = int(p.get("max_mana", 100))
 	hp = clampi(int(p.get("hp", max_hp)), 1, max_hp)
 	mana = clampi(int(p.get("mana", max_mana)), 0, max_mana)
@@ -360,13 +379,13 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 	_sync_nameplate()
 	print("[SERVER] Lik ", ime, " registrovan, damage: ", izracunaj_damage(), ", predmeta: ", vlasnistvo.size())
 
-	_ucitano_stanje = {"inventory": p.get("inventory", []), "equipment": eq}
+	_ucitano_stanje = {"inventory": inventar}
 	var podaci := {
 		"level": p.get("level", 1), "xp": p.get("xp", 0), "max_xp": p.get("max_xp", 100),
 		"hp": hp, "max_hp": max_hp,
 		"mana": mana, "max_mana": max_mana,
 		"gold": p.get("gold", 100), "napad_damage": napad_damage,
-		"inventory": p.get("inventory", []), "equipment": eq,
+		"inventory": inventar, "equipment": oprema.duplicate(),
 		"aktivni_quest_id": p.get("aktivni_quest_id", null), "quest_progres": p.get("quest_progres", 0),
 		"zavrseni_questovi": zavrseni
 	}
@@ -382,6 +401,7 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 		primi_lik(podaci)
 	else:
 		primi_lik.rpc_id(vlasnik, podaci)
+	_javi_statistike()
 	if ab_sacuvan:
 		_javi_action_bar()
 	else:
@@ -408,13 +428,13 @@ var _poslednje_stanje: Dictionary = {}  # poslednji raspored inventara od klijen
 var _poslednje_snimanje_ms := -SAVE_RAZMAK_MS
 var _snimanje_zakazano := false
 
-# Klijent (vlasnik) šalje samo raspored inventara/opreme; hp/manu i poziciju server uzima sam.
+# Klijent (vlasnik) šalje samo raspored inventara; opremu drži server (equipment od klijenta se ignoriše),
+# a hp/manu i poziciju server uzima sam.
 @rpc("any_peer", "reliable")
-func posalji_stanje(inventory: Array, equipment: Dictionary) -> void:
+func posalji_stanje(inventory: Array, _equipment: Dictionary) -> void:
 	if not multiplayer.is_server() or not _posiljalac_je_vlasnik() or ime_lika == "":
 		return
-	_poslednje_stanje = {"inventory": inventory, "equipment": equipment}
-	_primeni_oklop(equipment)
+	_poslednje_stanje = {"inventory": inventory}
 	_server_sacuvaj(false)
 
 func server_sacuvaj_konacno() -> void:
@@ -440,7 +460,7 @@ func _server_sacuvaj(konacno: bool) -> void:
 	var ok: bool = await ApiManager.save_player(ime, {
 		"hp": hp, "mana": mana,
 		"pos_x": pos.x, "pos_y": pos.y, "pos_z": pos.z,
-		"inventory": s["inventory"], "equipment": s["equipment"]
+		"inventory": s["inventory"], "equipment": oprema
 	})
 	if not ok:
 		print("[SAVE] Snimanje nije uspelo za ", ime)
@@ -451,21 +471,6 @@ func _zakazano_snimanje() -> void:
 		_server_sacuvaj(false)
 
 # ---------------------------------------------------------------- OPREMA -> SERVER
-
-# Klijent javlja serveru koje oružje je opremio ("" kad skine). Server proverava u bazi.
-@rpc("any_peer", "reliable")
-func postavi_oruzje(item_id: String) -> void:
-	if multiplayer.multiplayer_peer != null:
-		if not multiplayer.is_server():
-			return
-		var posiljalac := multiplayer.get_remote_sender_id()
-		if posiljalac != 0 and posiljalac != get_multiplayer_authority():
-			return
-	if item_id != "" and not posjeduje(item_id):
-		print("[SERVER] Odbijeno oružje koje lik ne poseduje: ", item_id)
-		bonus_oruzja = 0
-		return
-	await _primeni_oruzje(item_id)
 
 # Server proverava vlasništvo pre bilo kakvog bonusa
 func posjeduje(item_id: String) -> bool:
@@ -517,25 +522,14 @@ func dodaj_u_vlasnistvo(item_id: String, kolicina: int = 1) -> void:
 	if await _ab_dodaj(item_id):
 		_ab_sacuvaj()
 
-func _primeni_oruzje(item_id: String) -> void:
-	if item_id == "":
-		bonus_oruzja = 0
-		return
-	var item: Dictionary = await ApiManager.get_item(item_id)
-	if item.is_empty() or item.has("error") or str(item.get("tip", "")) != "weapon":
-		print("[SERVER] Nije validno oružje: ", item_id)
-		bonus_oruzja = 0
-		return
-	bonus_oruzja = int(item.get("damage", 0))
-	print("[SERVER] Oružje ", item_id, " bonus: ", bonus_oruzja)
-
 # ---------------------------------------------------------------- ZDRAVLJE (server)
 
 # Backend je izračunao nove statistike (xp/change, quest turnin); server ih preuzima.
 # Na level-up server sam puni hp i manu.
 func server_primeni_stats(st: Dictionary) -> void:
 	napad_damage = int(st.get("napad_damage", napad_damage))
-	max_hp = int(st.get("max_hp", max_hp))
+	max_hp_osnovni = int(st.get("max_hp", max_hp_osnovni))
+	max_hp = max_hp_osnovni + hp_bonus
 	max_mana = int(st.get("max_mana", max_mana))
 	if st.get("level_up", false):
 		hp = max_hp
@@ -543,6 +537,7 @@ func server_primeni_stats(st: Dictionary) -> void:
 	hp = mini(hp, max_hp)
 	mana = mini(mana, max_mana)
 	_posalji_hp()
+	_javi_statistike()
 
 # Regeneracija: 2 hp i 3 mane u sekundi, samo za žive i učitane igrače
 func _process(delta: float) -> void:
@@ -578,7 +573,7 @@ func server_primi_damage(sirova_steta: int) -> void:
 		return
 	if Time.get_ticks_msec() < _neosjetljiv_do_ms:
 		return
-	var steta := maxi(1, sirova_steta - armor)
+	var steta := maxi(1, sirova_steta * 100 / (100 + armor)) # oklop smanjuje štetu procentualno
 	hp = maxi(hp - steta, 0)
 	print("[DMG] ", ime_lika, " -", steta, " (oklop ", armor, ") -> hp ", hp)
 	if hp == 0:
@@ -616,30 +611,133 @@ func _posalji_hp() -> void:
 	else:
 		primi_hp.rpc_id(vlasnik, hp, max_hp, mana, max_mana, mrtav)
 
-# Oklop = zbir `armor` kolone opremljenih komada koje lik zaista poseduje.
-# Računa se ponovo samo kad se promeni skup opremljenih komada.
-func _primeni_oklop(eq: Dictionary) -> void:
-	var ids: PackedStringArray = []
-	for slot in SLOTOVI_OKLOPA:
-		var id := str(eq.get(slot, ""))
-		if id != "" and posjeduje(id):
-			ids.append(id)
-	var kljuc := ",".join(ids)
-	if kljuc == _oklop_kljuc:
+# ---------------------------------------------------------------- OPREMA (server je autoritet)
+
+# Podaci predmeta iz API-ja, jednom po predmetu (slot i statistike se ne menjaju dok server radi).
+func _predmet(item_id: String) -> Dictionary:
+	if not _predmeti.has(item_id):
+		var item: Dictionary = await ApiManager.get_item(item_id)
+		if item.is_empty() or item.has("error"):
+			return {}
+		_predmeti[item_id] = item
+	return _predmeti[item_id]
+
+# Statistike iz opreme (svi predmeti opreme su već u _predmeti): attack oružja, zbir armor-a i hp_bonus-a.
+# Skidanje hp_bonus-a ograničava trenutni HP na novi maksimum.
+func _preracunaj_statistike() -> void:
+	bonus_oruzja = 0
+	armor = 0
+	hp_bonus = 0
+	for slot in oprema:
+		var item: Dictionary = _predmeti.get(oprema[slot], {})
+		armor += int(item.get("armor", 0))
+		hp_bonus += int(item.get("hp_bonus", 0))
+		if slot == "weapon":
+			bonus_oruzja = int(item.get("damage", 0))
+	max_hp = max_hp_osnovni + hp_bonus
+	hp = mini(hp, max_hp)
+	print("[OPREMA] ", ime_lika, ": attack ", izracunaj_damage(), ", armor ", armor, ", max HP ", max_hp, " ", oprema)
+
+func _javi_statistike() -> void:
+	_odgovori(primi_statistike, {"attack": izracunaj_damage(), "armor": armor, "max_hp": max_hp})
+
+@rpc("any_peer", "reliable")
+func primi_statistike(d: Dictionary) -> void:
+	if not _poziv_od_servera():
 		return
-	_oklop_kljuc = kljuc
-	_oklop_verzija += 1
-	var verzija := _oklop_verzija
-	var zbir := 0
-	for id in ids:
-		var item: Dictionary = await ApiManager.get_item(id)
-		if item.is_empty() or item.has("error") or str(item.get("tip", "")) != "armor":
-			continue
-		zbir += int(item.get("armor", 0))
-	if verzija != _oklop_verzija:
-		return # stigla je novija promena opreme
-	armor = zbir
-	print("[SERVER] Oklop ", ime_lika, ": ", armor)
+	stat_attack = int(d.get("attack", 0))
+	stat_armor = int(d.get("armor", 0))
+	stat_max_hp = int(d.get("max_hp", 0))
+	statistike_promenjene.emit()
+
+# Klijent: zahtev za opremanje (item_id) ili skidanje ("") predmeta u slotu; čeka odgovor servera.
+func opremi_na_serveru(slot: String, item_id: String) -> Dictionary:
+	return await _posalji_i_cekaj("oprema", oprema_odgovor, zatrazi_opremanje, [slot, item_id])
+
+@rpc("any_peer", "reliable")
+func zatrazi_opremanje(slot: String, item_id: String) -> void:
+	if not multiplayer.is_server() or not _posiljalac_je_vlasnik():
+		return
+	var d := await _opremi(slot, item_id)
+	if d.get("ok", false):
+		_javi_statistike()
+		_posalji_hp()
+		_server_sacuvaj(false)
+	else:
+		print("[OPREMA] ", ime_lika, " odbijeno ", slot, "/", item_id, ": ", d.get("poruka", ""))
+	_odgovori(odgovor_oprema, d)
+
+# Proverava zahtev i menja opremu; inventar za snimanje prati promenu (isti broj komada kao kod klijenta posle
+# poteza), pa raspored koji klijent pošalje posle toga backend prihvata.
+func _opremi(slot: String, item_id: String) -> Dictionary:
+	var greska := _greska_opreme(slot, item_id)
+	if greska == "" and item_id != "":
+		_oprema_u_toku = true
+		var item := await _predmet(item_id)
+		_oprema_u_toku = false
+		greska = _greska_opreme(slot, item_id) # stanje je moglo da se promeni dok se čekao API
+		if greska == "" and str(item.get("slot", "")) != slot:
+			greska = "Can't be equipped" if item.get("slot") == null else "Can't be equipped in that slot"
+	if greska != "":
+		return {"ok": false, "poruka": greska, "oprema": oprema.duplicate()}
+	var inventar: Array = _inv_za_snimanje()
+	var staro: String = oprema.get(slot, "")
+	if item_id == "":
+		oprema.erase(slot)
+	else:
+		oprema[slot] = item_id
+		_inv_uzmi(inventar, item_id)
+	if staro != "":
+		_inv_vrati(inventar, staro)
+	_preracunaj_statistike()
+	return {"ok": true, "oprema": oprema.duplicate()}
+
+func _greska_opreme(slot: String, item_id: String) -> String:
+	if not _stanje_ucitano:
+		return "Character not registered"
+	if mrtav:
+		return "You are dead"
+	if _oprema_u_toku:
+		return "Request in progress"
+	if not slot in SLOTOVI_OPREME:
+		return "Can't be equipped in that slot"
+	if item_id == "":
+		if not oprema.has(slot):
+			return "Nothing equipped"
+		return "Inventory full" if _inv_za_snimanje().size() >= MAX_SLOTOVA_INVENTARA else ""
+	if not posjeduje(item_id):
+		return "You don't have that item"
+	if oprema.values().count(item_id) >= int(vlasnistvo.get(item_id, 0)):
+		return "Already equipped" # svi komadi tog predmeta su već opremljeni
+	return ""
+
+@rpc("any_peer", "reliable")
+func odgovor_oprema(d: Dictionary) -> void:
+	if not _poziv_od_servera():
+		return
+	oprema_odgovor.emit(d)
+
+func _inv_za_snimanje() -> Array:
+	var s: Dictionary = _ucitano_stanje if _poslednje_stanje.is_empty() else _poslednje_stanje
+	return s.get("inventory", [])
+
+# Jedan komad predmeta iz inventara (opremljen je).
+func _inv_uzmi(inventar: Array, item_id: String) -> void:
+	for i in inventar.size():
+		if str(inventar[i].get("id", "")) == item_id:
+			if int(inventar[i].get("kolicina", 1)) > 1:
+				inventar[i]["kolicina"] = int(inventar[i]["kolicina"]) - 1
+			else:
+				inventar.remove_at(i)
+			return
+
+# Skinut predmet ide u prvi slobodan slot inventara.
+func _inv_vrati(inventar: Array, item_id: String) -> void:
+	var zauzeti := inventar.map(func(e): return int(e.get("slot", -1)))
+	for i in MAX_SLOTOVA_INVENTARA:
+		if not i in zauzeti:
+			inventar.append({"slot": i, "id": item_id, "kolicina": 1})
+			return
 
 # ---------------------------------------------------------------- KUPOVINA I QUESTOVI KROZ SERVER
 
@@ -793,7 +891,8 @@ func odustani_quest_na_serveru() -> void:
 
 # Pošalje zahtev serveru (host: direktan poziv) i čeka signal odgovora, najviše 8 s.
 # Kasni odgovor posle timeouta nema više slušaoca, pa se ignoriše.
-func _posalji_i_cekaj(tip: String, odgovor_signal: Signal, zahtev: Callable, arg: String) -> Dictionary:
+func _posalji_i_cekaj(tip: String, odgovor_signal: Signal, zahtev: Callable, arg) -> Dictionary:
+	var args: Array = arg if arg is Array else [arg]
 	if _zahtevi_u_toku.get(tip, false):
 		return {"ok": false, "poruka": "Request in progress"}
 	_zahtevi_u_toku[tip] = true
@@ -801,9 +900,9 @@ func _posalji_i_cekaj(tip: String, odgovor_signal: Signal, zahtev: Callable, arg
 	var primi := func(d: Dictionary): stanje.odgovor = d
 	odgovor_signal.connect(primi)
 	if multiplayer.is_server():
-		zahtev.call(arg)
+		zahtev.callv(args)
 	else:
-		zahtev.rpc_id(1, arg)
+		callv("rpc_id", [1, zahtev.get_method()] + args)
 	var rok := Time.get_ticks_msec() + ZAHTEV_TIMEOUT_MS
 	while stanje.odgovor == null and Time.get_ticks_msec() < rok:
 		await get_tree().process_frame
