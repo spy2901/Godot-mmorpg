@@ -1504,6 +1504,7 @@ var _opr_upisano := ""
 var _opr_krenuo := false
 var _opr_kraj := false
 var _opr_cmd_br := 0
+var _opr_ucitan_peer := ""
 
 func _server_oprema() -> void:
 	if dir == "" or _world() == null: return
@@ -1521,6 +1522,9 @@ func _server_oprema() -> void:
 			p.hp = int(c[2])
 			p._posalji_hp()
 		print("[S] oprema komanda: ", cmd)
+	if p.get("_stanje_ucitano") and str(p.name) != _opr_ucitan_peer: # prvi frame posle učitavanja: HP pre regeneracije
+		_opr_ucitan_peer = str(p.name)
+		_pisi("oprema_ucitan", "%s %d" % [p.name, p.hp])
 	var st := JSON.stringify({"attack": p.izracunaj_damage(), "armor": p.get("armor"), "max_hp": p.max_hp, "hp": p.hp,
 		"oprema": p.get("oprema")})
 	if st != _opr_upisano:
@@ -1672,14 +1676,15 @@ func _oprema_scenario(p, inv) -> void:
 		and _opr_srv().get("oprema") is Dictionary and _opr_srv().get("oprema").is_empty(),
 		"Oprema2Lik poslao weapon/iron_sword za OpremaLik: %s" % _opr_srv_opis())
 
-	# za ponovnu prijavu: iron_sword + dragon_scale_armor, HP 140 (iznad osnovnog 100), pa odjava (server snima)
+	# za ponovnu prijavu: iron_sword + dragon_scale_armor, HP 150 (iznad osnovnog 100), pa odjava (server snima).
+	# HP je na maksimumu, pa ga regeneracija ne menja: HP pri odjavi je tačan broj.
 	await klik.call("iron_sword")
 	await klik.call("dragon_scale_armor")
 	await _cekaj(func(): return _opr_srv_ok(50, 35, 150), 3.0)
-	_opr_cmd_posalji("hp 140")
-	await _cekaj(func(): return int(_opr_srv().get("hp", 0)) == 140, 3.0)
+	_opr_cmd_posalji("hp 150")
+	await _cekaj(func(): return int(_opr_srv().get("hp", 0)) == 150, 3.0)
 	await create_timer(1.0).timeout # klijent pošalje raspored (posalji_stanje) posle poslednje promene
-	_pisi("oprema_korak1", _opr_srv_opis())
+	_pisi("oprema_korak1", JSON.stringify(_opr_srv()))
 	print("[OPREMA] korak 1 gotov: ", _opr_srv_opis())
 	_opr_kraj = true
 
@@ -1689,9 +1694,15 @@ func _oprema_prijava(p, inv) -> void:
 	_provera("statistike_prezive_prijavu", _opr_srv_ok(50, 35, 150) and _klijent_stat(p) == "50/35/150"
 		and _opremljeno(inv) == {"weapon": "iron_sword", "chest": "dragon_scale_armor"},
 		"%s; klijent %s, UI oprema %s" % [_opr_srv_opis(), _klijent_stat(p), _opremljeno(inv)])
-	# HP se regeneriše (+2/s), pa je posle prijave >= 140; bitno je da je iznad osnovnog maksimuma (100)
-	_provera("hp_iznad_osnovnog_prezivi_prijavu", int(d.get("hp", -1)) >= 140 and int(d.get("hp", -1)) <= 150 and int(d.get("max_hp", -1)) == 150,
-		"HP %s / %s (osnovni max 100, pre odjave 140)" % [d.get("hp"), d.get("max_hp")])
+	# HP pri odjavi (korak 1) = HP koji je stub snimio = HP na serveru u prvom frame-u posle učitavanja (pre regeneracije)
+	var k1 = JSON.parse_string(FileAccess.get_file_as_string(dir + "/oprema_korak1"))
+	var hp_odjava: int = int(k1.get("hp", -1)) if k1 is Dictionary else -1
+	var hp_stub: int = int((await root.get_node("ApiManager").get_player("OpremaLik")).get("hp", -1))
+	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/oprema_ucitan").begins_with(_id() + " "), 5.0)
+	var uc := FileAccess.get_file_as_string(dir + "/oprema_ucitan").split(" ")
+	var hp_ucitan: int = int(uc[1]) if uc.size() == 2 and uc[0] == _id() else -1
+	_provera("hp_iznad_osnovnog_prezivi_prijavu", hp_odjava > 100 and hp_odjava == hp_stub and hp_stub == hp_ucitan and int(d.get("max_hp", -1)) == 150,
+		"HP pri odjavi %d, snimljen u stub-u %d, na serveru posle učitavanja %d (max %s, osnovni 100)" % [hp_odjava, hp_stub, hp_ucitan, d.get("max_hp")])
 	await _kamera_fp_pa_nazad(p)
 	_opr_kraj = true
 
