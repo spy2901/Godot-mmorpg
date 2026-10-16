@@ -110,6 +110,14 @@ if grep -q "isn't currently active\|No multiplayer peer is assigned" "$OUT"/move
 else
   echo "PASS nema_greske_neaktivnog_peera"
 fi | tee "$OUT/run.log"
+# server ne šalje HP igraču koji je otišao (regeneracija dok server snima odjavu; stub drži /save Oprema2Lik-a)
+if ! grep -q "spori save Oprema2Lik" "$OUT/stub.log"; then
+  echo "FAIL server_ne_salje_hp_odjavljenom  scenario nije odrađen (nema sporog save-a Oprema2Lik-a u stub.log)"
+elif grep -q "Attempt to call RPC with unknown peer ID" "$OUT/server.log"; then
+  echo "FAIL server_ne_salje_hp_odjavljenom  $(grep -c "Attempt to call RPC with unknown peer ID" "$OUT/server.log") grešaka; prva: $(grep -m1 -A4 "Attempt to call RPC with unknown peer ID" "$OUT/server.log" | grep -o '\[0\] [^ ]*' | head -1)"
+else
+  echo "PASS server_ne_salje_hp_odjavljenom"
+fi | tee -a "$OUT/run.log"
 # tekstovi (bez Godot-a): poruke backenda u translations/teksti.csv, bez srpskog u prikazu
 python3 .claude/skills/run-mmorpg/proveri_tekstove.py > "$OUT/tekstovi.log" 2>&1; cat "$OUT/tekstovi.log"
 grep -h 'SCRIPT ERROR' "$OUT"/*.log | sort | uniq -c
@@ -123,5 +131,5 @@ if [ -z "${RUN_PONOVLJEN:-}" ] && grep -qh '^FAIL seq_bez_rupa_bez_gubitka' "$OU
   kill $STUB 2>/dev/null; wait $STUB 2>/dev/null # port mora biti slobodan za novi stub
   RUN_PONOVLJEN=1 exec "$SKRIPTA" "$@"
 fi
-# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 101
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 101 ]
+# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 102
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 102 ]

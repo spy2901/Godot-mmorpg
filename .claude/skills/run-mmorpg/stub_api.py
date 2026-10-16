@@ -100,7 +100,11 @@ PLAYERS["OpremaLik"] = dict(PLAYERS["TestLik"], ime="OpremaLik", hp=100, max_hp=
                             equipment={}, inventory=[{"slot": i, "id": x, "kolicina": 1} for i, x in enumerate(
                                 ["iron_sword", "iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots",
                                  "steel_shield", "dragon_scale_armor", "iron_gloves"])])
-PLAYERS["Oprema2Lik"] = dict(PLAYERS["TestLik"], ime="Oprema2Lik", pos_x=-20, pos_y=1.16, pos_z=16, inventory=[])
+# Oprema2Lik ima HP 50/1000 (regeneracija nikad ne stane), a stub njegov /save drži SPORI_SAVE s: posle njegove odjave
+# server snima dok mu regeneracija otkucava (server_ne_salje_hp_odjavljenom).
+PLAYERS["Oprema2Lik"] = dict(PLAYERS["TestLik"], ime="Oprema2Lik", hp=50, max_hp=1000, pos_x=-20, pos_y=1.16, pos_z=16,
+                             inventory=[])
+SPORI_SAVE = {"Oprema2Lik": 2.5}
 TOKENI = {"oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik"}
 LOCK = threading.Lock()
@@ -145,6 +149,9 @@ class H(BaseHTTPRequestHandler):
             return self._odgovor({"status": "ok", "ime_lika": ime, "username": ime.lower()} if ime
                                  else {"error": "Nevazeci ili istekao token"}, 200 if ime else 401)
         if m := re.fullmatch(r"/players/([\w-]+)/save", p):
+            if m[1] in SPORI_SAVE:
+                print(f"[STUB] spori save {m[1]} ({SPORI_SAVE[m[1]]} s)", file=sys.stderr, flush=True)
+                time.sleep(SPORI_SAVE[m[1]])
             with LOCK:
                 pl = PLAYERS.get(m[1])
                 if not pl:

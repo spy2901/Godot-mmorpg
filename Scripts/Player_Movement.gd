@@ -615,7 +615,7 @@ func _posalji_hp() -> void:
 	var vlasnik := get_multiplayer_authority()
 	if vlasnik == multiplayer.get_unique_id():
 		primi_hp(hp, max_hp, mana, max_mana, mrtav)
-	else:
+	elif vlasnik in multiplayer.get_peers(): # vlasnik je možda već otišao (regeneracija dok server snima njegovu odjavu)
 		primi_hp.rpc_id(vlasnik, hp, max_hp, mana, max_mana, mrtav)
 
 # ---------------------------------------------------------------- OPREMA (server je autoritet)
