@@ -1738,7 +1738,8 @@ func _kamera_fp_pa_nazad(p) -> void:
 	var gore_ok := absf(rad_to_deg(k.rotation.x) - 60.0) < 0.5
 	for i in 40: await mis.call(40)  # dole preko granice
 	var dole_ok := absf(rad_to_deg(k.rotation.x) + 60.0) < 0.5
-	for i in 20: await mis.call(-40) # nazad isto koliko je išlo gore
+	# sa donje granice (-60°) nazad tačno do početnog pitch-a (jedan pokret, bez granice)
+	await mis.call(-(rad_to_deg(pre_rot.x) + 60.0) / p.mouse_sensitivity)
 	await desni.call(false)
 	var posle_fp_pogleda := k.rotation
 	while model.visible == false or p._kamera_poz.z < pre_off.z - 0.001: # odzum dok se ne vrati na početni offset (ili do kraja)
