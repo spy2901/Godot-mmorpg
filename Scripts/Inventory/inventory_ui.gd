@@ -4,6 +4,7 @@ const SLOT_SIZE = 64
 const GRID_COLUMNS = 6
 const GRID_ROWS = 4
 const TOTAL_SLOTS = GRID_COLUMNS * GRID_ROWS
+const STIL := preload("res://Scripts/UI/inventar_stil.gd")
 
 var inventory_data = []
 var slots = []
@@ -20,6 +21,7 @@ var glavni_panel: Panel
 var tooltip_panel: Panel
 var tooltip_label: Label
 var character_panel: Panel
+var stat_label: Label # sažetak statistika lika po serveru (attack, armor, max HP)
 
 # Equipment slotovi (paneli) i opremljeni itemi (podaci)
 var equipment_slots = {
@@ -101,6 +103,7 @@ func _napravi_ui():
 	character_panel.add_child(char_label)
 
 	_napravi_equipment_slotove()
+	_napravi_statistike()
 
 	var desni_panel = Panel.new()
 	desni_panel.position = Vector2(285, 60)
@@ -170,6 +173,28 @@ func _napravi_equipment_slotove():
 
 		character_panel.add_child(slot)
 		equipment_slots[info[0]] = slot
+
+# Sažetak statistika na dnu panela sa opremom; vrednosti računa server (igrač.stat_*), ovde je samo prikaz.
+func _napravi_statistike() -> void:
+	stat_label = Label.new()
+	stat_label.position = Vector2(STIL.SAZETAK_MARGINA, character_panel.size.y - STIL.SAZETAK_ODOZDO)
+	stat_label.size = Vector2(character_panel.size.x - 2 * STIL.SAZETAK_MARGINA, STIL.SAZETAK_VISINA)
+	stat_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stat_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	stat_label.add_theme_font_size_override("font_size", STIL.SAZETAK_FONT)
+	stat_label.add_theme_color_override("font_color", STIL.SAZETAK_BOJA)
+	stat_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	character_panel.add_child(stat_label)
+	var igrac = get_parent().get_parent()
+	if igrac and igrac.has_signal("statistike_promenjene"):
+		igrac.statistike_promenjene.connect(_osvezi_statistike)
+	_osvezi_statistike()
+
+func _osvezi_statistike() -> void:
+	var igrac = get_parent().get_parent()
+	if stat_label == null or igrac == null or not igrac.has_signal("statistike_promenjene"):
+		return
+	stat_label.text = tr("Attack: %d   Armor: %d   Max HP: %d") % [igrac.stat_attack, igrac.stat_armor, igrac.stat_max_hp]
 
 func _napravi_kategorije(parent: Control):
 	var screen = get_viewport().get_visible_rect().size
@@ -338,24 +363,10 @@ func _zavrsi_drag(cilj_index: int):
 
 # ---------------------------------------------------------------- EQUIP
 
+# Slot dolazi iz baze (items.slot); predmet bez slota (npr. iron_gloves) se ne oprema.
 func _eq_slot_za_item(item: Dictionary) -> String:
-	var tip = item.get("tip", "")
-	match tip:
-		"weapon":
-			return "weapon"
-		"armor":
-			var ime = str(item.get("ime", "")).to_lower()
-			if "helmet" in ime or "hood" in ime or "glove" in ime:
-				return "head"
-			elif "chest" in ime or "robe" in ime or "armor" in ime or "cloak" in ime:
-				return "chest"
-			elif "legging" in ime or "trouser" in ime:
-				return "legs"
-			elif "boot" in ime:
-				return "boots"
-			elif "shield" in ime:
-				return "shield"
-	return ""
+	var slot = item.get("slot")
+	return str(slot) if slot != null and equipment_slots.has(str(slot)) else ""
 
 func _on_slot_klik(index: int):
 	if index >= inventory_data.size() or inventory_data[index].is_empty():
@@ -366,9 +377,26 @@ func _on_slot_klik(index: int):
 		return
 	var eq_slot = _eq_slot_za_item(item)
 	if eq_slot == "":
-		print("Ovaj item ne moze da se opremi!")
+		return # ne oprema se (npr. predmet bez slota); tooltip to kaže
+	_zatrazi_opremanje(index, eq_slot)
+
+# Opremanje odlučuje server (predmet u inventaru, pravi slot, lik živ); UI pomera predmet tek posle potvrde.
+func _zatrazi_opremanje(index: int, eq_slot: String) -> void:
+	var item_id := str(inventory_data[index].get("id", ""))
+	var r: Dictionary = await get_parent().get_parent().opremi_na_serveru(eq_slot, item_id)
+	if not r.get("ok", false):
+		_prikazi_poruku(str(r.get("poruka", "")))
 		return
+	if str(inventory_data[index].get("id", "")) != item_id: # raspored se u međuvremenu promenio
+		index = inventory_data.find_custom(func(x): return str(x.get("id", "")) == item_id)
+		if index < 0:
+			return
 	_opremi_item(index, eq_slot)
+
+func _prikazi_poruku(tekst: String) -> void:
+	var hud = get_tree().get_first_node_in_group("hud")
+	if hud:
+		hud.prikazi_poruku(tekst)
 
 # Potrošni predmet troši server; UI skida komad tek kad server potvrdi (tako se slaže sa bazom)
 func _koristi_item(item_id: String) -> void:
@@ -397,17 +425,23 @@ func _opremi_item(inventory_index: int, eq_slot: String):
 	_prikazi_opremu(eq_slot, item)
 	osvezi_slot(inventory_index)
 	print("Opremio: ", item.get("ime", ""), " u slot: ", eq_slot)
-	if eq_slot == "weapon":
-		_posalji_oruzje(str(item.get("id", "")))
 	_oznaci_promenu()
 
 func _on_equipment_slot_input(event: InputEvent, eq_slot: String):
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		_skini_opremu(eq_slot)
 
+# Skidanje: prvo slobodno mesto u inventaru, pa potvrda servera, pa pomeranje u UI-ju.
 func _skini_opremu(eq_slot: String):
 	var item = equipped_items.get(eq_slot, null)
 	if item == null or item.is_empty():
+		return
+	if not inventory_data.any(func(x): return x.is_empty()):
+		_prikazi_poruku("Inventory full")
+		return
+	var r: Dictionary = await get_parent().get_parent().opremi_na_serveru(eq_slot, "")
+	if not r.get("ok", false):
+		_prikazi_poruku(str(r.get("poruka", "")))
 		return
 	for i in TOTAL_SLOTS:
 		if inventory_data[i].is_empty():
@@ -416,21 +450,9 @@ func _skini_opremu(eq_slot: String):
 			_prikazi_opremu(eq_slot, {})
 			osvezi_slot(i)
 			print("Skinuo: ", item.get("ime", ""))
-			if eq_slot == "weapon":
-				_posalji_oruzje("")
 			_oznaci_promenu()
 			return
 	print("Inventory je pun, ne mogu da skinem opremu!")
-
-# Javi serveru koje oružje je opremljeno (host ga postavlja direktno, klijent preko RPC-a)
-func _posalji_oruzje(item_id: String) -> void:
-	var player = get_parent().get_parent()
-	if player == null or not player.has_method("postavi_oruzje"):
-		return
-	if multiplayer.multiplayer_peer == null or multiplayer.is_server():
-		player.postavi_oruzje(item_id)
-	else:
-		player.postavi_oruzje.rpc_id(1, item_id)
 
 func _prikazi_opremu(eq_slot: String, item: Dictionary):
 	var slot_panel = equipment_slots[eq_slot]
@@ -466,6 +488,14 @@ func _on_slot_hover(index: int):
 		str(hovered_item.get("kolicina", 1)),
 		str(int(hovered_item.get("max_stack", 1)))
 	]
+	var stat: PackedStringArray = []
+	if int(hovered_item.get("damage", 0)) > 0: stat.append(tr("Attack +%d") % int(hovered_item.damage))
+	if int(hovered_item.get("armor", 0)) > 0: stat.append(tr("Armor +%d") % int(hovered_item.armor))
+	if int(hovered_item.get("hp_bonus", 0)) > 0: stat.append(tr("Max HP +%d") % int(hovered_item.hp_bonus))
+	if not stat.is_empty():
+		tooltip_label.text += "\n" + "  |  ".join(stat)
+	if hovered_item.get("tip", "") in ["weapon", "armor"] and _eq_slot_za_item(hovered_item) == "":
+		tooltip_label.text += "\n" + tr("Can't be equipped")
 	var hp_e := int(hovered_item.get("hp_efekat", 0))
 	var mana_e := int(hovered_item.get("mana_efekat", 0))
 	if hovered_item.get("tip", "") == "consumable" and hp_e + mana_e > 0:

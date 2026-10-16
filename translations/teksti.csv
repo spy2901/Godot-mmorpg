@@ -135,3 +135,12 @@ Quest nije zavrsen,Quest not finished,Quest nije zavrsen
 Gold:  %s 🪙,Gold:  %s 🪙,Zlato:  %s 🪙
 Experience:  %s XP,Experience:  %s XP,Iskustvo:  %s XP
 Enemy,Enemy,Neprijatelj
+Attack: %d   Armor: %d   Max HP: %d,Attack: %d   Armor: %d   Max HP: %d,Napad: %d   Oklop: %d   Max HP: %d
+Attack +%d,Attack +%d,Napad +%d
+Armor +%d,Armor +%d,Oklop +%d
+Max HP +%d,Max HP +%d,Max HP +%d
+Can't be equipped,Can't be equipped,Ne može da se opremi
+Can't be equipped in that slot,Can't be equipped in that slot,Ne ide u taj slot
+Already equipped,Already equipped,Već opremljeno
+Nothing equipped,Nothing equipped,Ništa nije opremljeno
+Inventory full,Inventory full,Inventar je pun
