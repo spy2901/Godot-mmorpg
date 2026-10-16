@@ -1669,7 +1669,7 @@ func _oprema_scenario(p, inv) -> void:
 	await _cekaj(func(): return FileAccess.file_exists(dir + "/oprema_tudji_poslato"), 30.0)
 	await create_timer(1.0).timeout
 	_provera("drugi_igrac_ne_oprema_tudji_predmet", FileAccess.file_exists(dir + "/oprema_tudji_poslato") and _opr_srv_ok(25, 0, 100)
-		and str(_opr_srv().get("oprema", {})) == "{ }",
+		and _opr_srv().get("oprema") is Dictionary and _opr_srv().get("oprema").is_empty(),
 		"Oprema2Lik poslao weapon/iron_sword za OpremaLik: %s" % _opr_srv_opis())
 
 	# za ponovnu prijavu: iron_sword + dragon_scale_armor, HP 140 (iznad osnovnog 100), pa odjava (server snima)
@@ -1689,7 +1689,8 @@ func _oprema_prijava(p, inv) -> void:
 	_provera("statistike_prezive_prijavu", _opr_srv_ok(50, 35, 150) and _klijent_stat(p) == "50/35/150"
 		and _opremljeno(inv) == {"weapon": "iron_sword", "chest": "dragon_scale_armor"},
 		"%s; klijent %s, UI oprema %s" % [_opr_srv_opis(), _klijent_stat(p), _opremljeno(inv)])
-	_provera("hp_iznad_osnovnog_prezivi_prijavu", int(d.get("hp", -1)) == 140 and int(d.get("max_hp", -1)) == 150,
+	# HP se regeneriše (+2/s), pa je posle prijave >= 140; bitno je da je iznad osnovnog maksimuma (100)
+	_provera("hp_iznad_osnovnog_prezivi_prijavu", int(d.get("hp", -1)) >= 140 and int(d.get("hp", -1)) <= 150 and int(d.get("max_hp", -1)) == 150,
 		"HP %s / %s (osnovni max 100, pre odjave 140)" % [d.get("hp"), d.get("max_hp")])
 	_opr_kraj = true
 
