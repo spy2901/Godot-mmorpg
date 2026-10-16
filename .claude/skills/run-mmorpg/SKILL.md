@@ -25,7 +25,7 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 100 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 100 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 102 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 102 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -172,6 +172,12 @@ upisuje statistike po serveru u `$OUT/oprema_server` i izvršava `$OUT/oprema_cm
 equipped"), `skidanje_vraca_stare_vrednosti`, `drugi_igrac_ne_oprema_tudji_predmet`, `statistike_prezive_prijavu`,
 `hp_iznad_osnovnog_prezivi_prijavu`. Svih 13 pada bez implementacije (provereno). Stub `/save` čuva inventar i opremu
 samo kad se broj komada slaže (kao backend). Mover čeka gašenje servera do 70 s (`run.sh` čeka uloge do 60 s).
+`hp_iznad_osnovnog_prezivi_prijavu`: korak 1 se odjavi sa HP 150 (pun maksimum, regeneracija ga ne menja) i upiše ga
+u `$OUT/oprema_korak1`; server drajver upiše HP u prvom frame-u posle učitavanja (`$OUT/oprema_ucitan`); HP pri
+odjavi, HP koji je stub snimio i HP posle učitavanja moraju biti jednaki (stub koji snimi 3 manje -> FAIL).
+`server_ne_salje_hp_odjavljenom` (`run.sh`, grep `server.log`): Oprema2Lik ima HP 50/1000, a stub drži njegov
+`/save` 2.5 s (`SPORI_SAVE`), pa posle odjave regeneracija kuca dok server snima; u logu ne sme biti
+"Attempt to call RPC with unknown peer ID" (bez guard-a u `_posalji_hp` pada sa 2 greške).
 
 Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
 igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u
