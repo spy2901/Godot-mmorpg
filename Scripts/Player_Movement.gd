@@ -36,6 +36,10 @@ var _vizuelni_offset := Vector3.ZERO
 var _offset_brzina := 0.0
 var _model_poz := Vector3.ZERO
 var _kamera_poz := Vector3.ZERO
+var _kamera_rot0 := Vector3.ZERO # rotacija kamere iz scene; yaw/roll ostaju, menja se samo pitch
+var _pitch := 0.0                # pitch kamere (rad), jedini izvor ugla gore/dole
+var _zum_korak := 0              # koraci zuma od početnog offseta iz scene (0 = početni)
+var _kamera_z0 := 0.0            # početni offset kamere (z) iz scene
 var server_poz := Vector3.ZERO # poslednja pozicija od servera (testovi)
 var korekcije_glatke := 0
 var korekcije_snap := 0
@@ -189,6 +193,9 @@ func _ready():
 		server_postavi_poziciju(global_position, true) # spawn je reset br. 1
 	_model_poz = $CharacterMain.position
 	_kamera_poz = kamera.position
+	_kamera_rot0 = kamera.rotation
+	_kamera_z0 = _kamera_poz.z
+	_pitch = _kamera_rot0.x
 	# Node pripada vlasniku (RPC-ovi); poz_sync/yaw_sync šalje server ostalima.
 	# position se NE replicira: vlasnikovu poziciju menjaju samo predikcija i reconciliation.
 	$MultiplayerSynchronizer.set_multiplayer_authority(1)
@@ -1127,19 +1134,25 @@ func _input(event):
 				Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_kamera_poz.z = max(_kamera_poz.z - zum_brzina, min_zum)
-			if _kamera_poz.z <= 0.1:
-				$CharacterMain.visible = false
-
+			_zumiraj(-1)
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_kamera_poz.z = min(_kamera_poz.z + zum_brzina, max_zum)
-			if _kamera_poz.z > 0.1:
-				$CharacterMain.visible = true
+			_zumiraj(1)
 
 	if event is InputEventMouseMotion and rotacija_misa:
 		rotate_y(deg_to_rad(-event.relative.x * mouse_sensitivity))
-		kamera.rotate_x(deg_to_rad(-event.relative.y * mouse_sensitivity))
-		kamera.rotation.x = clamp(kamera.rotation.x, deg_to_rad(-60), deg_to_rad(60))
+		# pitch se čuva kao broj i ograničava pre primene; rotate_x + clamp Ojlerovog ugla na kameri koja ima yaw/roll iz
+		# scene nije reverzibilan na granici i ostavljao je yaw/roll (kamera "pod čudnim uglom" posle first person-a)
+		_pitch = clampf(_pitch + deg_to_rad(-event.relative.y * mouse_sensitivity), deg_to_rad(-60), deg_to_rad(60))
+		kamera.rotation = Vector3(_pitch, _kamera_rot0.y, _kamera_rot0.z)
+
+# Zum u koracima od početnog offseta iz scene, pa se odzumiranjem vraća tačno na njega (koraci od min/max ne bi);
+# z <= 0.1 je first person (model skriven).
+func _zumiraj(smer: int) -> void:
+	var k_min := floori((min_zum - _kamera_z0) / zum_brzina)
+	var k_max := ceili((max_zum - _kamera_z0) / zum_brzina)
+	_zum_korak = clampi(_zum_korak + smer, k_min, k_max)
+	_kamera_poz.z = clampf(_kamera_z0 + _zum_korak * zum_brzina, min_zum, max_zum)
+	$CharacterMain.visible = _kamera_poz.z > 0.1
 
 # ---------------------------------------------------------------- CILJ (klik na neprijatelja)
 # Cilj drži server po igraču (čvor ovog igrača, pa nestaje sa odjavom) i javlja ga samo vlasniku; ne replicira se.
