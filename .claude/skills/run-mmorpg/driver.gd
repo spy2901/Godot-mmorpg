@@ -140,6 +140,10 @@ func _process(d):
 				root.size = Vector2i(1280, 720) # kao cilj: u 64x64 bi action bar progutao klik
 				root.get_node("GameState").token = "drugi-token"
 				root.get_node("GameState").ime_igraca = "DrugiLik"
+			elif uloga == "oprema": # korak=1 i 2 OpremaLik (2 = ponovna prijava), korak=3 Oprema2Lik (drugi igrač)
+				var ime := "Oprema2Lik" if _korak == 3 else "OpremaLik"
+				root.get_node("GameState").token = "oprema2-token" if _korak == 3 else "oprema-token"
+				root.get_node("GameState").ime_igraca = ime
 			elif uloga == "ai": # korak=1 AiLik, korak=2 Ai2Lik
 				var ime := "AiLik" if _korak == 1 else "Ai2Lik"
 				root.get_node("GameState").token = ime.to_lower() + "-token"
@@ -173,6 +177,7 @@ func _process(d):
 		"cilj": return _cilj()
 		"drugi": return _uloga_drugi()
 		"ai": return _uloga_ai()
+		"oprema": return _uloga_oprema()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -249,6 +254,7 @@ func _server(log: bool) -> bool:
 					fh.close()
 	_server_cilj()
 	_server_ai()
+	_server_oprema()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -481,8 +487,8 @@ func _mover_ceka_gasenje() -> bool:
 		var ok: bool = current_scene.get("_error_label") != null and current_scene._error_label.text == "Lost connection to the server"
 		_provera("server_prekid_vraca_na_login", ok, "scena=%s poruka='%s' token='%s'" % [scena, current_scene._error_label.text, root.get_node("GameState").token])
 		return true
-	if t - _ceka_gasenje >= 30.0:
-		_provera("server_prekid_vraca_na_login", false, "nema promene scene za 30 s (scena=%s poruka='%s')" % [scena, poruka])
+	if t - _ceka_gasenje >= 70.0: # run.sh čeka ostale uloge do 60 s pre gašenja servera
+		_provera("server_prekid_vraca_na_login", false, "nema promene scene za 70 s (scena=%s poruka='%s')" % [scena, poruka])
 		return true
 	return false
 
@@ -1487,3 +1493,213 @@ func _ai_scenario(a1, a2) -> void:
 	var ob: bool = await _cekaj(func(): return _tab(e).is_empty() and _st(e) != "JURENJE", 5.0)
 	_provera("ai_odjava_brise_pretnju", pr_pre > 0 and ob, "pretnja AiLik pre odjave %.1f, posle: %s, stanje %s" % [pr_pre, _tab(e), _st(e)])
 	_pisi("ai_gotov", "1")
+
+# ---------------------------------------------------------------- OPREMA I STATISTIKE
+# Server: svaki frame upisuje statistike OpremaLik-a po serveru u dir/oprema_server (JSON) i izvršava komande iz
+# dir/oprema_cmd ("N steta X" -> dir/oprema_steta "N hp_pre hp_posle", isti frame; "N hp X" = postavi HP).
+# Klijent OpremaLik (korak 1) oprema kroz inventar (klik na predmet / na slot opreme) i šalje zahteve direktno;
+# korak 2 je ponovna prijava; Oprema2Lik (korak 3) pokušava da opremi tuđi predmet.
+var _opr_cmd := ""
+var _opr_upisano := ""
+var _opr_krenuo := false
+var _opr_kraj := false
+var _opr_cmd_br := 0
+
+func _server_oprema() -> void:
+	if dir == "" or _world() == null: return
+	var p = _ai_lik("OpremaLik")
+	if p == null: return
+	var cmd := FileAccess.get_file_as_string(dir + "/oprema_cmd")
+	if cmd != "" and cmd != _opr_cmd:
+		_opr_cmd = cmd
+		var c := cmd.split(" ")
+		if c[1] == "steta":
+			var pre: int = p.hp
+			p.server_primi_damage(int(c[2]))
+			_pisi("oprema_steta", "%s %d %d" % [c[0], pre, p.hp])
+		elif c[1] == "hp":
+			p.hp = int(c[2])
+			p._posalji_hp()
+		print("[S] oprema komanda: ", cmd)
+	var st := JSON.stringify({"attack": p.izracunaj_damage(), "armor": p.get("armor"), "max_hp": p.max_hp, "hp": p.hp,
+		"oprema": p.get("oprema")})
+	if st != _opr_upisano:
+		_opr_upisano = st
+		_pisi("oprema_server", st)
+
+func _opr_srv() -> Dictionary:
+	var d = JSON.parse_string(FileAccess.get_file_as_string(dir + "/oprema_server"))
+	return d if d is Dictionary else {}
+
+func _opr_srv_ok(attack: int, armor: int, max_hp: int) -> bool:
+	var d := _opr_srv()
+	return int(d.get("attack", -1)) == attack and int(d.get("armor", -1) if d.get("armor") != null else -1) == armor \
+		and int(d.get("max_hp", -1)) == max_hp
+
+func _opr_cmd_posalji(cmd: String) -> void:
+	_opr_cmd_br += 1
+	_pisi("oprema_cmd", "%d %s" % [_opr_cmd_br, cmd])
+
+func _opr_srv_opis() -> String:
+	var d := _opr_srv()
+	return "server attack %s armor %s max %s hp %s oprema %s" % [d.get("attack"), d.get("armor"), d.get("max_hp"), d.get("hp"), d.get("oprema")]
+
+func _uloga_oprema() -> bool:
+	var p = _moj()
+	if p == null or not p.get_node("ui/Control")._ucitano:
+		return (_opr_krenuo and p == null) or t > 2 * MAX_T
+	if not _opr_krenuo:
+		_opr_krenuo = true
+		match _korak:
+			1: _oprema_scenario(p, p.get_node("ui/InventoryUI"))
+			2: _oprema_prijava(p, p.get_node("ui/InventoryUI"))
+			3: _oprema_tudji(p)
+	return _opr_kraj or t > 2 * MAX_T
+
+func _inv_index(inv, id: String) -> int:
+	for i in inv.inventory_data.size():
+		if not inv.inventory_data[i].is_empty() and str(inv.inventory_data[i].get("id", "")) == id:
+			return i
+	return -1
+
+func _opremljeno(inv) -> Dictionary:
+	var eq := {}
+	for k in inv.equipped_items:
+		if not inv.equipped_items[k].is_empty():
+			eq[k] = str(inv.equipped_items[k].get("id", ""))
+	return eq
+
+func _klijent_stat(p) -> String:
+	return "%s/%s/%s" % [p.get("stat_attack"), p.get("stat_armor"), p.get("stat_max_hp")]
+
+func _oprema_scenario(p, inv) -> void:
+	var odg := []
+	if p.has_signal("oprema_odgovor"): p.oprema_odgovor.connect(func(d): odg.append(d))
+	var zahtev := func(slot: String, id: String) -> Dictionary: # direktan zahtev serveru, čeka odgovor
+		var n := odg.size()
+		if p.has_method("zatrazi_opremanje"): p.zatrazi_opremanje.rpc_id(1, slot, id)
+		await _cekaj(func(): return odg.size() > n, 3.0)
+		return odg[n] if odg.size() > n else {}
+	var klik := func(id: String) -> void: # klik na predmet u inventaru (UI), čeka da se stanje servera smiri
+		var i := _inv_index(inv, id)
+		if i >= 0: inv._on_slot_klik(i)
+		await create_timer(0.6).timeout
+	var lbl = inv.get("stat_label")
+
+	# neopremljen: osnovne vrednosti na serveru, kod klijenta i u sažetku inventara
+	await _cekaj(func(): return _opr_srv_ok(25, 0, 100) and _klijent_stat(p) == "25/0/100", 5.0)
+	_provera("oprema_osnovne_vrednosti", _opr_srv_ok(25, 0, 100) and _klijent_stat(p) == "25/0/100"
+		and lbl != null and lbl.text == "Attack: 25   Armor: 0   Max HP: 100",
+		"%s; klijent %s, sažetak '%s'" % [_opr_srv_opis(), _klijent_stat(p), lbl.text if lbl else "-"])
+
+	# oružje: iron_sword +25
+	await klik.call("iron_sword")
+	await _cekaj(func(): return _opr_srv_ok(50, 0, 100) and _klijent_stat(p) == "50/0/100", 3.0)
+	_provera("oruzje_povecava_stetu", _opr_srv_ok(50, 0, 100) and _klijent_stat(p) == "50/0/100" and _opremljeno(inv).get("weapon") == "iron_sword",
+		"%s; klijent %s, UI oprema %s" % [_opr_srv_opis(), _klijent_stat(p), _opremljeno(inv)])
+
+	# oklop 68 (kaciga 10 + grudi 20 + noge 12 + čizme 6 + štit 20): 25 štete -> 14
+	for id in ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots", "steel_shield"]:
+		await klik.call(id)
+	await _cekaj(func(): return _opr_srv_ok(50, 68, 110), 3.0)
+	var oklop_ok := _opr_srv_ok(50, 68, 110)
+	_opr_cmd_posalji("steta 25")
+	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/oprema_steta").begins_with(str(_opr_cmd_br) + " "), 3.0)
+	var st := FileAccess.get_file_as_string(dir + "/oprema_steta").split(" ")
+	var primljeno: int = int(st[1]) - int(st[2]) if st.size() == 3 else -1
+	_provera("oklop_68_smanjuje_stetu_25_na_14", oklop_ok and primljeno == 14,
+		"%s; 25 štete -> primljeno %d" % [_opr_srv_opis(), primljeno])
+
+	# max_hp predmet: grudi iron_chestplate -> dragon_scale_armor (+50 max HP, armor 68 - 20 + 35 = 83)
+	await klik.call("dragon_scale_armor")
+	await _cekaj(func(): return _opr_srv_ok(50, 83, 160) and _klijent_stat(p) == "50/83/160", 3.0)
+	_provera("max_hp_predmet_podize_maksimum", _opr_srv_ok(50, 83, 160) and _klijent_stat(p) == "50/83/160"
+		and _opremljeno(inv).get("chest") == "dragon_scale_armor" and _inv_index(inv, "iron_chestplate") >= 0,
+		"%s; klijent %s, UI oprema %s" % [_opr_srv_opis(), _klijent_stat(p), _opremljeno(inv)])
+
+	# skidanje max_hp predmeta ograničava HP: HP 160 -> skini grudi -> max 110, HP 110
+	_opr_cmd_posalji("hp 160")
+	await _cekaj(func(): return int(_opr_srv().get("hp", 0)) == 160, 3.0)
+	inv._skini_opremu("chest")
+	await _cekaj(func(): return _opr_srv_ok(50, 48, 110), 3.0)
+	await create_timer(0.3).timeout
+	var d := _opr_srv()
+	_provera("skidanje_max_hp_ogranicava_hp", _opr_srv_ok(50, 48, 110) and int(d.get("hp", -1)) == 110,
+		"%s (pre skidanja HP 160)" % _opr_srv_opis())
+
+	# odbijanja (direktni zahtevi): nije u inventaru, pogrešan slot, isti predmet dvaput, rukavice bez slota
+	var pre_eq := _opremljeno(inv)
+	var pre_srv = _opr_srv().get("oprema")
+	var r1: Dictionary = await zahtev.call("weapon", "golden_sword")
+	_provera("odbija_predmet_koji_nije_u_inventaru", r1.get("ok", true) == false and _opr_srv().get("oprema") == pre_srv,
+		"golden_sword (nije u inventaru): %s; %s" % [r1, _opr_srv_opis()])
+	inv._skini_opremu("head")
+	await _cekaj(func(): return _opr_srv_ok(50, 38, 110), 3.0)
+	var r2: Dictionary = await zahtev.call("boots", "iron_helmet")
+	_provera("odbija_pogresan_slot", r2.get("ok", true) == false and _opr_srv_ok(50, 38, 110) and str(_opr_srv().get("oprema", {}).get("boots")) == "iron_boots",
+		"iron_helmet u boots: %s; %s" % [r2, _opr_srv_opis()])
+	await klik.call("iron_helmet")
+	await _cekaj(func(): return _opr_srv_ok(50, 48, 110), 3.0)
+	var r3: Dictionary = await zahtev.call("head", "iron_helmet")
+	_provera("odbija_isti_predmet_dvaput", _opr_srv_ok(50, 48, 110) and r3.get("ok", true) == false,
+		"iron_helmet već opremljen, ponovo u head: %s; %s" % [r3, _opr_srv_opis()])
+	var n_odg := odg.size()
+	var gi := _inv_index(inv, "iron_gloves")
+	await klik.call("iron_gloves")
+	if gi >= 0: inv._on_slot_hover(gi)
+	var tooltip: String = inv.tooltip_label.text
+	var r4: Dictionary = await zahtev.call("head", "iron_gloves")
+	_provera("iron_gloves_se_ne_oprema", gi >= 0 and odg.size() == n_odg + 1 and _inv_index(inv, "iron_gloves") == gi
+		and _opremljeno(inv).get("head") == "iron_helmet" and "Can't be equipped" in tooltip and r4.get("ok", true) == false and _opr_srv_ok(50, 48, 110),
+		"klik bez zahteva=%s, ostao u slotu %d=%s, tooltip ima 'Can't be equipped'=%s, zahtev: %s; %s" % [odg.size() == n_odg + 1, gi, _inv_index(inv, "iron_gloves") == gi, "Can't be equipped" in tooltip, r4, _opr_srv_opis()])
+
+	# skidanje vraća osnovne vrednosti i sve predmete u inventar
+	for slot in ["weapon", "head", "legs", "boots", "shield"]:
+		inv._skini_opremu(slot)
+		await create_timer(0.4).timeout
+	await _cekaj(func(): return _opr_srv_ok(25, 0, 100) and _klijent_stat(p) == "25/0/100", 3.0)
+	var svi := ["iron_sword", "iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots", "steel_shield", "dragon_scale_armor", "iron_gloves"]
+	var u_inv := svi.filter(func(x): return _inv_index(inv, x) >= 0).size()
+	_provera("skidanje_vraca_stare_vrednosti", _opr_srv_ok(25, 0, 100) and _klijent_stat(p) == "25/0/100" and _opremljeno(inv).is_empty() and u_inv == 8
+		and lbl != null and lbl.text == "Attack: 25   Armor: 0   Max HP: 100",
+		"%s; klijent %s, UI oprema %s, u inventaru %d/8" % [_opr_srv_opis(), _klijent_stat(p), _opremljeno(inv), u_inv])
+
+	# drugi igrač šalje zahtev za MOJ lik (moj iron_sword u weapon): server ga ignoriše
+	_pisi("oprema_tudji_kreni", str(p.get_multiplayer_authority()))
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/oprema_tudji_poslato"), 30.0)
+	await create_timer(1.0).timeout
+	_provera("drugi_igrac_ne_oprema_tudji_predmet", FileAccess.file_exists(dir + "/oprema_tudji_poslato") and _opr_srv_ok(25, 0, 100)
+		and str(_opr_srv().get("oprema", {})) == "{ }",
+		"Oprema2Lik poslao weapon/iron_sword za OpremaLik: %s" % _opr_srv_opis())
+
+	# za ponovnu prijavu: iron_sword + dragon_scale_armor, HP 140 (iznad osnovnog 100), pa odjava (server snima)
+	await klik.call("iron_sword")
+	await klik.call("dragon_scale_armor")
+	await _cekaj(func(): return _opr_srv_ok(50, 35, 150), 3.0)
+	_opr_cmd_posalji("hp 140")
+	await _cekaj(func(): return int(_opr_srv().get("hp", 0)) == 140, 3.0)
+	await create_timer(1.0).timeout # klijent pošalje raspored (posalji_stanje) posle poslednje promene
+	_pisi("oprema_korak1", _opr_srv_opis())
+	print("[OPREMA] korak 1 gotov: ", _opr_srv_opis())
+	_opr_kraj = true
+
+func _oprema_prijava(p, inv) -> void:
+	await _cekaj(func(): return _opr_srv_ok(50, 35, 150) and _klijent_stat(p) == "50/35/150" and _opremljeno(inv).size() == 2, 8.0)
+	var d := _opr_srv()
+	_provera("statistike_prezive_prijavu", _opr_srv_ok(50, 35, 150) and _klijent_stat(p) == "50/35/150"
+		and _opremljeno(inv) == {"weapon": "iron_sword", "chest": "dragon_scale_armor"},
+		"%s; klijent %s, UI oprema %s" % [_opr_srv_opis(), _klijent_stat(p), _opremljeno(inv)])
+	_provera("hp_iznad_osnovnog_prezivi_prijavu", int(d.get("hp", -1)) == 140 and int(d.get("max_hp", -1)) == 150,
+		"HP %s / %s (osnovni max 100, pre odjave 140)" % [d.get("hp"), d.get("max_hp")])
+	_opr_kraj = true
+
+func _oprema_tudji(p) -> void:
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/oprema_tudji_kreni"), 2 * MAX_T)
+	var tudji = _world().get_node_or_null(FileAccess.get_file_as_string(dir + "/oprema_tudji_kreni"))
+	if tudji and tudji.has_method("zatrazi_opremanje"):
+		tudji.zatrazi_opremanje.rpc_id(1, "weapon", "iron_sword")
+	elif tudji and tudji.has_method("postavi_oruzje"):
+		tudji.postavi_oruzje.rpc_id(1, "iron_sword") # stari put opremanja oružja
+	await create_timer(0.3).timeout
+	_pisi("oprema_tudji_poslato", "1")
+	_opr_kraj = true

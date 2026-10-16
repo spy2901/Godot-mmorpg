@@ -14,9 +14,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ITEM_USE_KASNJENJE = 0.3  # s: da se dva istovremena zahteva preklope
 
+def _prebroj(inv, eq):
+    c = {}
+    for e in inv:
+        c[e["id"]] = c.get(e["id"], 0) + int(e.get("kolicina", 1))
+    for x in eq.values():
+        if x:
+            c[x] = c.get(x, 0) + 1
+    return c
+
+
 def _item(id, ime, tip, **x):
     d = {"id": id, "ime": ime, "tip": tip, "ikonica": "?", "vrednost": 1, "stackable": 1,
-         "max_stack": 20, "damage": 0, "armor": 0, "hp_efekat": 0, "mana_efekat": 0, "cooldown_ms": 0}
+         "max_stack": 20, "damage": 0, "armor": 0, "hp_bonus": 0, "slot": None, "hp_efekat": 0, "mana_efekat": 0, "cooldown_ms": 0}
     d.update(x)
     return d
 
@@ -26,7 +36,17 @@ ITEMS = {i["id"]: i for i in [
     _item("large_health_potion", "Large Health Potion", "consumable", hp_efekat=150, cooldown_ms=10000),
     _item("mana_potion", "Mana Potion", "consumable", mana_efekat=50, cooldown_ms=5000),
     _item("apple", "Apple", "consumable", hp_efekat=10, cooldown_ms=5000),
-    _item("iron_sword", "Iron Sword", "weapon", stackable=0, max_stack=1, damage=10),
+    _item("iron_sword", "Iron Sword", "weapon", stackable=0, max_stack=1, damage=25, slot="weapon"),
+    # oprema kao u bazi posle migracije 007 (attack = damage, armor, hp_bonus, slot; iron_gloves bez slota)
+    _item("golden_sword", "Golden Sword", "weapon", stackable=0, max_stack=1, damage=40, slot="weapon"),
+    _item("iron_helmet", "Iron Helmet", "armor", stackable=0, max_stack=1, armor=10, slot="head"),
+    _item("iron_chestplate", "Iron Chestplate", "armor", stackable=0, max_stack=1, armor=20, slot="chest"),
+    _item("iron_leggings", "Iron Leggings", "armor", stackable=0, max_stack=1, armor=12, slot="legs"),
+    _item("iron_boots", "Iron Boots", "armor", stackable=0, max_stack=1, armor=6, slot="boots"),
+    _item("steel_shield", "Steel Shield", "armor", stackable=0, max_stack=1, armor=20, hp_bonus=10, slot="shield"),
+    _item("dragon_scale_armor", "Dragon Scale Armor", "armor", stackable=0, max_stack=1, armor=35, hp_bonus=50,
+          slot="chest"),
+    _item("iron_gloves", "Iron Gloves", "armor", stackable=0, max_stack=1, armor=5),
 ]}
 
 PLAYERS = {"TestLik": {
@@ -74,7 +94,14 @@ PLAYERS["DrugiLik"] = dict(PLAYERS["TestLik"], ime="DrugiLik", pos_x=-15, pos_y=
 for _ime, _poz in (("AiLik", (14, 22)), ("Ai2Lik", (24, 14))):
     PLAYERS[_ime] = dict(PLAYERS["TestLik"], ime=_ime, hp=1000, max_hp=1000, pos_x=_poz[0], pos_y=1.16, pos_z=_poz[1],
                          inventory=[])
-TOKENI = {"ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
+# OpremaLik: oprema i statistike (uloga oprema, korak 1 pa korak 2 = ponovna prijava); osnovno attack 25, max HP 100.
+# Oprema2Lik (korak 3): drugi igrač koji pokušava da opremi tuđi predmet. Obojica van putanje movera i ostalih.
+PLAYERS["OpremaLik"] = dict(PLAYERS["TestLik"], ime="OpremaLik", hp=100, max_hp=100, pos_x=-20, pos_y=1.16, pos_z=10,
+                            equipment={}, inventory=[{"slot": i, "id": x, "kolicina": 1} for i, x in enumerate(
+                                ["iron_sword", "iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots",
+                                 "steel_shield", "dragon_scale_armor", "iron_gloves"])])
+PLAYERS["Oprema2Lik"] = dict(PLAYERS["TestLik"], ime="Oprema2Lik", pos_x=-20, pos_y=1.16, pos_z=16, inventory=[])
+TOKENI = {"oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik"}
 LOCK = threading.Lock()
 
@@ -122,10 +149,14 @@ class H(BaseHTTPRequestHandler):
                 pl = PLAYERS.get(m[1])
                 if not pl:
                     return self._odgovor({"error": "Player not found"}, 404)
-                # inventar je autoritativan ovde (kao baza); save menja samo hp/manu/poziciju
+                # hp/mana/pozicija uvek; inventar i oprema kao backend: samo kad se broj komada slaže sa "bazom"
+                # (inventar ostaje autoritativan ovde: item/use i kupovina ga menjaju mimo game servera)
                 for k in ("hp", "mana", "pos_x", "pos_y", "pos_z"):
                     if k in d:
                         pl[k] = d[k]
+                if "inventory" in d and _prebroj(d["inventory"], d.get("equipment", {})) == \
+                        _prebroj(pl.get("inventory", []), pl.get("equipment", {})):
+                    pl["inventory"], pl["equipment"] = d["inventory"], d.get("equipment", {})
             return self._odgovor({"status": "ok"})
         if m := re.fullmatch(r"/players/([\w-]+)/action_bar", p):  # kao backend: 10 slotova, predmeti postoje
             sl = d.get("slotovi")
