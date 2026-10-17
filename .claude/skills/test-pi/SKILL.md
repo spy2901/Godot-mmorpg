@@ -44,6 +44,10 @@ Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad
      statistike; agent_test likovi nemaju opremu, pa je attack = osnovni napad iz baze, armor 0, max HP = HUD, a
      sažetak u inventaru "Attack: … Armor: … Max HP: …". igrac1 snimi `$OUT/pi_igrac1_inventar.png` (inventar
      otvoren pa zatvoren).
+   - `napredak_na_pravom_serveru` (oba igrača, samo čitanje): nivo L iz baze i statistike po odobrenoj krivi
+     (migracija 008): max_xp 25·L²+75·L (0 i traka "XP: MAX  |  Lv.20" na nivou 20), max HP 100+15·(L−1) (bez
+     opreme), max mana 100+10·(L−1), osnovni napad 10+2·(L−1) = attack sa servera. Pre migracije 008 na Pi-ju pada
+     (napad 250).
    - `cilj_na_pravom_serveru` (igrac1 u prozoru, posle screenshot-a): okrene se ka najbližem živom neprijatelju bližem
      od 25 m, levi klik na njega → server potvrdi cilj, okvir pokazuje HP = replicirani hp; screenshot
      `$OUT/pi_igrac1_cilj.png`; Esc skida cilj.

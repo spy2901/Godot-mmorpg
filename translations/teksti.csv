@@ -32,6 +32,8 @@ Abandon,Abandon,Odustani
 HP: %d / %d,HP: %d / %d,HP: %d / %d
 Mana: %d / %d,Mana: %d / %d,Mana: %d / %d
 XP: %d / %d  |  Lv.%d,XP: %d / %d  |  Lv.%d,XP: %d / %d  |  Lv.%d
+XP: MAX  |  Lv.%d,XP: MAX  |  Lv.%d,XP: MAX  |  Lv.%d
+Level up! Lv.%d,Level up! Lv.%d,Novi nivo! Lv.%d
 Kill,Kill,Ubij
 Bring,Bring,Donesi
 Complete: return to the quest giver,Complete: return to the quest giver,Završeno — vrati se NPC-u

@@ -106,6 +106,17 @@ func _statistike(p, hud) -> void:
 	_provera("statistike_na_pravom_serveru", stigle and bez_opreme and p.stat_attack == p.napad_damage and p.stat_armor == 0
 		and p.stat_max_hp == hud.max_hp and inv.stat_label.text == ocek,
 		"attack %d (osnovni %d), armor %d, max HP %d (HUD %d), oprema prazna=%s, sažetak '%s'" % [p.stat_attack, p.napad_damage, p.stat_armor, p.stat_max_hp, hud.max_hp, bez_opreme, inv.stat_label.text])
+	# napredak (migracija 008 + novi backend): statistike učitanog lika odgovaraju njegovom nivou po odobrenoj krivi
+	# (bez opreme: max HP = osnovni). Samo čitanje, nema ubistava ni XP-a.
+	var L: int = hud.level
+	var ocek_np := [0 if L == 20 else 25 * L * L + 75 * L, 100 + 15 * (L - 1), 100 + 10 * (L - 1), 10 + 2 * (L - 1)]
+	var xp_lbl = hud.xp_bar.get_node_or_null("XPLabel")
+	var ocek_xp := "XP: MAX  |  Lv.20" if L == 20 else "XP: %d / %d  |  Lv.%d" % [hud.xp, ocek_np[0], L]
+	_provera("napredak_na_pravom_serveru", stigle and bez_opreme and L >= 1 and L <= 20 and hud.xp >= 0
+		and (hud.xp < hud.max_xp or (L == 20 and hud.xp == 0)) and [hud.max_xp, hud.max_hp, hud.max_mana, p.napad_damage] == ocek_np
+		and p.stat_attack == p.napad_damage and xp_lbl != null and xp_lbl.text == ocek_xp,
+		"Lv.%d xp %d: max_xp/max HP/max mana/napad %s (za nivo %s), traka '%s' (očekivano '%s')" % [L, hud.xp,
+		[hud.max_xp, hud.max_hp, hud.max_mana, p.napad_damage], ocek_np, xp_lbl.text if xp_lbl else "-", ocek_xp])
 	if shot != "" and uloga == "igrac1":
 		inv.visible = true
 		await _snimi("_inventar")

@@ -78,6 +78,7 @@ var _t0 := -1.0         # mover: početak vremenske ose (lik stao na pod)
 var _spawn = null       # mover: [vreme, pozicija] pojave lika (za ispis kad na_podu padne)
 const PODLOGA_TIMEOUT := 5.0
 const MAX_T := 120.0    # zaštita od zaglavljivanja
+const PORUKA_SLEDECA := 2.3 # s: duže od TopBar.PORUKA_TRAJANJE
 var _max_t := MAX_T     # server u repro_login.sh radi duže (maxt=)
 var _aktivnost := false # prijava: reliable zahtevi za predmet dok traje sesija
 var _izgubi_reset := false # prijava: klijent odbaci reset posle prijave (test hook)
@@ -148,6 +149,9 @@ func _process(d):
 				var ime := "AiLik" if _korak == 1 else "Ai2Lik"
 				root.get_node("GameState").token = ime.to_lower() + "-token"
 				root.get_node("GameState").ime_igraca = ime
+			elif uloga == "napredak": # korak=1 ubistva i level-up, korak=2 ponovna prijava
+				root.get_node("GameState").token = "napredak-token"
+				root.get_node("GameState").ime_igraca = "NapredakLik"
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
 				root.get_node("GameState").ime_igraca = "RasporedLik"
@@ -178,6 +182,7 @@ func _process(d):
 		"drugi": return _uloga_drugi()
 		"ai": return _uloga_ai()
 		"oprema": return _uloga_oprema()
+		"napredak": return _uloga_napredak()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -255,6 +260,7 @@ func _server(log: bool) -> bool:
 	_server_cilj()
 	_server_ai()
 	_server_oprema()
+	_server_napredak()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -1765,3 +1771,142 @@ func _kamera_fp_pa_nazad(p) -> void:
 		"first person=%s, granice gore/dole=%s/%s, rot pre %s posle %s (razlika %s stepeni), offset pre %s posle %s, model=%s" % [
 			fp, gore_ok, dole_ok, (pre_rot * 180.0 / PI).snapped(Vector3.ONE * 0.01), (k.rotation * 180.0 / PI).snapped(Vector3.ONE * 0.01),
 			razlika.snapped(Vector3.ONE * 0.01), pre_off.snapped(Vector3.ONE * 0.001), p._kamera_poz.snapped(Vector3.ONE * 0.001), model.visible])
+
+# ---------------------------------------------------------------- NAPREDAK LIKA
+# NapredakLik (uloga napredak, korak 1) traži od servera ubistva test goblina sa zadatim XP-om (dir/napredak_cmd
+# "br ubij XP" / "br hp HP MANA"): goblin umire pravim putem (Enemy.primi_damage -> _isplati_kill -> server_isplati_xp ->
+# stub /xp/change sa krivom iz napredak.py). Server upisuje svoje statistike lika u dir/napredak_server.
+# Korak 2 je ponovna prijava. Kriva: 100 XP za nivo 2, 250 za 3, 450 za 4; nivo 20 je maksimum.
+var _np_cmd := ""
+var _np_upisano := ""
+var _np_krenuo := false
+var _np_kraj := false
+var _np_br := 0
+
+func _server_napredak() -> void:
+	if dir == "" or _world() == null: return
+	var p = _ai_lik("NapredakLik")
+	if p == null: return
+	var cmd := FileAccess.get_file_as_string(dir + "/napredak_cmd")
+	if cmd != "" and cmd != _np_cmd:
+		_np_cmd = cmd
+		_np_izvrsi(p, cmd.split(" "))
+	var st := JSON.stringify({"attack": p.izracunaj_damage(), "osnovni_napad": p.napad_damage, "osnovni_max_hp": p.max_hp_osnovni,
+		"max_hp": p.max_hp, "hp": p.hp, "mana": p.mana, "max_mana": p.max_mana, "ok": _np_cmd.get_slice(" ", 0)})
+	if st != _np_upisano:
+		_np_upisano = st
+		_pisi("napredak_server", st)
+
+func _np_izvrsi(p, c: PackedStringArray) -> void:
+	print("[S] napredak komanda: ", " ".join(c))
+	if c[1] == "hp":
+		p.hp = int(c[2])
+		p.mana = int(c[3])
+		p._posalji_hp()
+		return
+	var id := 970 + int(c[0])
+	_world().goblin_spawner.spawn({"vrsta": "goblin", "id": id, "pos": Vector3(26, 2, 0)})
+	await _cekaj(func(): return _nep("goblin_%d" % id) != null, 3.0)
+	var e = _nep("goblin_%d" % id)
+	if e:
+		e.xp_nagrada = int(c[2]) # test: nagrada po meri krive (sadržaj ostaje: goblin daje 25)
+		e.primi_damage(100000, p.get_multiplayer_authority())
+
+func _np_srv() -> Dictionary:
+	var d = JSON.parse_string(FileAccess.get_file_as_string(dir + "/napredak_server"))
+	return d if d is Dictionary else {}
+
+# server: [attack, osnovni max HP, max HP, hp, mana, max mana]
+func _np_srv_ok(v: Array) -> bool:
+	var d := _np_srv()
+	return [int(d.get("attack", -1)), int(d.get("osnovni_max_hp", -1)), int(d.get("max_hp", -1)), int(d.get("hp", -1)),
+		int(d.get("mana", -1)), int(d.get("max_mana", -1))] == v
+
+func _np_cmd_posalji(cmd: String) -> void:
+	_np_br += 1
+	_pisi("napredak_cmd", "%d %s" % [_np_br, cmd])
+	await _cekaj(func(): return str(_np_srv().get("ok", "")) == str(_np_br), 5.0)
+
+func _uloga_napredak() -> bool:
+	var p = _moj()
+	if p == null or not p.get_node("ui/Control")._ucitano:
+		return (_np_krenuo and p == null) or t > 2 * MAX_T
+	if not _np_krenuo:
+		_np_krenuo = true
+		if _korak == 1: _napredak_scenario(p, p.get_node("ui/Control"))
+		else: _napredak_prijava(p, p.get_node("ui/Control"))
+	return _np_kraj or t > 2 * MAX_T
+
+func _np_xp_tekst(hud) -> String:
+	var l = hud.xp_bar.get_node_or_null("XPLabel")
+	return l.text if l else "-"
+
+func _np_poruka(hud) -> String:
+	var l = hud.get("_poruka_label")
+	return l.text if l != null and l.visible else "-"
+
+func _np_opis(p, hud) -> String:
+	var b = hud.xp_bar
+	return "HUD Lv.%d xp %d/%d '%s' bar %s/%s, HUD hp %d/%d mana %d/%d, klijent napad %s; server %s" % [hud.level, hud.xp, hud.max_xp,
+		_np_xp_tekst(hud), b.value, b.max_value, hud.hp, hud.max_hp, hud.mana, hud.max_mana, p.napad_damage, _np_srv()]
+
+func _np_stub() -> Dictionary:
+	return await root.get_node("ApiManager").get_player("NapredakLik")
+
+# HUD i stub (baza) pokazuju [nivo, xp, max_xp]
+func _np_nivo_ok(hud, st: Dictionary, v: Array) -> bool:
+	return [hud.level, hud.xp, hud.max_xp] == v and [int(st.get("level", -1)), int(st.get("xp", -1)), int(st.get("max_xp", -1))] == v
+
+func _napredak_scenario(p, hud) -> void:
+	# 1) nivo 1 (0/100), ranjen: ubistvo sa 100 XP -> tačno nivo 2 (0/250). Server: napad 12, max HP 115 + štit 10,
+	#    HP i mana puni; HUD prikazuje isto (max HP sa bonusom opreme), poruka "Level up! Lv.2"
+	await _cekaj(func(): return hud.level == 1 and _np_srv().has("attack"), 5.0)
+	await _np_cmd_posalji("hp 40 30")
+	await _np_cmd_posalji("ubij 100")
+	var v2 := [12, 115, 125, 125, 110, 110]
+	await _cekaj(func(): return hud.level == 2 and _np_srv_ok(v2) and hud.max_hp == 125 and hud.hp == 125, 5.0)
+	var poruka := _np_poruka(hud)
+	var st: Dictionary = await _np_stub()
+	_provera("napredak_ubistvo_daje_xp_i_level_up_po_krivi", _np_nivo_ok(hud, st, [2, 0, 250]) and _np_xp_tekst(hud) == "XP: 0 / 250  |  Lv.2"
+		and int(p.napad_damage) == 12, "%s; stub lv %s xp %s/%s" % [_np_opis(p, hud), st.get("level"), st.get("xp"), st.get("max_xp")])
+	_provera("napredak_level_up_poruka_u_hud_u", poruka == "Level up! Lv.2", "poruka '%s'" % poruka)
+	_provera("napredak_statistike_sa_servera_pun_hp_i_mana_sa_bonusom_opreme", _np_srv_ok(v2) and hud.max_hp == 125 and hud.hp == 125
+		and hud.max_mana == 110 and hud.mana == 110 and int(st.get("hp", -1)) == 125,
+		"%s; stub hp %s (pre ubistva HP 40, mana 30; osnovni max HP 115 + steel_shield 10)" % [_np_opis(p, hud), st.get("hp")])
+
+	# 2) više nivoa odjednom: 250 + 450 + 30 -> nivo 4 (30/700), napad 16, max HP 145 + 10
+	await _np_cmd_posalji("hp 40 30")
+	await _np_cmd_posalji("ubij 730")
+	var v4 := [16, 145, 155, 155, 130, 130]
+	await _cekaj(func(): return hud.level == 4 and _np_srv_ok(v4), 5.0)
+	poruka = _np_poruka(hud)
+	st = await _np_stub()
+	_provera("napredak_vise_nivoa_odjednom", _np_nivo_ok(hud, st, [4, 30, 700]) and _np_xp_tekst(hud) == "XP: 30 / 700  |  Lv.4"
+		and _np_srv_ok(v4) and hud.max_hp == 155 and poruka == "Level up! Lv.4",
+		"%s; poruka '%s'; stub lv %s xp %s/%s" % [_np_opis(p, hud), poruka, st.get("level"), st.get("xp"), st.get("max_xp")])
+
+	# 3) nivo 20 je maksimum: XP se ne skuplja (0/0), traka "MAX" i puna, sledeće ubistvo ništa ne menja
+	await _np_cmd_posalji("ubij 1000000")
+	var v20 := [48, 385, 395, 395, 290, 290]
+	await _cekaj(func(): return hud.level == 20 and _np_srv_ok(v20), 5.0)
+	var tekst20 := _np_xp_tekst(hud)
+	await create_timer(PORUKA_SLEDECA).timeout # poruka nivoa 20 se ugasi pre sledećeg ubistva
+	await _np_cmd_posalji("ubij 500")
+	await create_timer(1.5).timeout # odgovor stub-a stiže posle smrti goblina
+	st = await _np_stub()
+	var b = hud.xp_bar
+	_provera("napredak_nivo_20_maksimum_xp_se_ne_skuplja", tekst20 == "XP: MAX  |  Lv.20" and _np_nivo_ok(hud, st, [20, 0, 0])
+		and _np_xp_tekst(hud) == "XP: MAX  |  Lv.20" and b.max_value > 0 and b.value == b.max_value and _np_srv_ok(v20)
+		and _np_poruka(hud) == "-",
+		"%s; poruka posle ubistva na 20 '%s'; stub lv %s xp %s/%s" % [_np_opis(p, hud), _np_poruka(hud), st.get("level"), st.get("xp"), st.get("max_xp")])
+	print("[NAPREDAK] korak 1 gotov: ", _np_opis(p, hud))
+	_np_kraj = true
+
+func _napredak_prijava(p, hud) -> void:
+	var v20 := [48, 385, 395, 395, 290, 290]
+	await _cekaj(func(): return hud.level == 20 and _np_srv_ok(v20) and hud.max_hp == 395, 8.0)
+	var st: Dictionary = await _np_stub()
+	_provera("napredak_statistike_prezive_prijavu", _np_nivo_ok(hud, st, [20, 0, 0]) and _np_xp_tekst(hud) == "XP: MAX  |  Lv.20"
+		and _np_srv_ok(v20) and int(p.napad_damage) == 48 and hud.max_hp == 395 and hud.max_mana == 290,
+		"%s; stub lv %s napad %s max_hp %s max_mana %s" % [_np_opis(p, hud), st.get("level"), st.get("napad_damage"), st.get("max_hp"), st.get("max_mana")])
+	_np_kraj = true

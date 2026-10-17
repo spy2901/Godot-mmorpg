@@ -109,7 +109,7 @@ var _snimci: Array = []      # [tik, poz, yaw]
 var _sat_pomak := 0.0        # lokalno vreme - serversko vreme (usrednjeno)
 
 #ATTACK
-var napad_damage = 25  # na serveru: učitano iz baze preko registruj_lik
+var napad_damage = 10  # na serveru: učitano iz baze preko registruj_lik (osnovni napad nivoa)
 var bonus_oruzja = 0   # na serveru: attack opremljenog oružja (items.damage)
 var napad_cooldown = 1.0
 const DOMET_NAPADA := 3.5  # m, od SERVER pozicije igrača do cilja

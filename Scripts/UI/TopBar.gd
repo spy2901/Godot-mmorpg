@@ -210,11 +210,10 @@ func primeni_lik(p: Dictionary) -> void:
 
 	# Lik ovog klijenta je roditelj HUD-a (TopBar → ui → Player), ne prvi igrač u grupi
 	var player = get_parent().get_parent()
-	player.napad_damage = int(p.get("napad_damage", 250))
+	player.napad_damage = int(p.get("napad_damage", 10))
 
 	hp_bar.max_value = max_hp
 	mana_bar.max_value = max_mana
-	xp_bar.max_value = max_xp
 	label_ime.text = tr("%s  Lv.%d") % [ime_igraca, level]
 
 	await get_tree().process_frame
@@ -243,7 +242,9 @@ func _notification(what):
 func _osvezi_barove() -> void:
 	hp_bar.value = hp
 	mana_bar.value = mana
-	xp_bar.value = xp
+	# max_xp 0 = maksimalni nivo: traka puna, bez deljenja nulom
+	xp_bar.max_value = max(max_xp, 1)
+	xp_bar.value = xp_bar.max_value if max_xp <= 0 else xp
 
 	var hp_lbl = hp_bar.get_node_or_null("HPLabel")
 	if hp_lbl:
@@ -255,7 +256,7 @@ func _osvezi_barove() -> void:
 
 	var xp_lbl = xp_bar.get_node_or_null("XPLabel")
 	if xp_lbl:
-		xp_lbl.text = tr("XP: %d / %d  |  Lv.%d") % [xp, max_xp, level]
+		xp_lbl.text = tr("XP: MAX  |  Lv.%d") % level if max_xp <= 0 else tr("XP: %d / %d  |  Lv.%d") % [xp, max_xp, level]
 
 func _osvezi_gold() -> void:
 	gold_label.text = "🪙 %d" % gold
@@ -306,17 +307,13 @@ func primeni_stats(s: Dictionary) -> void:
 	level = int(s.get("level", level))
 	xp = int(s.get("xp", xp))
 	max_xp = int(s.get("max_xp", max_xp))
-	max_hp = int(s.get("max_hp", max_hp))
-	max_mana = int(s.get("max_mana", max_mana))
 	var player = get_parent().get_parent()
 	if player and s.has("napad_damage"):
 		player.napad_damage = int(s["napad_damage"])
 	if s.get("level_up", false):
-		print("LEVEL UP! Lv.%d | Max HP: %d | Max Mana: %d" % [level, max_hp, max_mana])
-	# hp i manu (uključujući punjenje na level-up) šalje server preko primeni_hp
-	hp_bar.max_value = max_hp
-	mana_bar.max_value = max_mana
-	xp_bar.max_value = max_xp
+		prikazi_poruku(tr("Level up! Lv.%d") % level)
+	# hp, manu i njihove maksimume (sa bonusom opreme, i punjenje na level-up) šalje server preko primeni_hp;
+	# max_hp iz stats je osnovni, bez opreme
 	label_ime.text = tr("%s  Lv.%d") % [ime_igraca, level]
 	_osvezi_barove()
 

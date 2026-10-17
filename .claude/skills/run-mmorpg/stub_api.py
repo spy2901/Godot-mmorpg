@@ -6,11 +6,16 @@ Pokriva samo rute koje game server/klijent zovu u testu. Token "potion-token" ->
 Nepoznata ruta: 404 {"error": ...} i linija u stderr (vidi se u $OUT/stub.log).
 """
 import json
+import os
 import re
 import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# XP kriva i statistike po nivou iz pravog backend-a (napredak.py nema zavisnosti), ne kopija
+sys.path.insert(0, os.environ.get("BACKEND_DIR", os.path.expanduser("~/mmorpg-server")))
+from napredak import primeni_xp  # noqa: E402
 
 ITEM_USE_KASNJENJE = 0.3  # s: da se dva istovremena zahteva preklope
 
@@ -105,7 +110,14 @@ PLAYERS["OpremaLik"] = dict(PLAYERS["TestLik"], ime="OpremaLik", hp=100, max_hp=
 PLAYERS["Oprema2Lik"] = dict(PLAYERS["TestLik"], ime="Oprema2Lik", hp=50, max_hp=1000, pos_x=-20, pos_y=1.16, pos_z=16,
                              inventory=[])
 SPORI_SAVE = {"Oprema2Lik": 2.5}
-TOKENI = {"oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
+# NapredakLik: napredak kroz nivoe (uloga napredak, korak 1 pa korak 2 = ponovna prijava). Nivo 1 po novoj krivi,
+# ranjen (HP 40, mana 30) da se vidi punjenje na level-up, sa steel_shield (+10 max HP). U uglu van ostalih likova.
+PLAYERS["NapredakLik"] = dict(PLAYERS["TestLik"], ime="NapredakLik", napad_damage=10, hp=40, max_hp=100, mana=30,
+                              pos_x=22, pos_y=1.16, pos_z=0, equipment={"shield": "steel_shield"}, inventory=[])
+# /xp/change samo za ove likove: ostali test likovi imaju veštački HP (1000, 100000) koji bi statistike iz nivoa
+# prepisale, a njihovi scenariji ubijaju neprijatelje (do sada je /xp/change bio nepoznata ruta)
+XP_LIKOVI = {"NapredakLik"}
+TOKENI = {"napredak-token": "NapredakLik", "oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik"}
 LOCK = threading.Lock()
 
@@ -165,6 +177,17 @@ class H(BaseHTTPRequestHandler):
                         _prebroj(pl.get("inventory", []), pl.get("equipment", {})):
                     pl["inventory"], pl["equipment"] = d["inventory"], d.get("equipment", {})
             return self._odgovor({"status": "ok"})
+        if (m := re.fullmatch(r"/players/([\w-]+)/xp/change", p)) and m[1] in XP_LIKOVI:
+            if int(d.get("delta", 0)) <= 0:
+                return self._odgovor({"error": "delta mora biti > 0"})
+            with LOCK:  # kao backend _upisi_xp: kolone iz primeni_xp, na level-up pun HP (+ hp_bonus opreme) i mana
+                pl = PLAYERS[m[1]]
+                s = primeni_xp(pl, int(d["delta"]))
+                pl.update({k: s[k] for k in ("level", "xp", "max_xp", "max_hp", "max_mana", "napad_damage")})
+                if s["level_up"]:
+                    pl["hp"] = s["max_hp"] + sum(ITEMS[i]["hp_bonus"] for i in pl["equipment"].values() if i in ITEMS)
+                    pl["mana"] = s["max_mana"]
+                return self._odgovor({"status": "ok", **s})
         if m := re.fullmatch(r"/players/([\w-]+)/action_bar", p):  # kao backend: 10 slotova, predmeti postoje
             sl = d.get("slotovi")
             if not isinstance(sl, list) or len(sl) != 10:

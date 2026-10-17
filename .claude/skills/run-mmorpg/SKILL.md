@@ -25,10 +25,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 102 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 102 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 108 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 108 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -122,7 +122,10 @@ upiše `$OUT/snimljeno_<kat>` (headless: samo marker, bez slike).
 Stub (`stub_api.py`): `/auth/verify` (token `potion-token` → `TestLik`), `GET /players/{ime}`,
 `GET /items/{id}`, `/quests/completed/{ime}`, `POST /players/{ime}/save` (samo hp/mana/pozicija;
 inventar je autoritativan u stub-u), `POST /players/{ime}/item/use` (kašnjenje 0.3 s da se zahtevi
-preklope; brojač `item_use_br`). Nepoznate rute: 404 i linija u `$OUT/stub.log`. TestLik ima sačuvanu
+preklope; brojač `item_use_br`), `POST /players/{ime}/xp/change` samo za `XP_LIKOVI` (NapredakLik; ostali test
+likovi imaju veštački HP koji bi statistike iz nivoa prepisale) sa `primeni_xp` iz pravog backend-a: stub uvozi
+`napredak.py` iz `BACKEND_DIR` (podrazumevano `~/mmorpg-server`), pa bez backend repoa `run.sh` odmah ispiše
+`FAIL stub_api`. Nepoznate rute: 404 i linija u `$OUT/stub.log`. TestLik ima sačuvanu
 poziciju (9, 1, -7): van putanje movera i van aggro dometa neprijatelja (na spawn-u bi blokirao movera).
 Mover i observer i dalje rade bez prijave (lažni token "x").
 
@@ -178,6 +181,17 @@ odjavi, HP koji je stub snimio i HP posle učitavanja moraju biti jednaki (stub 
 `server_ne_salje_hp_odjavljenom` (`run.sh`, grep `server.log`): Oprema2Lik ima HP 50/1000, a stub drži njegov
 `/save` 2.5 s (`SPORI_SAVE`), pa posle odjave regeneracija kuca dok server snima; u logu ne sme biti
 "Attempt to call RPC with unknown peer ID" (bez guard-a u `_posalji_hp` pada sa 2 greške).
+
+Napredak lika (backend `napredak.py`: kriva 25·n²+75·n, statistike iz nivoa, maksimum 20). Uloga `napredak`:
+`korak=1` NapredakLik (nivo 1, HP 40/100, mana 30, steel_shield +10 max HP, napad 10) traži od servera
+(`$OUT/napredak_cmd`: "ubij XP" / "hp HP MANA") ubistvo test goblina (goblin_97N) sa zadatim `xp_nagrada`: goblin umire
+pravim putem (`Enemy.primi_damage` -> `server_isplati_xp` -> stub `/xp/change`). Server drajver upisuje statistike
+lika u `$OUT/napredak_server`. Provere: `napredak_ubistvo_daje_xp_i_level_up_po_krivi` (100 XP -> Lv.2 0/250, HUD,
+stub, napad 12), `napredak_level_up_poruka_u_hud_u` ("Level up! Lv.2"),
+`napredak_statistike_sa_servera_pun_hp_i_mana_sa_bonusom_opreme` (server 12/115+10, HP 125 i mana 110 puni, HUD max
+HP 125, ne osnovni 115), `napredak_vise_nivoa_odjednom` (730 XP -> Lv.4 30/700), `napredak_nivo_20_maksimum_xp_se_ne_skuplja`
+(Lv.20 0/0, traka "XP: MAX  |  Lv.20" puna, ubistvo na 20 ne menja ništa i ne pokazuje poruku); `korak=2` je
+ponovna prijava: `napredak_statistike_prezive_prijavu`.
 
 Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
 igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u
