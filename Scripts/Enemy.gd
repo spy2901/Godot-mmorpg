@@ -53,9 +53,13 @@ var _regen_akum := 0.0
 const HP_PO_NIVOU := 0.15
 const STETA_PO_NIVOU := 0.10
 const UBISTAVA_PO_NIVOU := 15.0
+const XP_UBISTVA_MAX_UDEO := 0.25 # jedno ubistvo daje najviše 25% XP-a potrebnog za trenutni nivo igrača
+
+static func xp_do_sledeceg(n: int) -> int:
+	return 25 * n * n + 75 * n
 
 static func xp_za_nivo(n: int) -> int:
-	return maxi(1, roundi((25 * n * n + 75 * n) / UBISTAVA_PO_NIVOU))
+	return maxi(1, roundi(xp_do_sledeceg(n) / UBISTAVA_PO_NIVOU))
 
 # razlika = nivo neprijatelja - nivo igrača; najmanje 10%, nikad 0
 static func xp_mnozilac(razlika: int) -> float:
@@ -67,6 +71,11 @@ static func xp_mnozilac(razlika: int) -> float:
 
 static func xp_za_razliku(xp: int, razlika: int) -> int:
 	return maxi(1, roundi(xp * xp_mnozilac(razlika)))
+
+# XP jednog ubistva za igrača nivoa nivo_igraca: razlika nivoa, pa ograničenje (nizak lik ne preskače nivoe)
+static func xp_ubistva(xp: int, nivo_neprijatelja: int, nivo_igraca: int) -> int:
+	var limit := maxi(1, floori(xp_do_sledeceg(nivo_igraca) * XP_UBISTVA_MAX_UDEO))
+	return mini(xp_za_razliku(xp, nivo_neprijatelja - nivo_igraca), limit)
 
 func _skaliraj() -> void:
 	max_hp = roundi(max_hp * (1.0 + HP_PO_NIVOU * (nivo - 1)))
@@ -285,7 +294,7 @@ func _isplati_kill() -> void:
 		var igrac = _nadji_igraca_po_id(peer_id)
 		if igrac == null:
 			continue
-		var xp := xp_za_razliku(xp_nagrada, int(nivo) - int(igrac.nivo_lika))
+		var xp := xp_ubistva(xp_nagrada, int(nivo), int(igrac.nivo_lika))
 		igrac.server_zabelezi_kill(ime.to_lower())
 		igrac.server_isplati_xp(xp, "kill:" + ime.to_lower())
 		if peer_id == multiplayer.get_unique_id():
