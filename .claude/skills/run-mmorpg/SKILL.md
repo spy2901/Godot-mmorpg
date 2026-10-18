@@ -25,7 +25,7 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 140 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 140 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 142 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 142 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -244,7 +244,8 @@ min_nivo 11 3%, shadow_boots utvara 17 2%, dragonscale_leggings utvara 20 0.4%; 
 `novi_predmeti_dostupni` (9 predmeta iz 009: prodavnica za T1, loot ili nagrada questa za T3/T4). `neprijatelji_nivoi_i_spawn_tacke`
 sada pokriva svih 17 tačaka (aggro zone ≥ 0.5 m razmaka). QuestLik još: `nove_vrste_nivoi_statistike_xp` (vuk 11, pauk 15,
 utvara 20 na klijentu), `prodavnica_t1_da_t3_t4_ne`; PosmatracLik ubija i goblina svog nivoa (d = 0, bez ograničenja).
-`korak=3` LovacLik (nivo 1, 6 krzna, ispred Hunter-a na (29, 0); svoj kanal `$OUT/lovac_cmd`/`lovac_server`):
+`prodavnica_bez_arcane_staff_ostalo_oruzje_da` (arcane_staff, napad 45, u `Config.VAN_PRODAVNICE`; ostalih 11
+oružja iz baze se nudi; stub ima sve oružje iz baze). `korak=3` LovacLik (nivo 1, 6 krzna, ispred Hunter-a na (29, 0); svoj kanal `$OUT/lovac_cmd`/`lovac_server`):
 `xp_limit_po_ubistvu` (vuk 11 -> 25 = 25% od 100, goblin 1 -> 7), `quest_lovac_klikom_prihvat_i_predaja` i
 `quest_lovac_lanac_redosled` (svila_za_krojaca pre vucja_krzna odbijen). OpremaLik: `oklop_prema_nivou_napadaca_10_i_20`
 (komanda "steta 25 N": 18 i 20; nivo 1 ostaje 14). Svih 10 novih pada bez implementacije (oklop: na staroj formuli).

@@ -2581,6 +2581,12 @@ func _quest_scenario(p) -> void:
 	_provera("prodavnica_bez_iron_gloves_i_najbolje_opreme", ponuda.has("Iron Sword") and nudi.is_empty() and not kup.get("ok", true)
 		and _komada(st, "iron_gloves") == 0, "nudi zabranjeno %s (ponuda %d, Iron Sword=%s), kupovina iron_gloves %s" % [nudi, ponuda.size(),
 		ponuda.has("Iron Sword"), kup])
+	# oružje: arcane_staff (napad 45) van prodavnice, ostalo oružje koje nije quest predmet i ima cenu ostaje
+	var oruzje := ["Apprentice Staff", "Battle Axe", "Crossbow", "Hunters Bow", "Iron Dagger", "Iron Sword", "Oak Bow",
+		"Rusty Sword", "Spear", "Steel Longsword", "War Hammer"]
+	var nedostaje := oruzje.filter(func(x): return not ponuda.has(x))
+	_provera("prodavnica_bez_arcane_staff_ostalo_oruzje_da", not ponuda.has("Arcane Staff") and nedostaje.is_empty(),
+		"Arcane Staff u ponudi=%s, oružje koje nedostaje %s (očekivano svih %d)" % [ponuda.has("Arcane Staff"), nedostaje, oruzje.size()])
 	_provera("prodavnica_t1_da_t3_t4_ne", ponuda.has("Cloth Trousers") and ponuda.has("Wooden Shield") and ponuda.has("Leather Pants")
 		and nudi.is_empty() and not kup_t3.get("ok", true) and _komada(st, "tower_shield") == 0,
 		"T1 u ponudi: Cloth Trousers=%s Wooden Shield=%s Leather Pants=%s; T3/T4 u ponudi %s; kupovina tower_shield %s" % [

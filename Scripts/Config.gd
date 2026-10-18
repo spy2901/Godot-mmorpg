@@ -13,7 +13,8 @@ const CONFIG_PATH = "user://config.cfg"
 # kao nagrada questa. Proveravaju i MerchantUI i game server (zatrazi_kupovinu).
 const VAN_PRODAVNICE := ["iron_gloves", "dragon_scale_armor", "dragon_staff", "golden_helmet", "golden_sword",
 	"shadow_cloak", "shadow_dagger",
-	"steel_greaves", "steel_sabatons", "tower_shield", "dragonscale_leggings", "shadow_boots", "dragon_shield"]
+	"steel_greaves", "steel_sabatons", "tower_shield", "dragonscale_leggings", "shadow_boots", "dragon_shield",
+	"arcane_staff"] # napad 45: jače od ostalog oružja u prodavnici (do 35), ostaje samo van nje
 
 func _ready() -> void:
 	_ucitaj_iz_fajla()

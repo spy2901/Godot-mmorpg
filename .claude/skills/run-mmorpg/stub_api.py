@@ -76,7 +76,7 @@ ITEMS = {i["id"]: i for i in [
     _item("large_health_potion", "Large Health Potion", "consumable", hp_efekat=150, cooldown_ms=10000),
     _item("mana_potion", "Mana Potion", "consumable", mana_efekat=50, cooldown_ms=5000),
     _item("apple", "Apple", "consumable", hp_efekat=10, cooldown_ms=5000),
-    _item("iron_sword", "Iron Sword", "weapon", stackable=0, max_stack=1, damage=25, slot="weapon"),
+    _item("iron_sword", "Iron Sword", "weapon", stackable=0, max_stack=1, damage=25, slot="weapon", vrednost=20),
     # oprema kao u bazi posle migracije 007 (attack = damage, armor, hp_bonus, slot; iron_gloves bez slota)
     _item("golden_sword", "Golden Sword", "weapon", stackable=0, max_stack=1, damage=40, slot="weapon"),
     _item("iron_helmet", "Iron Helmet", "armor", stackable=0, max_stack=1, armor=10, slot="head"),
@@ -91,8 +91,8 @@ ITEMS = {i["id"]: i for i in [
     *[_item(i, i.replace("_", " ").title(), "material") for i in (
         "goblin_ear", "bronze_coin", "leather_scrap", "skeleton_rib", "iron_ore", "silver_coin", "troll_tooth",
         "gold_coin", "steel_ingot")],
-    _item("iron_dagger", "Iron Dagger", "weapon", stackable=0, max_stack=1, damage=10, slot="weapon"),
-    _item("war_hammer", "War Hammer", "weapon", stackable=0, max_stack=1, damage=30, slot="weapon"),
+    _item("iron_dagger", "Iron Dagger", "weapon", stackable=0, max_stack=1, damage=10, slot="weapon", vrednost=15),
+    _item("war_hammer", "War Hammer", "weapon", stackable=0, max_stack=1, damage=30, slot="weapon", vrednost=70),
     _item("dragon_staff", "Dragon Staff", "weapon", stackable=0, max_stack=1, damage=50, slot="weapon", quest_item=1),
     _item("golden_helmet", "Golden Helmet", "armor", stackable=0, max_stack=1, armor=15, hp_bonus=20, slot="head",
           quest_item=1),
@@ -108,6 +108,12 @@ ITEMS = {i["id"]: i for i in [
         ("steel_sabatons", "Steel Sabatons", "boots", 10, 5, 70), ("shadow_boots", "Shadow Boots", "boots", 14, 15, 280),
         ("wooden_shield", "Wooden Shield", "shield", 6, 0, 10), ("tower_shield", "Tower Shield", "shield", 28, 20, 120),
         ("dragon_shield", "Dragon Shield", "shield", 36, 40, 520))],
+    # ostalo oružje iz baze (damage, vrednost kao na Pi-ju): ponuda oružja u prodavnici
+    *[_item(i, ime, "weapon", stackable=0, max_stack=1, slot="weapon", damage=dmg, vrednost=v) for i, ime, dmg, v in (
+        ("apprentice_staff", "Apprentice Staff", 12, 30), ("arcane_staff", "Arcane Staff", 45, 80),
+        ("battle_axe", "Battle Axe", 30, 60), ("crossbow", "Crossbow", 20, 45), ("hunters_bow", "Hunters Bow", 20, 25),
+        ("oak_bow", "Oak Bow", 15, 15), ("rusty_sword", "Rusty Sword", 10, 5), ("spear", "Spear", 15, 35),
+        ("steel_longsword", "Steel Longsword", 35, 50))],
     _item("stamina_potion", "Stamina Potion", "consumable", mana_efekat=40, cooldown_ms=5000),
     _item("antidote", "Antidote", "consumable", hp_efekat=20, cooldown_ms=5000),
 ]}
