@@ -578,12 +578,21 @@ func _process(delta: float) -> void:
 		_posalji_hp()
 
 # Poziva Enemy na serveru. Šteta = max(1, šteta - oklop).
-func server_primi_damage(sirova_steta: int) -> void:
+# Oklop smanjuje štetu za armor / (armor + K); K raste sa nivoom napadača, pa isti oklop vredi manje protiv jačih
+# (nivo 1: K = 100, kao ranije). Jedino mesto za ove konstante.
+const OKLOP_K := 100
+const OKLOP_K_PO_NIVOU := 10
+
+static func steta_posle_oklopa(sirova: int, oklop: int, nivo_napadaca: int) -> int:
+	var k := OKLOP_K + OKLOP_K_PO_NIVOU * (maxi(nivo_napadaca, 1) - 1)
+	return maxi(1, sirova * k / (k + oklop))
+
+func server_primi_damage(sirova_steta: int, nivo_napadaca := 1) -> void:
 	if not multiplayer.is_server() or not _stanje_ucitano or mrtav:
 		return
 	if Time.get_ticks_msec() < _neosjetljiv_do_ms:
 		return
-	var steta := maxi(1, sirova_steta * 100 / (100 + armor)) # oklop smanjuje štetu procentualno
+	var steta := steta_posle_oklopa(sirova_steta, armor, nivo_napadaca)
 	hp = maxi(hp - steta, 0)
 	print("[DMG] ", ime_lika, " -", steta, " (oklop ", armor, ") -> hp ", hp)
 	if hp == 0:

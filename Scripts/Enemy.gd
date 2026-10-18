@@ -301,7 +301,7 @@ func napadni_igraca():
 	if global_position.distance_to(player.global_position) > napad_range + 0.5:
 		return
 	moze_napasti = false
-	player.server_primi_damage(napad_damage)
+	player.server_primi_damage(napad_damage, nivo)
 
 	await get_tree().create_timer(napad_cooldown).timeout
 	moze_napasti = true
