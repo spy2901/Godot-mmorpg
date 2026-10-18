@@ -979,6 +979,10 @@ func zatrazi_kupovinu(item_id: String) -> void:
 	if greska != "":
 		_odgovori(odgovor_kupovina, {"ok": false, "poruka": greska})
 		return
+	if Config.VAN_PRODAVNICE.has(item_id):
+		print("[SHOP] Odbijeno za ", ime_lika, ": ", item_id, " (nije u prodavnici)")
+		_odgovori(odgovor_kupovina, {"ok": false, "poruka": "Item not for sale"})
+		return
 	_server_zauzet["kupovina"] = true
 	var r: Dictionary = await ApiManager.kupi_item(ime_lika, item_id)
 	_server_zauzet.erase("kupovina")

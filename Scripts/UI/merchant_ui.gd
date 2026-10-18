@@ -89,8 +89,8 @@ func open(npc_name: String) -> void:
 		_add_item_row(item)
 
 func _add_item_row(item: Dictionary) -> void:
-	# quest itemi i itemi bez cene se ne prodaju
-	if int(item.get("quest_item", 0)) == 1 or int(item.get("vrednost", 0)) <= 0:
+	# quest itemi, itemi bez cene i Config.VAN_PRODAVNICE se ne prodaju
+	if int(item.get("quest_item", 0)) == 1 or int(item.get("vrednost", 0)) <= 0 or Config.VAN_PRODAVNICE.has(str(item.get("id", ""))):
 		return
 	var row := HBoxContainer.new()
 	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
