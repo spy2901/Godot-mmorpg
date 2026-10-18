@@ -57,7 +57,7 @@ func _spawn_na_tacki(tacka: Node3D) -> Node:
 		return null
 	_enemy_counter += 1
 	print("[SPAWN] ", vrsta, " na ", tacka.name, " (", tacka.position, ")")
-	return goblin_spawner.spawn({"vrsta": vrsta, "id": _enemy_counter, "pos": tacka.position})
+	return goblin_spawner.spawn({"vrsta": vrsta, "id": _enemy_counter, "pos": tacka.position, "nivo": tacka.nivo})
 
 # Ručni spawn goblina (dugme u test meniju)
 func spawn_goblin() -> void:
@@ -73,6 +73,7 @@ func spawn_goblin() -> void:
 func _spawn_enemy(data: Dictionary) -> Node:
 	var enemy = ENEMY_SCENES[data["vrsta"]].instantiate()
 	enemy.name = "%s_%d" % [data["vrsta"], data["id"]]
+	enemy.get_node("CharacterBody3D").nivo = int(data.get("nivo", 1)) # i na klijentu (spawn podaci), pre _ready
 	enemy.position = data["pos"]
 	return enemy
 

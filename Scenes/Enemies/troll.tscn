@@ -29,7 +29,6 @@ max_hp = 250
 brzina = 1.0
 napad_damage = 25
 napad_range = 1.5
-xp_nagrada = 150
 napad_cooldown = 4.0
 loot_tabela = [{
 "id": "troll_tooth",

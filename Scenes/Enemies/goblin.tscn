@@ -30,7 +30,6 @@ brzina = 4.0
 napad_damage = 5
 aggro_range = 5.0
 napad_range = 1.2
-xp_nagrada = 25
 loot_tabela = [{
 "id": "goblin_ear",
 "sansa": 100

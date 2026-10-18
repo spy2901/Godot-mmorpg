@@ -4,12 +4,12 @@ extends CharacterBody3D
 
 @export var ime = "Enemy"
 @export var max_hp = 100
-@export var nivo = 1  # prikazuje se u okviru cilja
+@export var nivo = 1  # po instanci (spawn tačka); statistike iz scene su za nivo 1 i rastu sa nivoom (_skaliraj)
 @export var brzina = 2.0
 @export var napad_damage = 10
 @export var aggro_range = 10.0
 @export var napad_range = 2.0
-@export var xp_nagrada = 50
+var xp_nagrada = 0  # iz nivoa (xp_za_nivo), ne iz scene
 @export var napad_cooldown = 2.0
 @export var loot_tabela = [
 	{"id": "goblin_ear", "sansa": 100},
@@ -48,8 +48,34 @@ var _pocetak := Vector3.ZERO
 var _regen := false
 var _regen_akum := 0.0
 
+# Nivo: HP +15% i šteta +10% po nivou iznad 1. XP tako da protiv neprijatelja svog nivoa nivo traje ~15 ubistava
+# (XP do sledećeg nivoa = 25*n^2 + 75*n, kao backend napredak.py), pa prema razlici nivoa (xp_mnozilac).
+const HP_PO_NIVOU := 0.15
+const STETA_PO_NIVOU := 0.10
+const UBISTAVA_PO_NIVOU := 15.0
+
+static func xp_za_nivo(n: int) -> int:
+	return maxi(1, roundi((25 * n * n + 75 * n) / UBISTAVA_PO_NIVOU))
+
+# razlika = nivo neprijatelja - nivo igrača; najmanje 10%, nikad 0
+static func xp_mnozilac(razlika: int) -> float:
+	if razlika >= 3: return 1.2
+	if razlika >= -2: return 1.0
+	if razlika >= -4: return 0.5
+	if razlika >= -6: return 0.2
+	return 0.1
+
+static func xp_za_razliku(xp: int, razlika: int) -> int:
+	return maxi(1, roundi(xp * xp_mnozilac(razlika)))
+
+func _skaliraj() -> void:
+	max_hp = roundi(max_hp * (1.0 + HP_PO_NIVOU * (nivo - 1)))
+	napad_damage = roundi(napad_damage * (1.0 + STETA_PO_NIVOU * (nivo - 1)))
+	xp_nagrada = xp_za_nivo(nivo)
+
 func _ready():
 	add_to_group("neprijatelj")
+	_skaliraj()
 	hp = max_hp
 	ime_label.text = tr(ime)
 	ime_label.position = Vector3(0, 2.2, 0)
@@ -254,18 +280,19 @@ func _isplati_personal_loot() -> void:
 		if not dobijeno.is_empty():
 			igrac.server_isplati_loot(dobijeno)
 
-# XP + kill progres za sve koji su naneli damage
+# XP + kill progres za sve koji su naneli damage; XP posebno za svakog prema njegovom nivou (server)
 func _isplati_kill() -> void:
 	for peer_id in napadaci:
 		var igrac = _nadji_igraca_po_id(peer_id)
 		if igrac == null:
 			continue
+		var xp := xp_za_razliku(xp_nagrada, int(nivo) - int(igrac.nivo_lika))
 		igrac.server_zabelezi_kill(ime.to_lower())
-		igrac.server_isplati_xp(xp_nagrada, "kill:" + ime.to_lower())
+		igrac.server_isplati_xp(xp, "kill:" + ime.to_lower())
 		if peer_id == multiplayer.get_unique_id():
-			igrac.primi_kill(ime.to_lower(), xp_nagrada)
+			igrac.primi_kill(ime.to_lower(), xp)
 		else:
-			igrac.primi_kill.rpc_id(peer_id, ime.to_lower(), xp_nagrada)
+			igrac.primi_kill.rpc_id(peer_id, ime.to_lower(), xp)
 
 # Samo na serveru: šteta ide direktno na Player node mete (oklop se računa u igraču)
 func napadni_igraca():

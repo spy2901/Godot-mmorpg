@@ -116,6 +116,7 @@ const DOMET_NAPADA := 3.5  # m, od SERVER pozicije igrača do cilja
 var _napad_spreman_ms := 0 # server: od kada sme sledeći napad
 signal napad_odgovor(odgovor: Dictionary) # klijent: odgovor servera na napad
 var ime_lika := ""      # samo na serveru
+var nivo_lika := 1      # samo na serveru: nivo po bazi (XP ubistva prema razlici nivoa, Enemy._isplati_kill)
 
 #CAMERA
 var zum_brzina = 1.0
@@ -381,6 +382,7 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 	mana = clampi(int(p.get("mana", max_mana)), 0, max_mana)
 	mrtav = false
 	_neosjetljiv_do_ms = 0
+	nivo_lika = int(p.get("level", 1))
 	_stanje_ucitano = true
 	_ucitan_ms = Time.get_ticks_msec()
 	_sync_nameplate()
@@ -534,6 +536,7 @@ func dodaj_u_vlasnistvo(item_id: String, kolicina: int = 1) -> void:
 # Backend je izračunao nove statistike (xp/change, quest turnin); server ih preuzima.
 # Na level-up server sam puni hp i manu.
 func server_primeni_stats(st: Dictionary) -> void:
+	nivo_lika = int(st.get("level", nivo_lika))
 	napad_damage = int(st.get("napad_damage", napad_damage))
 	max_hp_osnovni = int(st.get("max_hp", max_hp_osnovni))
 	max_hp = max_hp_osnovni + hp_bonus
