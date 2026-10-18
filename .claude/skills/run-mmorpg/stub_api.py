@@ -64,23 +64,41 @@ ITEMS = {i["id"]: i for i in [
     _item("shadow_cloak", "Shadow Cloak", "armor", stackable=0, max_stack=1, armor=8, hp_bonus=15, slot="chest",
           quest_item=1),
     _item("shadow_dagger", "Shadow Dagger", "weapon", stackable=0, max_stack=1, damage=40, slot="weapon", quest_item=1),
+    # migracija 009: materijali zone 2 i 9 predmeta za legs/boots/shield (T1 u prodavnici, T3/T4 van nje)
+    *[_item(i, i.replace("_", " ").title(), "material") for i in (
+        "wolf_pelt", "feather", "spider_web", "poison_gland", "herb_bundle", "shadow_fragment", "magic_dust", "crystal_shard")],
+    *[_item(i, ime, "armor", stackable=0, max_stack=1, slot=slot, armor=a, hp_bonus=h, vrednost=v) for i, ime, slot, a, h, v in (
+        ("cloth_trousers", "Cloth Trousers", "legs", 2, 0, 6), ("leather_pants", "Leather Pants", "legs", 6, 0, 18),
+        ("steel_greaves", "Steel Greaves", "legs", 18, 10, 90), ("dragonscale_leggings", "Dragonscale Leggings", "legs", 26, 30, 450),
+        ("steel_sabatons", "Steel Sabatons", "boots", 10, 5, 70), ("shadow_boots", "Shadow Boots", "boots", 14, 15, 280),
+        ("wooden_shield", "Wooden Shield", "shield", 6, 0, 10), ("tower_shield", "Tower Shield", "shield", 28, 20, 120),
+        ("dragon_shield", "Dragon Shield", "shield", 36, 40, 520))],
+    _item("stamina_potion", "Stamina Potion", "consumable", mana_efekat=40, cooldown_ms=5000),
+    _item("antidote", "Antidote", "consumable", hp_efekat=20, cooldown_ms=5000),
 ]}
 for _i in ("golden_sword", "dragon_scale_armor"):
     ITEMS[_i]["quest_item"] = 1
 
-# Questovi kao u bazi (GET /quests sa Pi-ja, 2026-10-18); lanac skupljac_oruzja -> goblin_killer -> skeleton_hunter ->
-# troll_slayer. Rute accept/kill/turnin/abandon prate routers/players.py.
+# Questovi kao u bazi (GET /quests sa Pi-ja, 2026-10-18) posle migracije 009; lanci skupljac_oruzja -> goblin_killer ->
+# skeleton_hunter -> troll_slayer, kosti_za_supu -> lek_od_otrova -> prah_za_napitke, vucja_krzna -> svila_za_krojaca ->
+# senke_u_sumi -> kraj_utvara (i q2 -> kraj_utvara). Rute accept/kill/turnin/abandon prate routers/players.py.
 def _q(id, naziv, tip, cilj, kolicina, xp, gold, item=None, sledeci=None, opis="..."):
     return {"id": id, "naziv": naziv, "opis": opis, "tip": tip, "cilj": cilj, "kolicina": kolicina, "nagrada_gold": gold,
             "nagrada_xp": xp, "nagrada_item": item, "sledeci_quest": sledeci}
 
 QUESTS = {q["id"]: q for q in [
     _q("goblin_killer", "Goblin Trouble", "kill", "goblin", 5, 100, 50, sledeci="skeleton_hunter"),
-    _q("kosti_za_supu", "Bones for Soup", "fetch", "skeleton_rib", 5, 80, 40),
-    _q("q2", "Goblin Ears", "fetch", "goblin_ear", 5, 150, 80, item="iron_sword"),
+    _q("kosti_za_supu", "Bones for Soup", "fetch", "skeleton_rib", 5, 80, 40, sledeci="lek_od_otrova"),
+    _q("q2", "Goblin Ears", "fetch", "goblin_ear", 5, 150, 80, item="iron_sword", sledeci="kraj_utvara"),
     _q("skeleton_hunter", "Rise of the Dead", "kill", "skeleton", 5, 150, 75, item="iron_sword", sledeci="troll_slayer"),
     _q("skupljac_oruzja", "Weapon Collector", "fetch", "iron_sword", 2, 120, 100, sledeci="goblin_killer"),
     _q("troll_slayer", "Troll Hunt", "kill", "troll", 3, 300, 150),
+    _q("vucja_krzna", "Wolf Pelts", "fetch", "wolf_pelt", 6, 1200, 150, sledeci="svila_za_krojaca"),
+    _q("svila_za_krojaca", "Silk for the Tailor", "fetch", "spider_web", 8, 1500, 200, item="steel_sabatons", sledeci="senke_u_sumi"),
+    _q("senke_u_sumi", "Shadows in the Forest", "kill", "wraith", 8, 2500, 300, item="tower_shield", sledeci="kraj_utvara"),
+    _q("kraj_utvara", "The End of the Wraiths", "kill", "wraith", 3, 3000, 500, item="dragon_shield"),
+    _q("lek_od_otrova", "A Cure for Venom", "fetch", "poison_gland", 4, 1400, 150, item="antidote", sledeci="prah_za_napitke"),
+    _q("prah_za_napitke", "Dust for Potions", "fetch", "magic_dust", 5, 2200, 250),
 ]}
 ZAVRSENI = {}  # ime -> [quest_id]
 
@@ -189,10 +207,13 @@ PLAYERS["PosmatracLik"] = dict(PLAYERS["TestLik"], ime="PosmatracLik", level=12,
                                max_hp=_s12["max_hp"], hp=_s12["max_hp"], max_mana=_s12["max_mana"],
                                mana=_s12["max_mana"], napad_damage=_s12["napad_damage"], pos_x=-14, pos_y=1.16,
                                pos_z=-12, aktivni_quest_id="goblin_killer", quest_progres=0, inventory=[])
-XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik"}
+# LovacLik (uloga quest, korak 3): nivo 1 sa 6 vučjih krzna, 1.1 m ispred Hunter-a (29, 0) u zoni 2, gleda ka njemu (-z)
+PLAYERS["LovacLik"] = dict(PLAYERS["TestLik"], ime="LovacLik", napad_damage=10, hp=100, max_hp=100, gold=100,
+                           pos_x=29, pos_y=1.16, pos_z=1.1, inventory=[{"slot": 0, "id": "wolf_pelt", "kolicina": 6}])
+XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik", "LovacLik"}
 TOKENI = {"napredak-token": "NapredakLik", "oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik", "quest-token": "QuestLik",
-          "posmatrac-token": "PosmatracLik"}
+          "posmatrac-token": "PosmatracLik", "lovac-token": "LovacLik"}
 LOCK = threading.Lock()
 
 

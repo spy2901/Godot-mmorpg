@@ -11,7 +11,7 @@ G="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 D=res://.claude/skills/run-mmorpg/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/run-mmorpg}"
 echo "load average: $(sysctl -n vm.loadavg 2>/dev/null || cut -d' ' -f1-3 /proc/loadavg)"
-mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt "$OUT"/visi_id "$OUT"/izgubljeno_* "$OUT"/cilj_* "$OUT"/drugi_* "$OUT"/ai_* "$OUT"/oprema_* "$OUT"/napredak_* "$OUT"/quest_*
+mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt "$OUT"/visi_id "$OUT"/izgubljeno_* "$OUT"/cilj_* "$OUT"/drugi_* "$OUT"/ai_* "$OUT"/oprema_* "$OUT"/napredak_* "$OUT"/quest_* "$OUT"/lovac_*
 PORT="${STUB_PORT:-18765}"
 API="--server-url=http://127.0.0.1:$PORT"
 
@@ -105,6 +105,9 @@ Q1=$PID
 sleep 0.3
 pokreni quest2 "$OUT/quest2.log" "$G" --headless --path . --script $D -- quest korak=2 "dir=$OUT" "$API"
 Q2=$PID
+sleep 0.3
+pokreni quest3 "$OUT/quest3.log" "$G" --headless --path . --script $D -- quest korak=3 "dir=$OUT" "$API"
+Q3=$PID
 
 # kad mover završi provere kretanja, ugasi server dok su klijenti još živi
 for _ in $(seq 240); do
@@ -113,14 +116,14 @@ for _ in $(seq 240); do
   sleep 0.5
 done
 for _ in $(seq 120); do # raspored, cilj, drugi i AI scenario (server upiše ai_gotov) moraju da završe pre gašenja servera
-  { kill -0 $R || kill -0 $C || kill -0 $DR || kill -0 $A1 || kill -0 $A2 || kill -0 $OP || kill -0 $O3 || kill -0 $NP || kill -0 $Q1 || kill -0 $Q2 || [ ! -f "$OUT/ai_gotov" ]; } 2>/dev/null || break
+  { kill -0 $R || kill -0 $C || kill -0 $DR || kill -0 $A1 || kill -0 $A2 || kill -0 $OP || kill -0 $O3 || kill -0 $NP || kill -0 $Q1 || kill -0 $Q2 || kill -0 $Q3 || [ ! -f "$OUT/ai_gotov" ]; } 2>/dev/null || break
   sleep 0.5
 done
 touch "$OUT/ugasi_server"
-wait $M $O $S $P $V $R $C $DR $A1 $A2 $OP $O3 $NP $Q1 $Q2
+wait $M $O $S $P $V $R $C $DR $A1 $A2 $OP $O3 $NP $Q1 $Q2 $Q3
 
 echo "logovi: $OUT"
-grep -h '^PASS\|^FAIL\|^WARN \|screenshot\|korekcije' "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log "$OUT"/visi.log "$OUT"/raspored1.log "$OUT"/raspored2.log "$OUT"/cilj.log "$OUT"/drugi.log "$OUT"/ai1.log "$OUT"/ai2.log "$OUT"/oprema1.log "$OUT"/oprema2.log "$OUT"/oprema3.log "$OUT"/napredak1.log "$OUT"/napredak2.log "$OUT"/quest1.log "$OUT"/quest2.log "$OUT"/server.log
+grep -h '^PASS\|^FAIL\|^WARN \|screenshot\|korekcije' "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log "$OUT"/visi.log "$OUT"/raspored1.log "$OUT"/raspored2.log "$OUT"/cilj.log "$OUT"/drugi.log "$OUT"/ai1.log "$OUT"/ai2.log "$OUT"/oprema1.log "$OUT"/oprema2.log "$OUT"/oprema3.log "$OUT"/napredak1.log "$OUT"/napredak2.log "$OUT"/quest1.log "$OUT"/quest2.log "$OUT"/quest3.log "$OUT"/server.log
 if grep -q "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log; then
   echo "FAIL nema_greske_neaktivnog_peera  $(grep -ch "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log | paste -sd+ - | bc) linija"
 else
@@ -148,4 +151,4 @@ if [ -z "${RUN_PONOVLJEN:-}" ] && grep -qh '^FAIL seq_bez_rupa_bez_gubitka' "$OU
   RUN_PONOVLJEN=1 exec "$SKRIPTA" "$@"
 fi
 # WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 108
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 131 ]
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 140 ]

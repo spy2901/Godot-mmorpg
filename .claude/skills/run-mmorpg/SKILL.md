@@ -25,10 +25,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 130 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 130 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 140 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 140 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -202,8 +202,8 @@ stub, napad 12), `napredak_level_up_poruka_u_hud_u` ("Level up! Lv.2"),
 `napredak_statistike_sa_servera_pun_hp_i_mana_sa_bonusom_opreme` (server 12/115+10, HP 125 i mana 110 puni, HUD max
 HP 125, ne osnovni 115), `napredak_vise_nivoa_odjednom` (730 XP -> Lv.4 30/700), `napredak_nivo_20_maksimum_xp_se_ne_skuplja`
 (Lv.20 0/0, traka "XP: MAX  |  Lv.20" puna, ubistvo na 20 ne menja ništa i ne pokazuje poruku); `korak=2` je
-ponovna prijava: `napredak_statistike_prezive_prijavu`. Goblin je nivoa 1, pa ubistvo "1000000" na nivou 4 daje 50%
-(razlika -3), i dalje dovoljno za nivo 20.
+ponovna prijava: `napredak_statistike_prezive_prijavu`. Ubistvo daje najviše 25% XP-a trenutnog nivoa, pa je nivo 2
+četiri ubistva po 25 XP; "više nivoa odjednom" i nivo 20 idu komandom "xp N" (`server_isplati_xp`, kao nagrada questa).
 
 Sadržaj (uloga `quest`, prozor drajvera 1280x720; `korak=1` QuestLik i `korak=2` PosmatracLik istovremeno). Server
 drajver na početku proverava scenu i podatke: `neprijatelji_nivoi_i_spawn_tacke` (goblin 3 tačke nivoa 1-3, kostur 3
@@ -222,6 +222,17 @@ dobija loot, kill i progres, i na klijentu), `xp_po_razlici_nivoa_po_napadacu` (
 nivoa 12+d; stub `xp_dnevnik`), `neprijatelji_statistike_skaliraju_sa_nivoom` (trol 10, kostur 5, goblin 3 na klijentu),
 `prodavnica_bez_iron_gloves_i_najbolje_opreme` (MerchantUI ih ne nudi, server odbija kupovinu). Svih 12 pada bez
 implementacije (provereno); posebno i bez klika na NPC-a, sa štetom 0 kao napadom i bez `min_nivo`.
+Zona 2 (sadržaj 2, migracija 009): server proverava i `vrste_neprijatelja_jedna_lista` (`spawn_point.VRSTE` = spawner
+`ENEMY_SCENES` = enum u editoru; svaka vrsta ima scenu, ime = ključ i red u teksti.csv), `zona2_spawn_tacke` (x > 25:
+vuk 11-13, pauk 14-16, utvara 17/18/20, na podu do x 75, Hunter), `zona2_loot_t3_t4_samo_svoja_zona` (steel_greaves pauk
+min_nivo 11 3%, shadow_boots utvara 17 2%, dragonscale_leggings utvara 20 0.4%; 30000 bacanja na min_nivo i min_nivo-1) i
+`novi_predmeti_dostupni` (9 predmeta iz 009: prodavnica za T1, loot ili nagrada questa za T3/T4). `neprijatelji_nivoi_i_spawn_tacke`
+sada pokriva svih 17 tačaka (aggro zone ≥ 0.5 m razmaka). QuestLik još: `nove_vrste_nivoi_statistike_xp` (vuk 11, pauk 15,
+utvara 20 na klijentu), `prodavnica_t1_da_t3_t4_ne`; PosmatracLik ubija i goblina svog nivoa (d = 0, bez ograničenja).
+`korak=3` LovacLik (nivo 1, 6 krzna, ispred Hunter-a na (29, 0); svoj kanal `$OUT/lovac_cmd`/`lovac_server`):
+`xp_limit_po_ubistvu` (vuk 11 -> 25 = 25% od 100, goblin 1 -> 7), `quest_lovac_klikom_prihvat_i_predaja` i
+`quest_lovac_lanac_redosled` (svila_za_krojaca pre vucja_krzna odbijen). OpremaLik: `oklop_prema_nivou_napadaca_10_i_20`
+(komanda "steta 25 N": 18 i 20; nivo 1 ostaje 14). Svih 10 novih pada bez implementacije (oklop: na staroj formuli).
 Stub: `/items`, `/quests`, `/quests/{id}`, `/quests/completed/{ime}`, `quest/accept|kill|turnin|abandon` (kao
 routers/players.py, lanac i redosled grešaka), `inventory/change` (loot). Bez implementacije (loot svima) RasporedLik i
 OpremaLik dobijaju tuđi loot pa padaju i njihove provere inventara.
