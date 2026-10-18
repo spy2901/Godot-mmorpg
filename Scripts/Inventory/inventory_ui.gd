@@ -302,8 +302,11 @@ func _on_slot_input(event: InputEvent, index: int):
 					_pokreni_drag()
 			else:
 				if is_dragging:
-					var cilj = _nadji_slot_ispod_misa()
-					_zavrsi_drag(cilj)
+					var bar = get_tree().get_first_node_in_group("action_bar")
+					if bar and bar.prevuci_iz_inventara(drag_item, get_global_mouse_position()):
+						_zavrsi_drag(-1) # na traku: raspored inventara se ne menja
+					else:
+						_zavrsi_drag(_nadji_slot_ispod_misa())
 				else:
 					if drag_index != -1:
 						_on_slot_klik(drag_index)
@@ -321,6 +324,12 @@ func _nadji_slot_ispod_misa() -> int:
 		if rect.has_point(mouse_pos):
 			return i
 	return -1
+
+# Esc tokom prevlačenja ga otkazuje i ne stiže do igrača (ne skida cilj)
+func _input(event):
+	if drag_index != -1 and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		_zavrsi_drag(-1)
+		get_viewport().set_input_as_handled()
 
 func _pokreni_drag():
 	if drag_label:

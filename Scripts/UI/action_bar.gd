@@ -1,8 +1,10 @@
 # Action bar: slotovi sa potrošnim predmetima i tasterima. Ponovo upotrebljiv (ActionBar.tscn): broj slotova,
 # tasteri i orijentacija su parametri. Izgled je samo u action_bar_stil.gd.
 # Raspored (koji predmet je u kom slotu) drži server po liku (igrač.action_bar, signal action_bar_promenjen);
-# izmenu traži igrač.promeni_action_slot. Stanje (količina, cooldown) takođe od servera (igrač.kolicine /
-# igrač.cd_do_ms, signal predmet_promenjen); taster samo pošalje zahtev (InventoryUI._koristi_item -> server).
+# izmenu traži igrač.promeni_action_slot / zameni_action_slotove (prevlačenje mišem). Stanje (količina, cooldown)
+# takođe od servera (igrač.kolicine / igrač.cd_do_ms, signal predmet_promenjen); taster i klik samo pošalju zahtev
+# (InventoryUI._koristi_item -> server).
+# Prevlačenje ne menja ništa lokalno: slot pokazuje raspored sa servera, pa se pri odbijanju predmet sam "vrati".
 extends Control
 
 const STIL := preload("res://Scripts/UI/action_bar_stil.gd")
@@ -16,6 +18,11 @@ var _predmeti: Dictionary = {}   # item_id -> podaci predmeta (ime...) za oznaku
 var _igrac: Node
 var _prikaz: Array = []          # po slotu: {panel, oznaka, kolicina, overlay, cd}
 
+const PRAG_PREVLACENJA := 10.0   # px, kao u inventaru: manji pomeraj od pritiska je klik
+var _drag_od := -1               # slot na kome je pritisnut levi taster miša, -1 = nema
+var _drag_start := Vector2.ZERO
+var _duh: Label = null           # oznaka uz miš kad pomeraj pređe prag (null = još je klik)
+
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if not is_multiplayer_authority():
@@ -24,6 +31,7 @@ func _ready() -> void:
 		set_process_unhandled_input(false)
 		return
 	_igrac = _nadji_igraca()
+	add_to_group("action_bar") # inventar spušta predmet na traku
 	slotovi.resize(broj_slotova)
 	slotovi.fill("")
 	_napravi()
@@ -67,7 +75,8 @@ func _napravi_slot(i: int) -> Control:
 	var panel := Panel.new()
 	panel.name = "Slot%d" % (i + 1)
 	panel.custom_minimum_size = Vector2(STIL.SLOT_VELICINA, STIL.SLOT_VELICINA)
-	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	panel.gui_input.connect(_na_slot_unos.bind(i))
 	var oznaka := _label(STIL.FONT_OZNAKA, STIL.BOJA_OZNAKA, HORIZONTAL_ALIGNMENT_CENTER, VERTICAL_ALIGNMENT_CENTER)
 	var taster := _label(STIL.FONT_TASTER, STIL.BOJA_TEKST, HORIZONTAL_ALIGNMENT_LEFT, VERTICAL_ALIGNMENT_TOP)
 	taster.text = OS.get_keycode_string(tasteri[i]) if i < tasteri.size() else ""
@@ -178,9 +187,19 @@ func _unhandled_input(event: InputEvent) -> void:
 	if i < 0 or i >= broj_slotova:
 		return
 	get_viewport().set_input_as_handled()
-	if _blokirano():
+	if _blokirano() or _prevlacenje_u_toku():
 		return
 	koristi_slot(i)
+
+# Esc tokom prevlačenja ga otkazuje i ne stiže do igrača (ne skida cilj)
+func _input(event: InputEvent) -> void:
+	if _drag_od >= 0 and event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		_otkazi()
+		get_viewport().set_input_as_handled()
+
+func _prevlacenje_u_toku() -> bool:
+	var inv := _igrac.get_node_or_null("ui/InventoryUI") if _igrac else null
+	return _drag_od >= 0 or (inv != null and inv.drag_index != -1)
 
 # chat/dijalog/prodavnica otvoreni ili fokus u polju za tekst: tasteri bara ne rade
 func _blokirano() -> bool:
@@ -202,3 +221,71 @@ func koristi_slot(i: int) -> void:
 		await inv._koristi_item(slotovi[i])
 	else:
 		await _igrac.koristi_item_na_serveru(slotovi[i])
+
+# ---------------------------------------------------------------- miš: klik koristi, prevlačenje traži izmenu od servera
+# Pritisnut slot dobija i pomeranje i otpuštanje (i van svog pravougaonika), pa je ceo tok ovde.
+
+func _na_slot_unos(event: InputEvent, i: int) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		accept_event()
+		if event.pressed:
+			_otkazi()
+			if slotovi[i] != "":
+				_drag_od = i
+				_drag_start = event.global_position
+		elif _drag_od >= 0:
+			_pusti(event.global_position)
+	elif event is InputEventMouseMotion and _drag_od >= 0:
+		if _duh == null and event.global_position.distance_to(_drag_start) > PRAG_PREVLACENJA:
+			_duh = _label(STIL.FONT_OZNAKA, STIL.BOJA_OZNAKA, HORIZONTAL_ALIGNMENT_CENTER, VERTICAL_ALIGNMENT_CENTER)
+			_duh.set_anchors_preset(Control.PRESET_TOP_LEFT)
+			_duh.size = Vector2(STIL.SLOT_VELICINA, STIL.SLOT_VELICINA)
+			_duh.text = _prikaz[_drag_od].oznaka.text
+			_duh.z_index = 100
+			add_child(_duh)
+		if _duh:
+			_duh.global_position = event.global_position - _duh.size / 2
+
+# bez prevlačenja: klik (ista ograničenja kao taster). Na slot: zamena mesta (prazan = premeštanje); van trake u prozoru:
+# slot se prazni (predmet ostaje u inventaru); van prozora: otkazano.
+func _pusti(poz: Vector2) -> void:
+	var od := _drag_od
+	var vuceno := _duh != null
+	_otkazi()
+	if not vuceno:
+		if not _blokirano():
+			koristi_slot(od)
+		return
+	var cilj := _slot_pod(poz)
+	if cilj == od:
+		return
+	if cilj >= 0:
+		_igrac.zameni_action_slotove(od + 1, cilj + 1)
+	elif get_viewport().get_visible_rect().has_point(poz):
+		_igrac.promeni_action_slot(od + 1, "")
+
+func _otkazi() -> void:
+	_drag_od = -1
+	if _duh:
+		_duh.queue_free()
+		_duh = null
+
+func _notification(what: int) -> void:
+	if what in [NOTIFICATION_WM_MOUSE_EXIT, NOTIFICATION_WM_WINDOW_FOCUS_OUT, NOTIFICATION_APPLICATION_FOCUS_OUT]:
+		_otkazi() # otpuštanje van prozora možda ni ne stigne
+
+func _slot_pod(poz: Vector2) -> int:
+	for i in _prikaz.size():
+		if _prikaz[i].panel.get_global_rect().has_point(poz):
+			return i
+	return -1
+
+# Inventar: predmet prevučen iz inventara pušten na poz. true = pušten iznad slota trake (inventar tada ne menja svoj
+# raspored); zahtev ide samo za potrošni predmet, server odlučuje.
+func prevuci_iz_inventara(predmet: Dictionary, poz: Vector2) -> bool:
+	var i := _slot_pod(poz)
+	if i < 0:
+		return false
+	if str(predmet.get("tip", "")) == "consumable" and _igrac:
+		_igrac.promeni_action_slot(i + 1, str(predmet.get("id", "")))
+	return true
