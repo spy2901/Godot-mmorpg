@@ -1203,8 +1203,9 @@ func neprijatelj_po_id(id: String) -> Node:
 			return e
 	return null
 
-# Levi klik u sceni bira neprijatelja pod mišem ili skida cilj (klik na prazno); ne napada. R napada cilj. Klik i taster
-# preko UI-ja ovde ne stižu (UI ih potroši). Esc skida cilj; otvoren dijalog/trgovac ga potroši pre ovoga.
+# Levi klik u sceni bira neprijatelja pod mišem ili skida cilj (klik na prazno); ne napada. Klik na NPC-a razgovara sa njim
+# (kao F, ako je lik u njegovom dometu) i ne menja cilj. R napada cilj. Klik i taster preko UI-ja ovde ne stižu (UI ih
+# potroši). Esc skida cilj; otvoren dijalog/trgovac ga potroši pre ovoga.
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_multiplayer_authority():
 		return
@@ -1216,18 +1217,21 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	var id := cilj_id
 	if klik:
-		id = _neprijatelj_pod_misem(event.position)
+		var pod = _pod_misem(event.position)
+		if pod and pod.is_in_group("npc"):
+			pod.klik()
+			return
+		id = str(pod.get_parent().name) if pod and pod.is_in_group("neprijatelj") else ""
 	elif event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
 		id = ""
 	if id != cilj_id:
 		izaberi_cilj(id)
 
-func _neprijatelj_pod_misem(poz: Vector2) -> String:
+func _pod_misem(poz: Vector2) -> Object:
 	var od: Vector3 = kamera.project_ray_origin(poz)
 	var upit := PhysicsRayQueryParameters3D.create(od, od + kamera.project_ray_normal(poz) * DOMET_KLIKA)
 	upit.exclude = [get_rid()]
-	var e = get_world_3d().direct_space_state.intersect_ray(upit).get("collider")
-	return str(e.get_parent().name) if e and e.is_in_group("neprijatelj") else ""
+	return get_world_3d().direct_space_state.intersect_ray(upit).get("collider")
 
 # Klijent: zahtev serveru ("" = skini cilj). Server odlučuje i uvek vrati trenutni cilj.
 func izaberi_cilj(id: String) -> void:

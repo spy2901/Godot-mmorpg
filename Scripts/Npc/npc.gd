@@ -15,6 +15,7 @@ var player_in_range: bool = false
 var current_player: Node3D = null
 
 func _ready() -> void:
+	add_to_group("npc") # klik mišem (Player._unhandled_input)
 	label.text = tr(npc_name)
 
 	prompt = Label3D.new()
@@ -32,8 +33,13 @@ func _ready() -> void:
 	area.body_entered.connect(_on_body_entered)
 	area.body_exited.connect(_on_body_exited)
 
+# Samo sopstveni lik (tuđi likovi na klijentu i svi likovi na serveru ne otvaraju razgovor)
+func _moj_lik(body: Node3D) -> bool:
+	return body.is_in_group("player") and (not multiplayer.has_multiplayer_peer()
+		or (body.is_multiplayer_authority() and not multiplayer.is_server()))
+
 func _on_body_entered(body: Node3D) -> void:
-	if body.is_in_group("player"):
+	if _moj_lik(body):
 		player_in_range = true
 		current_player = body
 		prompt.visible = true
@@ -43,15 +49,19 @@ func _on_body_entered(body: Node3D) -> void:
 			_update_prompt_text()
 
 func _on_body_exited(body: Node3D) -> void:
-	if body.is_in_group("player"):
+	if _moj_lik(body):
 		player_in_range = false
 		current_player = null
 		prompt.visible = false
 
 func _input(event: InputEvent) -> void:
 	if event.is_action_pressed("interact"):
-		if player_in_range and not DialogueUI._active and not MerchantUI._active:
-			interact()
+		klik()
+
+# F ili levi klik na NPC-a: razgovor ako je lik u dometu i nijedan prozor nije otvoren (van dometa: ništa)
+func klik() -> void:
+	if player_in_range and not DialogueUI._active and not MerchantUI._active:
+		interact()
 
 func _update_prompt_text() -> void:
 	match interaction_type:

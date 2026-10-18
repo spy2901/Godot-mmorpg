@@ -86,3 +86,21 @@ mesh = SubResource("BoxMesh_fs8mr")
 [node name="NPC" parent="." unique_id=1161211969 instance=ExtResource("4_h58xs")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.6940236, -10)
 interaction_type = 1
+
+[node name="QuestNPC_Lanac" parent="." instance=ExtResource("4_h58xs")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 2.6940236, -9)
+npc_name = "Village Elder"
+interaction_type = 2
+quest_id = "skupljac_oruzja"
+
+[node name="QuestNPC_Vestica" parent="." instance=ExtResource("4_h58xs")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2.6940236, -14)
+npc_name = "Old Witch"
+interaction_type = 2
+quest_id = "kosti_za_supu"
+
+[node name="QuestNPC_Kapetan" parent="." instance=ExtResource("4_h58xs")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -11, 2.6940236, 8)
+npc_name = "Guard Captain"
+interaction_type = 2
+quest_id = "q2"
