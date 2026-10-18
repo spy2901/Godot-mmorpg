@@ -25,10 +25,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 118 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 118 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 130 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 130 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -202,7 +202,29 @@ stub, napad 12), `napredak_level_up_poruka_u_hud_u` ("Level up! Lv.2"),
 `napredak_statistike_sa_servera_pun_hp_i_mana_sa_bonusom_opreme` (server 12/115+10, HP 125 i mana 110 puni, HUD max
 HP 125, ne osnovni 115), `napredak_vise_nivoa_odjednom` (730 XP -> Lv.4 30/700), `napredak_nivo_20_maksimum_xp_se_ne_skuplja`
 (Lv.20 0/0, traka "XP: MAX  |  Lv.20" puna, ubistvo na 20 ne menja ništa i ne pokazuje poruku); `korak=2` je
-ponovna prijava: `napredak_statistike_prezive_prijavu`.
+ponovna prijava: `napredak_statistike_prezive_prijavu`. Goblin je nivoa 1, pa ubistvo "1000000" na nivou 4 daje 50%
+(razlika -3), i dalje dovoljno za nivo 20.
+
+Sadržaj (uloga `quest`, prozor drajvera 1280x720; `korak=1` QuestLik i `korak=2` PosmatracLik istovremeno). Server
+drajver na početku proverava scenu i podatke: `neprijatelji_nivoi_i_spawn_tacke` (goblin 3 tačke nivoa 1-3, kostur 3
+nivoa 4-6, trol 2 nivoa 8-10 sa jednim nivoa 10; tačke ≥ 12 m od spawna igrača, aggro zone se ne preklapaju, quest
+NPC-ovi van aggro zona), `xp_po_razlici_nivoa_pragovi` (`Enemy.xp_mnozilac` za razliku -12..+6, 10-20 ubistava po
+nivou, minimum 1 XP), `najbolja_oprema_samo_trol_nivoa_10` (šest predmeta samo u troll.tscn sa `min_nivo` 10 i šansom
+1-3%; `baci_loot` 30000 puta za trola 10: 0.5-3.5% po predmetu, 0 za ostale vrste i nivoe), `iron_gloves_van_loota_i_prodavnice`,
+`questovi_dostupni_u_svetu` (svaki quest iz `/quests` dostupan lancem od nekog quest NPC-a u sceni; kill cilj se spawn-uje,
+fetch cilj pada sa spawn tačke ili je nagrada). Komande `$OUT/quest_cmd` ("ubij NIVO NAPADAČ [LIK_SA_ŠTETOM_0]",
+"spawn VRSTA ID NIVO"), potvrda `$OUT/quest_server`. QuestLik (nivo 1, dva mača, 1.1 m ispred Village Elder-a):
+`quest_klikom_na_npc_prihvat_i_predaja` (levi klik na NPC-a, klik na Accept, pa klik na NPC i Turn in: stub zlato +100,
+mačevi skinuti, 120 XP -> Lv.2 20/250), `quest_lanac_redosled` (goblin_killer pre skupljac_oruzja odbijen "Prethodni
+quest nije zavrsen", prva ponuda Weapon Collector, posle predaje Goblin Trouble), `loot_samo_napadacima` i
+`bez_stete_bez_kill_i_quest_credita` (PosmatracLik sa aktivnim goblin_killer udari 0, QuestLik ubije: samo QuestLik
+dobija loot, kill i progres, i na klijentu), `xp_po_razlici_nivoa_po_napadacu` (PosmatracLik nivo 12 ubija goblina
+nivoa 12+d; stub `xp_dnevnik`), `neprijatelji_statistike_skaliraju_sa_nivoom` (trol 10, kostur 5, goblin 3 na klijentu),
+`prodavnica_bez_iron_gloves_i_najbolje_opreme` (MerchantUI ih ne nudi, server odbija kupovinu). Svih 12 pada bez
+implementacije (provereno); posebno i bez klika na NPC-a, sa štetom 0 kao napadom i bez `min_nivo`.
+Stub: `/items`, `/quests`, `/quests/{id}`, `/quests/completed/{ime}`, `quest/accept|kill|turnin|abandon` (kao
+routers/players.py, lanac i redosled grešaka), `inventory/change` (loot). Bez implementacije (loot svima) RasporedLik i
+OpremaLik dobijaju tuđi loot pa padaju i njihove provere inventara.
 
 Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
 igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u

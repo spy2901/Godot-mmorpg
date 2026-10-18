@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # XP kriva i statistike po nivou iz pravog backend-a (napredak.py nema zavisnosti), ne kopija
 sys.path.insert(0, os.environ.get("BACKEND_DIR", os.path.expanduser("~/mmorpg-server")))
-from napredak import primeni_xp  # noqa: E402
+from napredak import primeni_xp, statistike_za_nivo  # noqa: E402
 
 ITEM_USE_KASNJENJE = 0.3  # s: da se dva istovremena zahteva preklope
 
@@ -30,7 +30,7 @@ def _prebroj(inv, eq):
 
 
 def _item(id, ime, tip, **x):
-    d = {"id": id, "ime": ime, "tip": tip, "ikonica": "?", "vrednost": 1, "stackable": 1,
+    d = {"id": id, "ime": ime, "tip": tip, "ikonica": "?", "vrednost": 1, "quest_item": 0, "stackable": 1,
          "max_stack": 20, "damage": 0, "armor": 0, "hp_bonus": 0, "slot": None, "hp_efekat": 0, "mana_efekat": 0, "cooldown_ms": 0}
     d.update(x)
     return d
@@ -51,8 +51,70 @@ ITEMS = {i["id"]: i for i in [
     _item("steel_shield", "Steel Shield", "armor", stackable=0, max_stack=1, armor=20, hp_bonus=10, slot="shield"),
     _item("dragon_scale_armor", "Dragon Scale Armor", "armor", stackable=0, max_stack=1, armor=35, hp_bonus=50,
           slot="chest"),
-    _item("iron_gloves", "Iron Gloves", "armor", stackable=0, max_stack=1, armor=5),
+    _item("iron_gloves", "Iron Gloves", "armor", stackable=0, max_stack=1, armor=5, vrednost=30),
+    # loot neprijatelja iz scena (kao u bazi); najbolja oprema je u bazi quest_item (van prodavnice)
+    *[_item(i, i.replace("_", " ").title(), "material") for i in (
+        "goblin_ear", "bronze_coin", "leather_scrap", "skeleton_rib", "iron_ore", "silver_coin", "troll_tooth",
+        "gold_coin", "steel_ingot")],
+    _item("iron_dagger", "Iron Dagger", "weapon", stackable=0, max_stack=1, damage=10, slot="weapon"),
+    _item("war_hammer", "War Hammer", "weapon", stackable=0, max_stack=1, damage=30, slot="weapon"),
+    _item("dragon_staff", "Dragon Staff", "weapon", stackable=0, max_stack=1, damage=50, slot="weapon", quest_item=1),
+    _item("golden_helmet", "Golden Helmet", "armor", stackable=0, max_stack=1, armor=15, hp_bonus=20, slot="head",
+          quest_item=1),
+    _item("shadow_cloak", "Shadow Cloak", "armor", stackable=0, max_stack=1, armor=8, hp_bonus=15, slot="chest",
+          quest_item=1),
+    _item("shadow_dagger", "Shadow Dagger", "weapon", stackable=0, max_stack=1, damage=40, slot="weapon", quest_item=1),
 ]}
+for _i in ("golden_sword", "dragon_scale_armor"):
+    ITEMS[_i]["quest_item"] = 1
+
+# Questovi kao u bazi (GET /quests sa Pi-ja, 2026-10-18); lanac skupljac_oruzja -> goblin_killer -> skeleton_hunter ->
+# troll_slayer. Rute accept/kill/turnin/abandon prate routers/players.py.
+def _q(id, naziv, tip, cilj, kolicina, xp, gold, item=None, sledeci=None, opis="..."):
+    return {"id": id, "naziv": naziv, "opis": opis, "tip": tip, "cilj": cilj, "kolicina": kolicina, "nagrada_gold": gold,
+            "nagrada_xp": xp, "nagrada_item": item, "sledeci_quest": sledeci}
+
+QUESTS = {q["id"]: q for q in [
+    _q("goblin_killer", "Goblin Trouble", "kill", "goblin", 5, 100, 50, sledeci="skeleton_hunter"),
+    _q("kosti_za_supu", "Bones for Soup", "fetch", "skeleton_rib", 5, 80, 40),
+    _q("q2", "Goblin Ears", "fetch", "goblin_ear", 5, 150, 80, item="iron_sword"),
+    _q("skeleton_hunter", "Rise of the Dead", "kill", "skeleton", 5, 150, 75, item="iron_sword", sledeci="troll_slayer"),
+    _q("skupljac_oruzja", "Weapon Collector", "fetch", "iron_sword", 2, 120, 100, sledeci="goblin_killer"),
+    _q("troll_slayer", "Troll Hunt", "kill", "troll", 3, 300, 150),
+]}
+ZAVRSENI = {}  # ime -> [quest_id]
+
+
+def _dodaj(inv, id, n):  # kao inventory_utils: stack do max_stack, nestackable po jedan
+    it = ITEMS[id]
+    for _ in range(n):
+        e = next((e for e in inv if e["id"] == id and it["stackable"] and e["kolicina"] < it["max_stack"]), None)
+        if e:
+            e["kolicina"] += 1
+        else:
+            inv.append({"slot": max([e["slot"] for e in inv], default=-1) + 1, "id": id, "kolicina": 1})
+
+
+def _ukloni(inv, id, n):
+    if sum(e["kolicina"] for e in inv if e["id"] == id) < n:
+        return False
+    for e in [e for e in inv if e["id"] == id]:
+        k = min(n, e["kolicina"])
+        e["kolicina"] -= k
+        n -= k
+        if e["kolicina"] == 0:
+            inv.remove(e)
+    return True
+
+
+def _upisi_xp(pl, delta):  # kao backend _upisi_xp
+    s = primeni_xp(pl, delta)
+    pl.update({k: s[k] for k in ("level", "xp", "max_xp", "max_hp", "max_mana", "napad_damage")})
+    if s["level_up"]:
+        pl["hp"] = s["max_hp"] + sum(ITEMS[i]["hp_bonus"] for i in pl["equipment"].values() if i in ITEMS)
+        pl["mana"] = s["max_mana"]
+    pl.setdefault("xp_dnevnik", []).append(delta)  # test: XP po ubistvu (razlika nivoa)
+    return s
 
 PLAYERS = {"TestLik": {
     "ime": "TestLik", "level": 1, "xp": 0, "max_xp": 100, "gold": 100, "napad_damage": 25,
@@ -116,9 +178,21 @@ PLAYERS["NapredakLik"] = dict(PLAYERS["TestLik"], ime="NapredakLik", napad_damag
                               pos_x=22, pos_y=1.16, pos_z=0, equipment={"shield": "steel_shield"}, inventory=[])
 # /xp/change samo za ove likove: ostali test likovi imaju veštački HP (1000, 100000) koji bi statistike iz nivoa
 # prepisale, a njihovi scenariji ubijaju neprijatelje (do sada je /xp/change bio nepoznata ruta)
-XP_LIKOVI = {"NapredakLik"}
+# QuestLik: quest NPC-ovi u svetu (uloga quest, korak 1): nivo 1, dva mača za skupljac_oruzja, 1.1 m ispred Village
+# Elder-a (-11, -9), u dometu njegove sfere, gleda ka njemu (-z, podrazumevano). PosmatracLik (korak 2): pored, sa aktivnim goblin_killer; ne napada (bez loot-a i
+# kill credit-a), pa nivo 12 za XP prema razlici nivoa (bez level-upa u toku testa).
+PLAYERS["QuestLik"] = dict(PLAYERS["TestLik"], ime="QuestLik", napad_damage=10, hp=100, max_hp=100, gold=100,
+                           pos_x=-11, pos_y=1.16, pos_z=-7.9, inventory=[{"slot": 0, "id": "iron_sword", "kolicina": 1},
+                                                                         {"slot": 1, "id": "iron_sword", "kolicina": 1}])
+_s12 = statistike_za_nivo(12)
+PLAYERS["PosmatracLik"] = dict(PLAYERS["TestLik"], ime="PosmatracLik", level=12, xp=0, max_xp=_s12["max_xp"],
+                               max_hp=_s12["max_hp"], hp=_s12["max_hp"], max_mana=_s12["max_mana"],
+                               mana=_s12["max_mana"], napad_damage=_s12["napad_damage"], pos_x=-14, pos_y=1.16,
+                               pos_z=-12, aktivni_quest_id="goblin_killer", quest_progres=0, inventory=[])
+XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik"}
 TOKENI = {"napredak-token": "NapredakLik", "oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
-          "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik"}
+          "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik", "quest-token": "QuestLik",
+          "posmatrac-token": "PosmatracLik"}
 LOCK = threading.Lock()
 
 
@@ -143,8 +217,16 @@ class H(BaseHTTPRequestHandler):
         if m := re.fullmatch(r"/items/([\w-]+)", p):
             it = ITEMS.get(m[1])
             return self._odgovor(it) if it else self._odgovor({"error": "Item not found"}, 404)
+        if p == "/items":
+            return self._odgovor({"items": list(ITEMS.values())})
+        if p == "/quests":
+            return self._odgovor({"quests": list(QUESTS.values())})
         if m := re.fullmatch(r"/quests/completed/([\w-]+)", p):
-            return self._odgovor({"completed": []})
+            with LOCK:
+                return self._odgovor({"completed": list(ZAVRSENI.get(m[1], []))})
+        if m := re.fullmatch(r"/quests/([\w-]+)", p):
+            q = QUESTS.get(m[1])
+            return self._odgovor(q) if q else self._odgovor({"error": "Quest not found"}, 404)
         if m := re.fullmatch(r"/players/([\w-]+)", p):
             with LOCK:
                 pl = PLAYERS.get(m[1])
@@ -181,13 +263,20 @@ class H(BaseHTTPRequestHandler):
             if int(d.get("delta", 0)) <= 0:
                 return self._odgovor({"error": "delta mora biti > 0"})
             with LOCK:  # kao backend _upisi_xp: kolone iz primeni_xp, na level-up pun HP (+ hp_bonus opreme) i mana
-                pl = PLAYERS[m[1]]
-                s = primeni_xp(pl, int(d["delta"]))
-                pl.update({k: s[k] for k in ("level", "xp", "max_xp", "max_hp", "max_mana", "napad_damage")})
-                if s["level_up"]:
-                    pl["hp"] = s["max_hp"] + sum(ITEMS[i]["hp_bonus"] for i in pl["equipment"].values() if i in ITEMS)
-                    pl["mana"] = s["max_mana"]
-                return self._odgovor({"status": "ok", **s})
+                return self._odgovor({"status": "ok", **_upisi_xp(PLAYERS[m[1]], int(d["delta"]))})
+        if m := re.fullmatch(r"/players/([\w-]+)/inventory/change", p):  # loot
+            with LOCK:
+                pl, id, n = PLAYERS.get(m[1]), str(d.get("item_id", "")), int(d.get("delta", 0))
+                if not pl or id not in ITEMS or n == 0:
+                    return self._odgovor({"error": "Player not found" if not pl else "Item not found"})
+                if n > 0:
+                    _dodaj(pl["inventory"], id, n)
+                elif not _ukloni(pl["inventory"], id, -n):
+                    return self._odgovor({"error": "Nedovoljno itema"})
+                return self._odgovor({"status": "ok", "inventory": pl["inventory"]})
+        if m := re.fullmatch(r"/players/([\w-]+)/quest/(accept|kill|abandon|turnin)", p):
+            with LOCK:
+                return self._odgovor(self._quest(PLAYERS.get(m[1]), m[1], m[2], d))
         if m := re.fullmatch(r"/players/([\w-]+)/action_bar", p):  # kao backend: 10 slotova, predmeti postoje
             sl = d.get("slotovi")
             if not isinstance(sl, list) or len(sl) != 10:
@@ -230,6 +319,49 @@ class H(BaseHTTPRequestHandler):
                                       "mana_efekat": it["mana_efekat"], "cooldown_ms": it["cooldown_ms"],
                                       "inventory": inv})
         self._nepoznato()
+
+    def _quest(self, pl, ime, akcija, d):
+        if not pl:
+            return {"error": "Player not found"}
+        zav = ZAVRSENI.setdefault(ime, [])
+        if akcija == "abandon":
+            pl["aktivni_quest_id"], pl["quest_progres"] = None, 0
+            return {"status": "ok"}
+        if akcija == "kill":
+            q = QUESTS.get(pl.get("aktivni_quest_id") or "")
+            if q and q["tip"] == "kill" and q["cilj"] == d.get("tip") and pl["quest_progres"] < q["kolicina"]:
+                pl["quest_progres"] += 1
+            pl.setdefault("kill_dnevnik", []).append(d.get("tip"))  # test: kill credit
+            return {"status": "ok", "quest_progres": pl["quest_progres"]}
+        q = QUESTS.get(str(d.get("quest_id", "")))
+        if akcija == "accept":
+            if not q:
+                return {"error": "Quest not found"}
+            if q["id"] in zav:
+                return {"error": "Quest vec zavrsen"}
+            if pl.get("aktivni_quest_id"):
+                return {"error": "Vec imas aktivan quest"}
+            if any(x["sledeci_quest"] == q["id"] and x["id"] not in zav for x in QUESTS.values()):
+                return {"error": "Prethodni quest nije zavrsen"}
+            pl["aktivni_quest_id"], pl["quest_progres"] = q["id"], 0
+            return {"status": "ok", "quest": q}
+        if not q or pl.get("aktivni_quest_id") != q["id"]:  # turnin
+            return {"error": "Quest nije aktivan"}
+        if q["id"] in zav:
+            return {"error": "Quest vec zavrsen"}
+        if q["tip"] == "kill" and pl["quest_progres"] < q["kolicina"]:
+            return {"error": "Quest nije zavrsen"}
+        if q["tip"] == "fetch" and not _ukloni(pl["inventory"], q["cilj"], q["kolicina"]):
+            return {"error": "Nedovoljno itema"}
+        if q["nagrada_item"]:
+            _dodaj(pl["inventory"], q["nagrada_item"], 1)
+        zav.append(q["id"])
+        pl["gold"] += q["nagrada_gold"]
+        pl["aktivni_quest_id"], pl["quest_progres"] = None, 0
+        s = _upisi_xp(pl, q["nagrada_xp"])
+        return {"status": "ok", "nagrada": {"naziv": q["naziv"], "gold": q["nagrada_gold"], "xp": q["nagrada_xp"],
+                "item": q["nagrada_item"], "sledeci_quest": q["sledeci_quest"]}, "quest": q, "gold": pl["gold"],
+                "inventory": pl["inventory"], "stats": s}
 
     def _nepoznato(self):
         print("[STUB] nepoznata ruta:", self.command, self.path, file=sys.stderr, flush=True)

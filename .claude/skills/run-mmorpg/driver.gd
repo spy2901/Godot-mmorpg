@@ -152,6 +152,10 @@ func _process(d):
 			elif uloga == "napredak": # korak=1 ubistva i level-up, korak=2 ponovna prijava
 				root.get_node("GameState").token = "napredak-token"
 				root.get_node("GameState").ime_igraca = "NapredakLik"
+			elif uloga == "quest": # korak=1 QuestLik (klikće NPC-a), korak=2 PosmatracLik (ne napada)
+				root.get_node("GameState").token = "quest-token" if _korak == 1 else "posmatrac-token"
+				root.get_node("GameState").ime_igraca = "QuestLik" if _korak == 1 else "PosmatracLik"
+				root.size = Vector2i(1280, 720)
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
 				root.size = Vector2i(1280, 720) # headless je 64x64: traka bi virila van prozora, a okvir cilja ležao preko nje
@@ -184,6 +188,7 @@ func _process(d):
 		"ai": return _uloga_ai()
 		"oprema": return _uloga_oprema()
 		"napredak": return _uloga_napredak()
+		"quest": return _uloga_quest()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -263,6 +268,7 @@ func _server(log: bool) -> bool:
 	_server_ai()
 	_server_oprema()
 	_server_napredak()
+	_server_quest()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -2085,3 +2091,324 @@ func _napredak_prijava(p, hud) -> void:
 		and _np_srv_ok(v20) and int(p.napad_damage) == 48 and hud.max_hp == 395 and hud.max_mana == 290,
 		"%s; stub lv %s napad %s max_hp %s max_mana %s" % [_np_opis(p, hud), st.get("level"), st.get("napad_damage"), st.get("max_hp"), st.get("max_mana")])
 	_np_kraj = true
+
+# ---------------------------------------------------------------- SADRŽAJ (uloga quest: QuestLik + PosmatracLik)
+# Server: provere scene i podataka (spawn tačke i nivoi, XP prema razlici nivoa, loot tabele) i komande iz
+# dir/quest_cmd ("br ubij <nivo> <napadač> [<lik sa štetom 0>]", "br spawn <vrsta> <id> <nivo>"), potvrda u dir/quest_server.
+# QuestLik: Village Elder klikom (prihvat, predaja, lanac), loot i kill credit samo napadaču, XP po razlici nivoa
+# (PosmatracLik nivo 12 ubija goblina zadatog nivoa), skalirane statistike na klijentu, prodavnica.
+
+const NAJBOLJA_OPREMA := ["dragon_scale_armor", "dragon_staff", "golden_helmet", "golden_sword", "shadow_cloak", "shadow_dagger"]
+const VRSTE := {"goblin": "res://Scenes/Enemies/goblin.tscn", "skeleton": "res://Scenes/Enemies/skeleton.tscn",
+	"troll": "res://Scenes/Enemies/troll.tscn"}
+const NIVOI_VRSTA := {"goblin": [1, 3], "skeleton": [4, 6], "troll": [8, 10]}
+const BROJ_TACAKA := {"goblin": 3, "skeleton": 3, "troll": 2}
+var _q_srv_provere := false
+var _q_cmd := ""
+
+func _telo_scene(vrsta: String, nivo := 1):
+	var w = load(VRSTE[vrsta]).instantiate()
+	var e = w.get_node("CharacterBody3D") # van stabla: grupa "neprijatelj" još ne postoji
+	e.nivo = nivo
+	return [w, e]
+
+# očekivani množilac (zadatak): +3 i više 120%, -2..+2 100%, -3..-4 50%, -5..-6 20%, -7 i niže 10%
+func _ocekivan_mnozilac(d: int) -> float:
+	return 1.2 if d >= 3 else 1.0 if d >= -2 else 0.5 if d >= -4 else 0.2 if d >= -6 else 0.1
+
+func _xp_kriva(n: int) -> int: return 25 * n * n + 75 * n
+
+func _server_quest() -> void:
+	if dir == "" or _world() == null: return
+	if not _q_srv_provere:
+		_q_srv_provere = true
+		_q_provere_scene()
+		_q_provere_xp()
+		_q_provere_loota()
+		_q_provere_questova()
+	var cmd := FileAccess.get_file_as_string(dir + "/quest_cmd")
+	if cmd != "" and cmd != _q_cmd:
+		_q_cmd = cmd
+		_q_izvrsi(cmd.split(" "))
+
+func _q_izvrsi(c: PackedStringArray) -> void:
+	print("[S] quest komanda: ", " ".join(c))
+	if c[1] == "spawn": # vrsta id nivo; u uglu, smiri ga _server
+		_world().goblin_spawner.spawn({"vrsta": c[2], "id": int(c[3]), "pos": Vector3(23, 2, -24 + 3 * (int(c[3]) % 3)), "nivo": int(c[4])})
+	elif c[1] == "ubij": # nivo napadač [lik sa štetom 0]
+		var id := 980 + int(c[0]) % 10
+		_world().goblin_spawner.spawn({"vrsta": "goblin", "id": id, "pos": Vector3(-13, 2, -15), "nivo": int(c[2])})
+		await _cekaj(func(): return _nep("goblin_%d" % id) != null, 3.0)
+		var e = _nep("goblin_%d" % id)
+		var nula = _ai_lik(c[4]) if c.size() > 4 else null
+		if e and nula:
+			e.primi_damage(0, nula.get_multiplayer_authority())
+		var nap = _ai_lik(c[3])
+		if e and nap:
+			e.primi_damage(100000, nap.get_multiplayer_authority())
+		await create_timer(1.5).timeout # loot, XP i kill credit idu backendu posle smrti
+	_pisi("quest_server", c[0])
+
+# spawn tačke scene: broj i nivoi po vrsti, daleko od spawna igrača, aggro zone se ne preklapaju, NPC-ovi van aggro zona
+func _q_provere_scene() -> void:
+	var tacke := get_nodes_in_group("spawn_tacka").filter(func(t): return t.get_parent() == _world())
+	var po_vrsti := {}
+	var nivoi_ok := true
+	var aggro := {}
+	for v in VRSTE:
+		var we = _telo_scene(v)
+		aggro[v] = float(we[1].aggro_range)
+		we[0].free()
+	for t in tacke:
+		po_vrsti[t.vrsta] = po_vrsti.get(t.vrsta, []) + [int(t.get("nivo") if t.get("nivo") != null else 1)]
+	for v in NIVOI_VRSTA:
+		var l: Array = po_vrsti.get(v, [])
+		nivoi_ok = nivoi_ok and l.size() == BROJ_TACAKA[v] and l.all(func(n): return n >= NIVOI_VRSTA[v][0] and n <= NIVOI_VRSTA[v][1])
+	nivoi_ok = nivoi_ok and po_vrsti.get("troll", []).has(10)
+	var preklapanja := []
+	for i in tacke.size():
+		var a = tacke[i]
+		if Vector2(a.position.x, a.position.z).length() < 12.0:
+			preklapanja.append("%s uz spawn igrača" % a.name)
+		for j in range(i + 1, tacke.size()):
+			var b = tacke[j]
+			if _xz(a.position, b.position) < aggro[a.vrsta] + aggro[b.vrsta]:
+				preklapanja.append("%s-%s" % [a.name, b.name])
+		for n in current_scene.get_children():
+			if n.is_in_group("npc") and _xz(a.position, n.position) < aggro[a.vrsta] + 1.0:
+				preklapanja.append("%s-%s" % [a.name, n.name])
+	_provera("neprijatelji_nivoi_i_spawn_tacke", nivoi_ok and preklapanja.is_empty(),
+		"tačke %s (očekivano broj %s, nivoi %s, trol 10), preklapanja %s" % [po_vrsti, BROJ_TACAKA, NIVOI_VRSTA, preklapanja])
+
+# XP: svi pragovi razlike nivoa (-12..+6) i minimum 10% (nikad 0); osnovni XP ~15 ubistava po nivou
+func _q_provere_xp() -> void:
+	var E = load("res://Scripts/Enemy.gd")
+	var ima: bool = E.get_script_method_list().any(func(m): return m.name == "xp_za_razliku")
+	var lose := []
+	if ima:
+		for d in range(-12, 7):
+			if not is_equal_approx(E.xp_mnozilac(d), _ocekivan_mnozilac(d)):
+				lose.append("%d: %s" % [d, E.xp_mnozilac(d)])
+		for n in range(1, 20):
+			var k: float = float(_xp_kriva(n)) / E.xp_za_nivo(n)
+			if k < 10.0 or k > 20.0:
+				lose.append("nivo %d: %.1f ubistava" % [n, k])
+		if E.xp_za_razliku(7, -11) != 1 or E.xp_za_razliku(1, -20) != 1:
+			lose.append("minimum: %d, %d" % [E.xp_za_razliku(7, -11), E.xp_za_razliku(1, -20)])
+	_provera("xp_po_razlici_nivoa_pragovi", ima and lose.is_empty(), "funkcije postoje=%s, odstupanja %s" % [ima, lose])
+
+# loot tabele: najbolja oprema samo od trola nivoa 10 (šansa 1-3%, i stvarno bacanje kockica), iron_gloves nigde
+func _q_provere_loota() -> void:
+	var lose := []
+	var ima := false
+	for v in VRSTE:
+		for n in range(1, 11):
+			var we = _telo_scene(v, n)
+			var e = we[1]
+			for l in e.loot_tabela:
+				if l["id"] == "iron_gloves":
+					lose.append("iron_gloves u %s" % v)
+				if l["id"] in NAJBOLJA_OPREMA and n == 1 and (v != "troll" or int(l.get("min_nivo", 0)) != 10 \
+						or float(l["sansa"]) < 1.0 or float(l["sansa"]) > 3.0):
+					lose.append("%s u %s: %s" % [l["id"], v, l])
+			if e.has_method("baci_loot") and n in [NIVOI_VRSTA[v][0], NIVOI_VRSTA[v][1], 9]:
+				ima = true
+				var br := {}
+				var puta := 30000 if v == "troll" and n == 10 else 5000
+				for _i in puta:
+					for id in e.baci_loot():
+						if id in NAJBOLJA_OPREMA: br[id] = br.get(id, 0) + 1
+				if v == "troll" and n == 10:
+					for id in NAJBOLJA_OPREMA:
+						var udeo: float = 100.0 * br.get(id, 0) / puta
+						if udeo < 0.5 or udeo > 3.5: lose.append("trol 10 %s %.2f%%" % [id, udeo])
+				elif not br.is_empty():
+					lose.append("%s nivo %d: %s" % [v, n, br])
+			we[0].free()
+	_provera("najbolja_oprema_samo_trol_nivoa_10", ima and lose.is_empty(), "baci_loot postoji=%s, odstupanja %s" % [ima, lose])
+	var van: Array = root.get_node("Config").get_script().get_script_constant_map().get("VAN_PRODAVNICE", [])
+	_provera("iron_gloves_van_loota_i_prodavnice", not lose.any(func(x): return str(x).begins_with("iron_gloves")) \
+		and van.has("iron_gloves"), "Config.VAN_PRODAVNICE=%s" % [van])
+
+# svaki quest dostupan od nekog NPC-a u svetu (lanac od quest_id), a ono što traži postoji u svetu: kill cilj je vrsta sa
+# spawn tačke, fetch cilj pada od takve vrste (do najvišeg nivoa tačke) ili je nagrada drugog questa
+func _q_provere_questova() -> void:
+	var r = await root.get_node("ApiManager")._zahtev("/quests")
+	var svi: Array = r.get("quests", []) if r is Dictionary else []
+	var po_id := {}
+	for q in svi: po_id[q.id] = q
+	var dostupni := {}
+	for n in current_scene.get_children():
+		if n.is_in_group("npc") and int(n.interaction_type) == 2:
+			var id: String = n.quest_id
+			while id != "" and po_id.has(id) and not dostupni.has(id):
+				dostupni[id] = n.npc_name
+				id = str(po_id[id].sledeci_quest) if po_id[id].sledeci_quest != null else ""
+	var vrste := {}
+	for t in get_nodes_in_group("spawn_tacka"):
+		if t.get_parent() == _world(): vrste[t.vrsta] = maxi(vrste.get(t.vrsta, 0), int(t.get("nivo") if t.get("nivo") != null else 1))
+	var izvori := {}
+	for v in vrste:
+		var we = _telo_scene(v, vrste[v])
+		for l in we[1].loot_tabela:
+			if float(l["sansa"]) > 0 and vrste[v] >= int(l.get("min_nivo", 0)): izvori[l["id"]] = v
+		we[0].free()
+	for q in svi:
+		if q.nagrada_item != null: izvori[q.nagrada_item] = "quest " + q.id
+	var lose := []
+	for q in svi:
+		if not dostupni.has(q.id): lose.append("%s bez NPC-a" % q.id)
+		if q.tip == "kill" and not vrste.has(q.cilj): lose.append("%s: %s se ne spawn-uje" % [q.id, q.cilj])
+		if q.tip == "fetch" and not izvori.has(q.cilj): lose.append("%s: %s nema izvor" % [q.id, q.cilj])
+	_provera("questovi_dostupni_u_svetu", svi.size() == 6 and lose.is_empty(), "questova %d, NPC %s, nedostaje %s" % [svi.size(), dostupni, lose])
+
+var _q_krenuo := false
+var _q_kraj := false
+var _q_br := 0
+
+func _uloga_quest() -> bool:
+	var p = _moj()
+	if p == null or not p.get_node("ui/Control")._ucitano:
+		return (_q_krenuo and p == null) or t > MAX_T
+	if not _q_krenuo:
+		_q_krenuo = true
+		if _korak == 1: _quest_scenario(p)
+		else: _posmatrac_scenario(p)
+	return _q_kraj or t > MAX_T
+
+func _q_cmd_posalji(cmd: String) -> void:
+	_q_br += 1
+	_pisi("quest_cmd", "%d %s" % [_q_br, cmd])
+	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/quest_server") == str(_q_br), 8.0)
+
+# PosmatracLik: ne napada; javlja svoj quest progres (klijent) dok QuestLik ne završi
+func _posmatrac_scenario(p) -> void:
+	_pisi("quest_posmatrac", "spreman")
+	var qm = root.get_node("QuestManager")
+	while not FileAccess.file_exists(dir + "/quest_gotov") and t < MAX_T:
+		_pisi("quest_posmatrac", "progres %d" % qm.progres)
+		await create_timer(0.2).timeout
+	_q_kraj = true
+
+func _dugme(tekst: String):
+	for b in root.get_node("DialogueUI").find_children("*", "Button", true, false):
+		if b.text == tr(tekst) and b.is_visible_in_tree(): return b
+	return null
+
+func _klikni(c) -> void:
+	if c: _klik(c.get_global_rect().get_center())
+
+func _q_dijalog() -> String: # "mod naslov" otvorenog dijaloga
+	var d = root.get_node("DialogueUI")
+	return "%s %s" % [d._mode, d._title_label.text] if d.is_open() and d._title_label else "-"
+
+func _quest_stub(ime: String) -> Dictionary:
+	return await root.get_node("ApiManager").get_player(ime)
+
+func _komada(pl: Dictionary, id: String) -> int:
+	var n := 0
+	for e in pl.get("inventory", []):
+		if e.id == id: n += int(e.kolicina)
+	return n
+
+func _quest_scenario(p) -> void:
+	var api = root.get_node("ApiManager")
+	var qm = root.get_node("QuestManager")
+	var npc = current_scene.get_node_or_null("QuestNPC_Lanac")
+	await _cekaj(func(): return npc != null and npc.player_in_range, 5.0)
+	var u_dometu: bool = npc != null and npc.player_in_range
+	# lanac: goblin_killer pre skupljac_oruzja server odbija; NPC nudi prvi nezavršen (skupljac_oruzja)
+	var preskok: Dictionary = await p.prihvati_quest_na_serveru("goblin_killer")
+	if npc: _klik(p.kamera.unproject_position(npc.global_position))
+	await _cekaj(func(): return _dugme("Accept") != null, 5.0)
+	var ponuda1 := _q_dijalog()
+	_klikni(_dugme("Accept"))
+	await _cekaj(func(): return str(qm.aktivni_quest.get("id", "")) == "skupljac_oruzja", 5.0)
+	var aktivan1 := str(qm.aktivni_quest.get("id", ""))
+	# predaja klikom: dva mača -> 100 zlata, 120 XP (nivo 2, 20/250); zatim ponuda sledećeg u lancu
+	await create_timer(0.5).timeout
+	if npc: _klik(p.kamera.unproject_position(npc.global_position))
+	await _cekaj(func(): return _dugme("Turn in") != null, 5.0)
+	var predaja := _q_dijalog()
+	_klikni(_dugme("Turn in"))
+	await _cekaj(func(): return _dugme("Accept") != null, 5.0)
+	var ponuda2 := _q_dijalog()
+	_klikni(_dugme("Accept"))
+	await _cekaj(func(): return str(qm.aktivni_quest.get("id", "")) == "goblin_killer", 5.0)
+	var st: Dictionary = await _quest_stub("QuestLik")
+	var zav: Array = await api.get_completed_quests("QuestLik")
+	_provera("quest_klikom_na_npc_prihvat_i_predaja", u_dometu and aktivan1 == "skupljac_oruzja" and predaja.begins_with("turnin")
+		and zav == ["skupljac_oruzja"] and int(st.get("gold", 0)) == 200 and _komada(st, "iron_sword") == 0
+		and [int(st.get("level", 0)), int(st.get("xp", 0))] == [2, 20] and p.get_node("ui/Control").level == 2,
+		"u dometu=%s, prihvaćen '%s', predaja '%s', završeni %s, stub zlato %s mačeva %d nivo %s xp %s, HUD Lv.%s" % [u_dometu,
+		aktivan1, predaja, zav, st.get("gold"), _komada(st, "iron_sword"), st.get("level"), st.get("xp"), p.get_node("ui/Control").level])
+	_provera("quest_lanac_redosled", not preskok.get("ok", true) and str(preskok.get("poruka", "")) == "Prethodni quest nije zavrsen"
+		and ponuda1 == "offer Weapon Collector" and ponuda2 == "offer Goblin Trouble" and str(qm.aktivni_quest.get("id", "")) == "goblin_killer",
+		"goblin_killer pre reda: %s; prva ponuda '%s', posle predaje '%s', aktivan '%s'" % [preskok, ponuda1, ponuda2, qm.aktivni_quest.get("id", "")])
+
+	# loot i kill/quest credit: QuestLik ubije goblina, PosmatracLik (pored, aktivan goblin_killer) samo udarac od 0
+	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/quest_posmatrac").begins_with("progres"), 10.0)
+	await _q_cmd_posalji("ubij 1 QuestLik PosmatracLik")
+	await _cekaj(func(): return qm.progres == 1, 3.0)
+	await create_timer(0.5).timeout
+	st = await _quest_stub("QuestLik")
+	var po: Dictionary = await _quest_stub("PosmatracLik")
+	var po_klijent := FileAccess.get_file_as_string(dir + "/quest_posmatrac")
+	_provera("loot_samo_napadacima", _komada(st, "goblin_ear") == 1 and po.get("inventory", []).is_empty(),
+		"QuestLik goblin_ear %d, PosmatracLik inventar %s" % [_komada(st, "goblin_ear"), po.get("inventory")])
+	_provera("bez_stete_bez_kill_i_quest_credita", st.get("kill_dnevnik", []) == ["goblin"] and int(st.get("quest_progres", -1)) == 1
+		and qm.progres == 1 and po.get("kill_dnevnik", []).is_empty() and int(po.get("quest_progres", -1)) == 0 and po_klijent == "progres 0",
+		"QuestLik kill %s progres %s/klijent %d; PosmatracLik kill %s progres %s, klijent '%s'" % [st.get("kill_dnevnik"),
+		st.get("quest_progres"), qm.progres, po.get("kill_dnevnik"), po.get("quest_progres"), po_klijent])
+
+	# XP prema razlici nivoa: PosmatracLik (nivo 12) ubija goblina nivoa 12 + d
+	var ocekivano := []
+	for d in [3, 8, 2, -2, -3, -4, -5, -6, -7, -11]:
+		await _q_cmd_posalji("ubij %d PosmatracLik" % (12 + d))
+		ocekivano.append(maxi(1, roundi(roundi(maxf(1, roundi(_xp_kriva(12 + d) / 15.0))) * _ocekivan_mnozilac(d))))
+	await create_timer(1.0).timeout
+	po = await _quest_stub("PosmatracLik")
+	var dobijeno: Array = po.get("xp_dnevnik", []).map(func(x): return int(x))
+	_provera("xp_po_razlici_nivoa_po_napadacu", dobijeno == ocekivano and int(po.get("level", 0)) == 12,
+		"XP po ubistvu %s, očekivano %s (d = +3, +8, +2, -2, -3, -4, -5, -6, -7, -11), nivo %s" % [dobijeno, ocekivano, po.get("level")])
+
+	# nivoi neprijatelja: server spawn-uje trola 10, kostura 5 i goblina 3; klijent vidi nivo i skalirane statistike
+	await _q_cmd_posalji("spawn troll 990 10")
+	await _q_cmd_posalji("spawn skeleton 991 5")
+	await _q_cmd_posalji("spawn goblin 992 3")
+	await _cekaj(func(): return _nep("troll_990") != null and _nep("skeleton_991") != null and _nep("goblin_992") != null, 5.0)
+	var opis := []
+	var stat_ok := true
+	for x in [["troll", 990, 10], ["skeleton", 991, 5], ["goblin", 992, 3]]:
+		var e = _nep("%s_%d" % [x[0], x[1]])
+		var we = _telo_scene(x[0])
+		var b = we[1]
+		var hp := roundi(b.max_hp * (1.0 + 0.15 * (x[2] - 1)))
+		var steta := roundi(b.napad_damage * (1.0 + 0.10 * (x[2] - 1)))
+		var xp := roundi(_xp_kriva(x[2]) / 15.0)
+		we[0].free()
+		var ok: bool = e != null and int(e.nivo) == x[2] and int(e.max_hp) == hp and int(e.hp) == hp and int(e.napad_damage) == steta \
+			and int(e.xp_nagrada) == xp
+		stat_ok = stat_ok and ok
+		opis.append("%s: %s" % [x[0], "nema" if e == null else "nivo %s hp %s/%s šteta %s xp %s (očekivano %d/%d/%d/%d)" % [e.nivo,
+			e.hp, e.max_hp, e.napad_damage, e.xp_nagrada, x[2], hp, steta, xp]])
+	_provera("neprijatelji_statistike_skaliraju_sa_nivoom", stat_ok, "; ".join(opis))
+
+	# prodavnica: iron_gloves i najbolja oprema se ne nude, a server odbija kupovinu
+	var mu = root.get_node("MerchantUI")
+	mu.open("Merchant")
+	await _cekaj(func(): return mu._list != null and mu._list.get_child_count() > 3, 5.0)
+	var ponuda := []
+	for row in mu._list.get_children():
+		var l = row.get_child(0) if row.get_child_count() > 0 else null
+		if l is Label: ponuda.append(l.text.trim_prefix("? "))
+	var zabranjeno := ["Iron Gloves", "Dragon Scale Armor", "Dragon Staff", "Golden Helmet", "Golden Sword", "Shadow Cloak", "Shadow Dagger"]
+	var nudi := zabranjeno.filter(func(x): return ponuda.has(x))
+	var kup: Dictionary = await p.kupi_na_serveru("iron_gloves")
+	mu._close()
+	st = await _quest_stub("QuestLik")
+	_provera("prodavnica_bez_iron_gloves_i_najbolje_opreme", ponuda.has("Iron Sword") and nudi.is_empty() and not kup.get("ok", true)
+		and _komada(st, "iron_gloves") == 0, "nudi zabranjeno %s (ponuda %d, Iron Sword=%s), kupovina iron_gloves %s" % [nudi, ponuda.size(),
+		ponuda.has("Iron Sword"), kup])
+	_pisi("quest_gotov", "1")
+	_q_kraj = true
