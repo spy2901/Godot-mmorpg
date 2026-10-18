@@ -42,6 +42,30 @@ loot_tabela = [{
 }, {
 "id": "war_hammer",
 "sansa": 5
+}, {
+"id": "dragon_scale_armor",
+"min_nivo": 10,
+"sansa": 1
+}, {
+"id": "dragon_staff",
+"min_nivo": 10,
+"sansa": 1
+}, {
+"id": "golden_helmet",
+"min_nivo": 10,
+"sansa": 1
+}, {
+"id": "golden_sword",
+"min_nivo": 10,
+"sansa": 1
+}, {
+"id": "shadow_cloak",
+"min_nivo": 10,
+"sansa": 1
+}, {
+"id": "shadow_dagger",
+"min_nivo": 10,
+"sansa": 1
 }]
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="CharacterBody3D" unique_id=747303743]

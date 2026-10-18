@@ -208,7 +208,7 @@ func _xz_daljina(a: Vector3, b: Vector3) -> float:
 func primi_damage(kolicina, napadac_id: int = 0):
 	if not _ja_sam_autoritet() or _mrtav:
 		return
-	if napadac_id != 0 and not napadaci.has(napadac_id):
+	if napadac_id != 0 and kolicina > 0 and not napadaci.has(napadac_id): # samo stvarna šteta: loot, XP i kill
 		napadaci.append(napadac_id)
 	if napadac_id != 0 and stanje != Stanje.POVRATAK: # šteta = pretnja 1:1; u povratku se ne računa
 		pretnja[napadac_id] = pretnja.get(napadac_id, 0.0) + kolicina
@@ -243,29 +243,31 @@ func primi_damage(kolicina, napadac_id: int = 0):
 func _obavesti_smrt() -> void:
 	pass  # samo "reliable" okidač da se despawn sigurno propagira i pre nego što queue_free stigne
 
-func _drop_fizicki_loot() -> void:
+# Kockice za jednog igrača. Stavka sa "min_nivo" pada samo od instance bar tog nivoa (najbolja oprema: trol nivoa 10).
+func baci_loot() -> Array:
+	var dobijeno: Array = []
 	for loot in loot_tabela:
-		var roll = randi() % 100 + 1
-		if roll <= loot["sansa"]:
-			var item_scena = load("res://Scenes/Items/item.tscn")
-			var item = item_scena.instantiate()
-			item.ime_itema = loot["id"]
-			get_tree().root.add_child(item)
-			item.global_position = global_position + Vector3(
-				randf_range(-1.0, 1.0),
-				0.5,
-				randf_range(-1.0, 1.0)
-			)
+		if nivo >= int(loot.get("min_nivo", 0)) and randf() * 100.0 < float(loot["sansa"]):
+			dobijeno.append(loot["id"])
+	return dobijeno
+
+func _drop_fizicki_loot() -> void:
+	for id in baci_loot():
+		var item_scena = load("res://Scenes/Items/item.tscn")
+		var item = item_scena.instantiate()
+		item.ime_itema = id
+		get_tree().root.add_child(item)
+		item.global_position = global_position + Vector3(
+			randf_range(-1.0, 1.0),
+			0.5,
+			randf_range(-1.0, 1.0)
+		)
 
 func _isplati_personal_loot() -> void:
 	if not multiplayer.is_server():
 		return
-	var peers: Array = multiplayer.get_peers()
-	if not peers.has(1) and not OS.has_feature("dedicated_server"):
-		peers.append(1)  # host igra i sam
-	print("[LOOT] ", ime, " umro, peers: ", peers)
-
-	for peer_id in peers:
+	print("[LOOT] ", ime, " umro, napadači: ", napadaci)
+	for peer_id in napadaci: # loot samo onima koji su naneli štetu (i host kad igra sam)
 		var igrac = _nadji_igraca_po_id(peer_id)
 		if igrac == null or not igrac.has_method("server_isplati_loot"):
 			print("[LOOT] Nema igrača za peer ", peer_id)
@@ -273,10 +275,7 @@ func _isplati_personal_loot() -> void:
 		if igrac.mrtav:
 			continue  # mrtav igrač ne dobija loot
 		# bacanje kockica je sinhrono, a upis u bazu preuzima igrač
-		var dobijeno: Array = []
-		for loot in loot_tabela:
-			if randi() % 100 + 1 <= loot["sansa"]:
-				dobijeno.append(loot["id"])
+		var dobijeno := baci_loot()
 		if not dobijeno.is_empty():
 			igrac.server_isplati_loot(dobijeno)
 
