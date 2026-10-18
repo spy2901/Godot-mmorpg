@@ -25,7 +25,7 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 108 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 108 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 118 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 118 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -74,7 +74,18 @@ Korak 1: `pocetni_raspored_upisan` (small, apple, mana u bar i u stub bazu), man
 (`promeni_action_slot`), `nevazeci_slot_item_odbijen` (slot 0, slot 11, nepostojeći item: server odgovori rasporedom,
 baza i bar nepromenjeni), apple potrošen, kupljen medium → `novi_predmet_prvi_prazan` (slot 3, ispražnjen
 premeštanjem, ne 4). Korak 2: `raspored_prezivi_prijavu` (isti raspored iz baze) i `potroseni_ne_pomera_slotove`
-(apple u slotu 2 sa 0, mana u 7). Svih 5 pada bez implementacije (provereno: stari bar posle prijave pomeri manu u slot 2).
+(apple u slotu 2 sa 0). Svih 5 pada bez implementacije (provereno: stari bar posle prijave pomeri manu u slot 2).
+Prevlačenje (korak 1 posle `novi_predmet_prvi_prazan`, pravi događaji miša kroz `Input.parse_input_event`: pritisak,
+pomeranje u 4 koraka sa frame-om između, otpuštanje; prozor drajvera 1280x720): `prevlacenje_slot_na_prazan` (mana 7 → 5,
+količine iste), `prevlacenje_zamena_atomska` (1 ↔ 3: od servera tačno jedan raspored, konačni), `esc_otkazuje_prevlacenje_ne_skida_cilj`
+i `tasteri_tokom_prevlacenja_ignorisani` (cilj `goblin_960` koga server drajver stvori na (-14, 3), 8 m od lika; Esc i taster 1 pre
+otpuštanja iznad slota 8), `otpustanje_van_prozora_otkazuje` (otpuštanje na (-50, -50)), `prevlacenje_van_trake_prazni_slot`
+(sredina ekrana; inventar isti), `esc_otkazuje_prevlacenje_iz_inventara`, `inventar_na_traku_raspored_inventara_isti` (mana
+iz inventara u slot 4; mač na slot 6 ne šalje ništa), `server_odbija_nepotrosni_i_tudji` (direktan zahtev: mač, i
+large_health_potion koji lik nema), `klik_na_slot_koristi_napitak`. Korak 2 proverava konačni raspored (medium, apple, small,
+mana). Provereno da pada: bez implementacije svih 11 (9 prevlačenja + 2 iz koraka 2); posebno zamena kroz dva zahteva
+(međustanje), server bez provere potrošnog/posedovanja, tasteri tokom prevlačenja, van prozora = uklanjanje, Esc bez
+obrade u traci i Esc bez obrade u inventaru.
 Stub: `POST /players/{ime}/action_bar` (10 slotova, predmeti postoje) i `POST /players/{ime}/shop/buy` (samo doda komad).
 
 Ciljanje (uloga `cilj`, lik `CiljLik` na (-20, 1.16, -20), okrenut ka +z; prozor drajvera 1280x720 jer je headless
@@ -262,7 +273,11 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
 - **Action bar: raspored se čuva po liku** (`players.action_bar`, backend migracija 005). Lik bez sačuvanog rasporeda
   dobije potrošne predmete po redosledu inventara i to se upiše. Posle toga se iz inventara ništa ne dopunjuje: novi
   predmet ide u prvi prazan slot samo kad ga server dodeli (loot, kupovina, nagrada), pa predmet dodat direktno u
-  bazi (npr. `inventory/change` mimo game servera) ne dobija slot. Nema drag-and-drop-a ni UI-ja za izmenu.
+  bazi (npr. `inventory/change` mimo game servera) ne dobija slot. Izmena rasporeda: prevlačenje mišem (`action_bar.gd`,
+  ručno, prag 10 px kao inventar; slot → slot = `zatrazi_zamenu_action_slotova`, van trake = prazan slot, inventar →
+  slot = `zatrazi_action_slot`), server prihvata samo potrošni predmet koji lik ima ili je već na traci.
+- **Headless prozor je 64x64**: UI koji se testira mišem (traka na dnu, okvir cilja na vrhu) se preklapa i viri van
+  prozora; uloga `raspored` (kao `cilj`) zato postavi `root.size = 1280x720`.
 - **Server radi bez `server_relay`** (`NetworkManager.hostuj`). Sa relay-em Godot pri odlasku peer-a A
   šalje `DEL_PEER` ostalima (kanal 0) pre nego što ENet ukloni peer-a B koji je otišao u istom paketu
   → `Unable to send packet on channel 0, max channels: 0` u journal-u (dva klijenta izađu zajedno).

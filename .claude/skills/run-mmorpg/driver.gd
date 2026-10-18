@@ -154,6 +154,7 @@ func _process(d):
 				root.get_node("GameState").ime_igraca = "NapredakLik"
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
+				root.size = Vector2i(1280, 720) # headless je 64x64: traka bi virila van prozora, a okvir cilja ležao preko nje
 				root.get_node("GameState").ime_igraca = "RasporedLik"
 			elif uloga == "mover" or uloga == "observer": # server objavljuje lika ostalima tek posle učitavanja
 				root.get_node("GameState").token = uloga + "-token"
@@ -258,6 +259,7 @@ func _server(log: bool) -> bool:
 					fh.store_string(st)
 					fh.close()
 	_server_cilj()
+	_server_raspored()
 	_server_ai()
 	_server_oprema()
 	_server_napredak()
@@ -855,11 +857,17 @@ func _prijava() -> bool:
 # ---------------------------------------------------------------- RASPORED ACTION BARA (RasporedLik, dva procesa)
 # Stub: small x2, mač, apple x1, mana x1, bez sačuvanog rasporeda. Korak 1: početni raspored iz inventara upisan u bazu,
 # mana premeštena u slot 7, nevažeći zahtevi odbijeni, apple potrošen (slot ostaje), kupljen medium (prvi prazan = 3).
+# Zatim prevlačenje mišem (pravi događaji pritisak/pomeranje/otpuštanje): slot -> prazan, zamena, Esc i van prozora
+# otkazuju, slot -> van trake, inventar -> slot; server odbija nepotrošni i predmet koji lik nema; klik koristi napitak.
 # Korak 2 (novi proces = ponovna prijava): isti raspored iz baze, apple i dalje u slotu 2 sa 0.
 
 const RASPORED_POCETNI := ["small_health_potion", "apple", "mana_potion", "", "", "", "", "", "", ""]
 const RASPORED_POMEREN := ["small_health_potion", "apple", "", "", "", "", "mana_potion", "", "", ""]
-const RASPORED_KRAJ := ["small_health_potion", "apple", "medium_health_potion", "", "", "", "mana_potion", "", "", ""]
+const RASPORED_KUPLJEN := ["small_health_potion", "apple", "medium_health_potion", "", "", "", "mana_potion", "", "", ""]
+const RASPORED_PREMESTEN := ["small_health_potion", "apple", "medium_health_potion", "", "mana_potion", "", "", "", "", ""]
+const RASPORED_ZAMENJEN := ["medium_health_potion", "apple", "small_health_potion", "", "mana_potion", "", "", "", "", ""]
+const RASPORED_UKLONJEN := ["medium_health_potion", "apple", "small_health_potion", "", "", "", "", "", "", ""]
+const RASPORED_KRAJ := ["medium_health_potion", "apple", "small_health_potion", "mana_potion", "", "", "", "", "", ""]
 var _raspored_krenuo := false
 var _raspored_kraj := false
 
@@ -893,8 +901,8 @@ func _raspored_scenario(p, bar) -> void:
 		await create_timer(0.5).timeout # količine stižu posle rasporeda
 		_provera("raspored_prezivi_prijavu", bar.slotovi == RASPORED_KRAJ, "bar=%s" % [bar.slotovi])
 		_provera("potroseni_ne_pomera_slotove", bar.slotovi[1] == "apple" and bar.kolicina(1) == 0 and bar._prikaz[1].kolicina.text == "0" \
-			and bar.slotovi[0] == "small_health_potion" and bar.slotovi[6] == "mana_potion",
-			"slot2 '%s' x%s, slot1 '%s', slot7 '%s'" % [bar.slotovi[1], bar._prikaz[1].kolicina.text, bar.slotovi[0], bar.slotovi[6]])
+			and bar.slotovi[0] == "medium_health_potion" and bar.slotovi[3] == "mana_potion",
+			"slot2 '%s' x%s, slot1 '%s', slot4 '%s'" % [bar.slotovi[1], bar._prikaz[1].kolicina.text, bar.slotovi[0], bar.slotovi[3]])
 		_raspored_kraj = true
 		return
 
@@ -924,10 +932,177 @@ func _raspored_scenario(p, bar) -> void:
 	# novi predmet ide u prvi prazan slot (3, ispražnjen premeštanjem)
 	var k: Dictionary = await p.kupi_na_serveru("medium_health_potion")
 	await _cekaj(func(): return bar.slotovi[2] != "" or bar.slotovi[3] != "", 5.0)
-	b = await _cekaj_bazu(RASPORED_KRAJ)
-	_provera("novi_predmet_prvi_prazan", bar.slotovi == RASPORED_KRAJ and b == RASPORED_KRAJ and bar.kolicina(1) == 0,
+	b = await _cekaj_bazu(RASPORED_KUPLJEN)
+	_provera("novi_predmet_prvi_prazan", bar.slotovi == RASPORED_KUPLJEN and b == RASPORED_KUPLJEN and bar.kolicina(1) == 0,
 		"apple=%s kupovina=%s bar=%s baza=%s" % [r.get("ok"), k.get("ok"), bar.slotovi, b])
+	await _prevlacenje_scenario(p, bar, prijema)
 	_raspored_kraj = true
+
+# ---------------------------------------------------------------- PREVLAČENJE (RasporedLik, korak 1, od RASPORED_KUPLJEN)
+
+# Server: sopstveni cilj za "Esc tokom prevlačenja ne skida cilj", 8 m od RasporedLik-a i daleko od ostalih likova
+# (goblini scenarija cilj su njegovi; driver ga smiri kao i ostale)
+var _raspored_goblin := false
+func _server_raspored() -> void:
+	if _raspored_goblin or _world() == null: return
+	_raspored_goblin = true
+	_world().goblin_spawner.spawn({"vrsta": "goblin", "id": RASPORED_CILJ_ID, "pos": Vector3(-14, 2, 3)})
+
+const RASPORED_CILJ_ID := 960
+
+func _mis_taster(poz: Vector2, dole: bool) -> void:
+	var e := InputEventMouseButton.new()
+	e.button_index = MOUSE_BUTTON_LEFT
+	e.pressed = dole
+	e.button_mask = MOUSE_BUTTON_MASK_LEFT if dole else 0
+	e.position = poz
+	e.global_position = poz
+	Input.parse_input_event(e)
+
+func _mis_pomeri(poz: Vector2) -> void:
+	var e := InputEventMouseMotion.new()
+	e.button_mask = MOUSE_BUTTON_MASK_LEFT
+	e.position = poz
+	e.global_position = poz
+	Input.parse_input_event(e)
+
+# pritisak na od, pomeranje u 4 koraka do kraj (frame između), pre_otpustanja (npr. Esc), otpuštanje na kraj
+func _prevuci(od: Vector2, kraj: Vector2, pre_otpustanja := Callable()) -> void:
+	_mis_taster(od, true)
+	await process_frame
+	for k in range(1, 5):
+		_mis_pomeri(od.lerp(kraj, k / 4.0))
+		await process_frame
+	if pre_otpustanja.is_valid():
+		await pre_otpustanja.call()
+	_mis_taster(kraj, false)
+	await process_frame
+
+func _slot_bara(bar, i: int) -> Vector2: # i od 0
+	return bar._prikaz[i].panel.get_global_rect().get_center()
+
+func _kolicine(p) -> Array:
+	return ["small_health_potion", "medium_health_potion", "mana_potion"].map(func(id): return int(p.kolicine.get(id, -1)))
+
+func _inv_raspored(inv) -> Array:
+	return inv.inventory_data.map(func(d): return "%s x%s" % [d.get("id", ""), d.get("kolicina", "")] if d is Dictionary else "")
+
+# server poslao raspored: ceka ocekivano, pa jos 0.5 s da stigne i eventualno međustanje/višak
+func _cekaj_raspored(bar, ocekivano: Array) -> void:
+	await _cekaj(func(): return bar.slotovi == ocekivano, 5.0)
+	await create_timer(0.5).timeout
+
+func _prevlacenje_scenario(p, bar, prijema: Array) -> void:
+	var rasporedi := [] # svaki raspored koji je server poslao
+	if p.has_signal("action_bar_promenjen"):
+		p.action_bar_promenjen.connect(func(): rasporedi.append(p.action_bar.duplicate()))
+	var kol0 := _kolicine(p) # [2, 1, 1]
+
+	# slot 7 (mana) -> prazan slot 5: premeštanje, napitak se ne koristi
+	await _prevuci(_slot_bara(bar, 6), _slot_bara(bar, 4))
+	await _cekaj_raspored(bar, RASPORED_PREMESTEN)
+	_provera("prevlacenje_slot_na_prazan", bar.slotovi == RASPORED_PREMESTEN and _kolicine(p) == kol0,
+		"bar=%s kolicine %s -> %s" % [bar.slotovi, kol0, _kolicine(p)])
+
+	# slot 1 (small) -> zauzet slot 3 (medium): zamena jednim zahtevom, tačno jedan raspored od servera (bez međustanja)
+	rasporedi.clear()
+	await _prevuci(_slot_bara(bar, 0), _slot_bara(bar, 2))
+	await _cekaj_raspored(bar, RASPORED_ZAMENJEN)
+	_provera("prevlacenje_zamena_atomska", bar.slotovi == RASPORED_ZAMENJEN and rasporedi == [RASPORED_ZAMENJEN] and _kolicine(p) == kol0,
+		"bar=%s rasporedi od servera=%s kolicine %s -> %s" % [bar.slotovi, rasporedi, kol0, _kolicine(p)])
+
+	# Esc tokom prevlačenja (slot 5 -> slot 8): otkazano, ništa ne ide serveru, cilj ostaje; taster 1 (medium) tokom
+	# prevlačenja se ignoriše
+	var cilj := "goblin_%d" % RASPORED_CILJ_ID
+	p.izaberi_cilj(cilj) # priprema (nije ono što se testira)
+	await _cekaj(func(): return p.cilj_id == cilj, 3.0)
+	var cilj_pre: String = p.cilj_id
+	var n0: int = prijema[0]
+	var duh := [false]
+	await _prevuci(_slot_bara(bar, 4), _slot_bara(bar, 7), func():
+		duh[0] = bar.get("_duh") != null
+		_pritisni(KEY_1)
+		_pritisni(KEY_ESCAPE)
+		await process_frame)
+	await create_timer(0.8).timeout
+	_provera("esc_otkazuje_prevlacenje_ne_skida_cilj", duh[0] and cilj_pre != "" and p.cilj_id == cilj_pre
+		and bar.slotovi == RASPORED_ZAMENJEN and prijema[0] == n0,
+		"prevlacenje pocelo=%s cilj '%s' -> '%s', bar=%s, rasporeda od servera %d" % [duh[0], cilj_pre, p.cilj_id, bar.slotovi, prijema[0] - n0])
+	_provera("tasteri_tokom_prevlacenja_ignorisani", duh[0] and _kolicine(p) == kol0,
+		"prevlacenje pocelo=%s kolicine %s -> %s" % [duh[0], kol0, _kolicine(p)])
+
+	# otpuštanje van prozora (slot 5 -> slot 8 -> van): otkazano, ništa ne ide serveru
+	n0 = prijema[0]
+	duh[0] = false
+	var van := Vector2(-50, -50)
+	_mis_taster(_slot_bara(bar, 4), true)
+	await process_frame
+	_mis_pomeri(_slot_bara(bar, 7))
+	await process_frame
+	_mis_pomeri(van)
+	await process_frame
+	duh[0] = bar.get("_duh") != null
+	_mis_taster(van, false)
+	await create_timer(0.8).timeout
+	_provera("otpustanje_van_prozora_otkazuje", duh[0] and bar.slotovi == RASPORED_ZAMENJEN and prijema[0] == n0,
+		"prevlacenje pocelo=%s bar=%s rasporeda od servera %d" % [duh[0], bar.slotovi, prijema[0] - n0])
+
+	# slot 5 (mana) -> van trake (sredina ekrana): slot se prazni, predmet ostaje u inventaru
+	var inv = p.get_node("ui/InventoryUI")
+	var inv0 := _inv_raspored(inv)
+	await _prevuci(_slot_bara(bar, 4), root.get_visible_rect().size / 2)
+	await _cekaj_raspored(bar, RASPORED_UKLONJEN)
+	_provera("prevlacenje_van_trake_prazni_slot", bar.slotovi == RASPORED_UKLONJEN and _inv_raspored(inv) == inv0
+		and inv.prebroj_item("mana_potion") == 1 and _kolicine(p) == kol0,
+		"bar=%s mana u inventaru %d, inventar isti=%s" % [bar.slotovi, inv.prebroj_item("mana_potion"), _inv_raspored(inv) == inv0])
+
+	# inventar -> slot 4 (mana) i inventar (mač, nije potrošni) -> slot 6: raspored inventara se ne menja
+	inv.toggle()
+	await process_frame
+	await process_frame
+	# Esc tokom prevlačenja iz inventara na slot 6: otkazano, ništa ne ide serveru, cilj ostaje
+	n0 = prijema[0]
+	cilj_pre = p.cilj_id
+	duh[0] = false
+	await _prevuci(inv.slots[_inv_index(inv, "mana_potion")].get_global_rect().get_center(), _slot_bara(bar, 5), func():
+		duh[0] = inv.is_dragging
+		_pritisni(KEY_ESCAPE)
+		await process_frame)
+	await create_timer(0.8).timeout
+	_provera("esc_otkazuje_prevlacenje_iz_inventara", duh[0] and cilj_pre != "" and p.cilj_id == cilj_pre
+		and bar.slotovi == RASPORED_UKLONJEN and prijema[0] == n0 and _inv_raspored(inv) == inv0,
+		"prevlacenje pocelo=%s cilj '%s' -> '%s', bar=%s, rasporeda od servera %d" % [duh[0], cilj_pre, p.cilj_id, bar.slotovi, prijema[0] - n0])
+	n0 = prijema[0]
+	await _prevuci(inv.slots[_inv_index(inv, "mana_potion")].get_global_rect().get_center(), _slot_bara(bar, 3))
+	await _cekaj_raspored(bar, RASPORED_KRAJ)
+	var posle_mane: int = prijema[0] - n0
+	await _prevuci(inv.slots[_inv_index(inv, "iron_sword")].get_global_rect().get_center(), _slot_bara(bar, 5))
+	await create_timer(0.8).timeout
+	_provera("inventar_na_traku_raspored_inventara_isti", bar.slotovi == RASPORED_KRAJ and _inv_raspored(inv) == inv0
+		and posle_mane == 1 and prijema[0] - n0 == 1,
+		"bar=%s, rasporeda od servera %d (mana) / %d (+mac), inventar isti=%s" % [bar.slotovi, posle_mane, prijema[0] - n0, _inv_raspored(inv) == inv0])
+	inv.toggle()
+
+	# server odbija predmet koji nije potrošni (mač, lik ga ima) i potrošni koji lik nema i nije na traci; zahtev ide
+	# direktno jer ga klijent mišem ne šalje
+	n0 = prijema[0]
+	if p.has_method("promeni_action_slot"):
+		p.promeni_action_slot(6, "iron_sword")
+		p.promeni_action_slot(6, "large_health_potion")
+	await _cekaj(func(): return prijema[0] >= n0 + 2, 5.0)
+	await create_timer(0.5).timeout
+	var b: Array = await _raspored_baza()
+	_provera("server_odbija_nepotrosni_i_tudji", prijema[0] == n0 + 2 and bar.slotovi == RASPORED_KRAJ and b == RASPORED_KRAJ,
+		"odgovora %d/2, bar=%s baza=%s" % [prijema[0] - n0, bar.slotovi, b])
+
+	# klik (bez pomeranja) na slot 3 (small x2) koristi napitak
+	_mis_taster(_slot_bara(bar, 2), true)
+	await process_frame
+	_mis_taster(_slot_bara(bar, 2), false)
+	await _cekaj(func(): return bar.kolicina(2) == 1, 3.0)
+	_provera("klik_na_slot_koristi_napitak", bar.slotovi[2] == "small_health_potion" and bar.kolicina(2) == 1,
+		"slot3 '%s' x%d" % [bar.slotovi[2], bar.kolicina(2)])
+	await _cekaj_bazu(RASPORED_KRAJ)
 
 # ---------------------------------------------------------------- CILJ (CiljLik na (-20, -20), gleda ka +z)
 # Server drajver izvršava komande iz dir/cilj_cmd ("br komanda ime [x z | n]") nad test neprijateljima
