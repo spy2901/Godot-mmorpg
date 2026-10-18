@@ -863,9 +863,11 @@ func zatrazi_action_slot(slot: int, item_id: String) -> void:
 	if not multiplayer.is_server() or not _posiljalac_je_vlasnik() or not _stanje_ucitano:
 		return
 	var ok := slot >= 1 and slot <= BROJ_SLOTOVA_BARA
-	if ok and item_id != "": # predmet mora da postoji (isti id i u odgovoru: id nije deo neke druge putanje)
+	if ok and item_id != "": # predmet postoji (isti id i u odgovoru: id nije deo neke druge putanje), potrošni je i lik ga
+		# ima ili je već na traci (premeštanje predmeta sa 0 komada)
 		var item: Dictionary = await ApiManager.get_item(item_id)
-		ok = str(item.get("id", "")) == item_id
+		ok = str(item.get("id", "")) == item_id and str(item.get("tip", "")) == "consumable" \
+			and (posjeduje(item_id) or action_bar.has(item_id))
 	if not ok:
 		print("[ACTION BAR] Odbijeno za ", ime_lika, ": slot ", slot, " = '", item_id, "'")
 		_javi_action_bar()
@@ -874,6 +876,26 @@ func zatrazi_action_slot(slot: int, item_id: String) -> void:
 	if item_id != "" and staro >= 0:
 		action_bar[staro] = ""
 	action_bar[slot - 1] = item_id
+	_ab_sacuvaj()
+
+# Klijent: zamena mesta dva slota (1-10; prazan slot = premeštanje). Jedan zahtev, pa i jedan raspored nazad (bez međustanja).
+func zameni_action_slotove(a: int, b: int) -> void:
+	if multiplayer.is_server():
+		zatrazi_zamenu_action_slotova(a, b)
+	else:
+		zatrazi_zamenu_action_slotova.rpc_id(1, a, b)
+
+@rpc("any_peer", "reliable")
+func zatrazi_zamenu_action_slotova(a: int, b: int) -> void:
+	if not multiplayer.is_server() or not _posiljalac_je_vlasnik() or not _stanje_ucitano:
+		return
+	if a < 1 or a > BROJ_SLOTOVA_BARA or b < 1 or b > BROJ_SLOTOVA_BARA or a == b:
+		print("[ACTION BAR] Zamena odbijena za ", ime_lika, ": ", a, " <-> ", b)
+		_javi_action_bar()
+		return
+	var x: String = action_bar[a - 1]
+	action_bar[a - 1] = action_bar[b - 1]
+	action_bar[b - 1] = x
 	_ab_sacuvaj()
 
 # --- klijent (zovu UI-ji)
