@@ -29,6 +29,41 @@ def _prebroj(inv, eq):
     return c
 
 
+# kao backend routers/players.py _validan_raspored: int slot (0-23, bez ponavljanja) i kolicina >= 1, slotovi opreme
+SLOTOVI_OPREME = {"head", "chest", "legs", "boots", "weapon", "shield"}
+
+
+def _je_int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _validan_raspored(inv, eq, db_inv, db_eq):
+    return _razlog_odbijanja(inv, eq, db_inv, db_eq) == ""
+
+
+# "" = prihvaćen; "format" = tipovi/slotovi (kvar game servera), "broj komada" = raspored se mimoišao sa izmenom
+# na serveru (loot, kupovina, napitak), backend tada namerno zadrži stanje iz baze
+def _razlog_odbijanja(inv, eq, db_inv, db_eq):
+    los = _los_format(inv, eq)
+    if los:
+        return f"format: {los}"
+    return "" if _prebroj(inv, eq) == _prebroj(db_inv, db_eq) else "broj komada"
+
+
+def _los_format(inv, eq):  # "" = ispravan, inače prvi neispravan deo
+    if not isinstance(inv, list) or not isinstance(eq, dict):
+        return "tip inventory/equipment"
+    slotovi = set()
+    for e in inv:
+        if not isinstance(e, dict) or not isinstance(e.get("id"), str) \
+                or not _je_int(e.get("kolicina")) or e["kolicina"] < 1 \
+                or not _je_int(e.get("slot")) or not 0 <= e["slot"] < 24 or e["slot"] in slotovi:
+            return json.dumps(e)
+        slotovi.add(e["slot"])
+    los = [k for k, v in eq.items() if k not in SLOTOVI_OPREME or not (v is None or isinstance(v, str))]
+    return f"equipment {los}" if los else ""
+
+
 def _item(id, ime, tip, **x):
     d = {"id": id, "ime": ime, "tip": tip, "ikonica": "?", "vrednost": 1, "quest_item": 0, "stackable": 1,
          "max_stack": 20, "damage": 0, "armor": 0, "hp_bonus": 0, "slot": None, "hp_efekat": 0, "mana_efekat": 0, "cooldown_ms": 0}
@@ -276,9 +311,12 @@ class H(BaseHTTPRequestHandler):
                 for k in ("hp", "mana", "pos_x", "pos_y", "pos_z"):
                     if k in d:
                         pl[k] = d[k]
-                if "inventory" in d and _prebroj(d["inventory"], d.get("equipment", {})) == \
-                        _prebroj(pl.get("inventory", []), pl.get("equipment", {})):
+                razlog = _razlog_odbijanja(d.get("inventory"), d.get("equipment", {}), pl.get("inventory", []), pl.get("equipment", {}))
+                if not razlog:
                     pl["inventory"], pl["equipment"] = d["inventory"], d.get("equipment", {})
+                else:  # isto upozorenje kao backend, sa razlogom (run.sh: save_raspored_prihvacen)
+                    print(f"[STUB] save {m[1]!r}: neispravan inventory/equipment ({razlog}), zadrzano stanje iz baze",
+                          file=sys.stderr, flush=True)
             return self._odgovor({"status": "ok"})
         if (m := re.fullmatch(r"/players/([\w-]+)/xp/change", p)) and m[1] in XP_LIKOVI:
             if int(d.get("delta", 0)) <= 0:

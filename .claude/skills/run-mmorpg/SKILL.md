@@ -55,6 +55,11 @@ Deo B (predikcija + reconciliation), nastavak iste vremenske ose:
   Zastoj **servera** (frame > `ZASTOJ_PRAG`, meri ga server drajver) opravdava rupu u istom prozoru za svakog lika:
   posle zastoja servera rupe dobiju svi povezani likovi u istom trenutku (pod opterećenjem: server frame 134 ms, rupe
   9-10 kod četiri peer-a u t=12.23). Rupa bez ikakvog zastoja i dalje je FAIL (mutacija "svaki 97. unos izgubljen" pada).
+- `save_raspored_prihvacen` (run.sh, iz stub.log): stub validira `/save` kao backend (`_validan_raspored`: int slot
+  0-23 bez ponavljanja i kolicina ≥ 1) i ispiše isto upozorenje sa razlogom. FAIL ako je neki raspored odbijen zbog
+  **formata**; odbijanje zbog broja komada je namerno (raspored se mimoišao sa izmenom na serveru). Uzrok koji hvata:
+  JSON u Godot-u čita brojeve kao float (3 -> 3.0), pa je lik koji ne promeni inventar (raspored iz baze) ili posle
+  napitka (inventar iz odgovora backenda) slao 3.0 i gubio raspored i opremu (na Pi-ju: agent_test2 u svakom /test-pi).
 - Fajlovi stanja između procesa (`_pisi`) pišu se atomski (`.tmp` pa `rename`): ranije je čitanje u trenutku kad
   pisac isprazni fajl (WRITE) vraćalo "" i sva polja prazna (npr. `ai_posmatrac_ne_vidi_pretnju`: Ai2Lik "cilj ''").
 - Server prima najviše `MAX_PLAYERS` (8) peer-a, a run.sh pokreće ~15 klijenata: klijent koji dobije

@@ -357,7 +357,9 @@ func _ucitaj_statistike_sa_servera(ime: String) -> void:
 		var id := str(eq[slot])
 		if id != "":
 			vlasnistvo[id] = vlasnistvo.get(id, 0) + 1
-	var inventar: Array = p.get("inventory", []).duplicate(true)
+	# JSON iz baze daje brojeve kao float (3 -> 3.0), a /save prihvata samo int slot i kolicina: lik koji tokom sesije
+	# ne promeni inventar (klijent ne pošalje raspored) bi pri odjavi poslao 3.0 i backend bi odbio raspored
+	var inventar: Array = p.get("inventory", []).map(_int_unos)
 	# oprema iz baze važi samo ako predmet ide baš u taj slot; ostalo se vraća u inventar
 	oprema.clear()
 	for slot in eq:
@@ -751,6 +753,13 @@ func _inv_uzmi(inventar: Array, item_id: String) -> void:
 			return
 
 # Skinut predmet ide u prvi slobodan slot inventara.
+func _int_unos(e) -> Dictionary:
+	var u: Dictionary = e.duplicate() if e is Dictionary else {}
+	for k in ["slot", "kolicina"]:
+		if u.has(k) and (u[k] is float or u[k] is int):
+			u[k] = int(u[k])
+	return u
+
 func _inv_vrati(inventar: Array, item_id: String) -> void:
 	var zauzeti := inventar.map(func(e): return int(e.get("slot", -1)))
 	for i in MAX_SLOTOVA_INVENTARA:
@@ -1120,7 +1129,7 @@ func _iskoristi_item(item_id: String) -> Dictionary:
 	# raspored za snimanje prati bazu, da save sa starim brojem komada ne bude odbijen
 	var s: Dictionary = _ucitano_stanje if _poslednje_stanje.is_empty() else _poslednje_stanje
 	if r.has("inventory") and not s.is_empty():
-		s["inventory"] = r["inventory"]
+		s["inventory"] = r["inventory"].map(_int_unos) # JSON: brojevi kao float, /save traži int
 	if not mrtav: # poginuo dok smo čekali backend: komad je potrošen, efekta nema
 		hp = mini(hp + hp_e, max_hp)
 		mana = mini(mana + mana_e, max_mana)

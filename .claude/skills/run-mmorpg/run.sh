@@ -137,6 +137,14 @@ elif grep -q "Attempt to call RPC with unknown peer ID" "$OUT/server.log"; then
 else
   echo "PASS server_ne_salje_hp_odjavljenom"
 fi | tee -a "$OUT/run.log"
+# /save: game server šalje raspored koji backend prihvata (int slot i kolicina), i za lik koji tokom sesije ne menja
+# inventar (tada ide raspored iz baze; JSON ga čita kao float). Stub validira kao backend i upozori kao on.
+# (Odbijanje zbog broja komada je namerno: raspored se mimoišao sa izmenom na serveru, ostaje stanje iz baze.)
+if grep -q "neispravan inventory/equipment (format" "$OUT/stub.log"; then
+  echo "FAIL save_raspored_prihvacen  $(grep -c "(format" "$OUT/stub.log") odbijenih zbog formata; likovi: $(grep "(format" "$OUT/stub.log" | grep -o "save '[A-Za-z0-9]*'" | sort -u | tr '\n' ' ')"
+else
+  echo "PASS save_raspored_prihvacen  $(grep -c 'POST /players/[A-Za-z0-9]*/save' "$OUT/stub.log") snimanja, nijedno zbog formata ($(grep -c "(broj komada)" "$OUT/stub.log") zbog broja komada)"
+fi | tee -a "$OUT/run.log"
 # tekstovi (bez Godot-a): poruke backenda u translations/teksti.csv, bez srpskog u prikazu
 python3 .claude/skills/run-mmorpg/proveri_tekstove.py > "$OUT/tekstovi.log" 2>&1; cat "$OUT/tekstovi.log"
 grep -h 'SCRIPT ERROR' "$OUT"/*.log | sort | uniq -c
@@ -151,4 +159,4 @@ if [ -z "${RUN_PONOVLJEN:-}" ] && grep -qh '^FAIL seq_bez_rupa_bez_gubitka' "$OU
   RUN_PONOVLJEN=1 exec "$SKRIPTA" "$@"
 fi
 # WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 108
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 140 ]
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 141 ]
