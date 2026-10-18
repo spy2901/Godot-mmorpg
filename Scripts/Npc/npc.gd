@@ -114,6 +114,13 @@ func _razresi_lanac(start_id: String) -> String:
 		guard += 1
 	return id
 
+# Kao backend (quest/accept): svaki quest kome je ovaj sledeci_quest mora biti završen
+func _prethodnici_zavrseni(id: String) -> bool:
+	for q in await ApiManager.get_all_quests():
+		if _safe_str(q.get("sledeci_quest")) == id and not QuestManager.je_quest_vec_zavrsen(str(q.get("id", ""))):
+			return false
+	return true
+
 # Pomeri quest_id na prvi nezavrsen quest u lancu (ako takav postoji)
 func _sinhronizuj_lanac() -> void:
 	if quest_id == "":
@@ -159,9 +166,9 @@ func _handle_quest_giver() -> void:
 		DialogueUI.open(npc_name, ["You've already helped me with everything. Thank you."], portret)
 		return
 
-	# Ponudi quest
+	# Ponudi quest (quest sa više prethodnika, npr. kraj_utvara posle senke_u_sumi i q2, tek kad su svi završeni)
 	var quest: Dictionary = await ApiManager.get_quest(quest_id)
-	if quest.is_empty() or quest.has("error"):
+	if quest.is_empty() or quest.has("error") or not await _prethodnici_zavrseni(quest_id):
 		DialogueUI.open(npc_name, ["I have no quest for you right now."], portret)
 		return
 
@@ -184,7 +191,7 @@ func _ponudi_sledeci(zavrsen_quest: Dictionary) -> void:
 	if sledeci_id == "":
 		return
 	sledeci_id = await _razresi_lanac(sledeci_id)
-	if sledeci_id == "":
+	if sledeci_id == "" or not await _prethodnici_zavrseni(sledeci_id):
 		return
 	quest_id = sledeci_id
 	var sledeci: Dictionary = await ApiManager.get_quest(sledeci_id)

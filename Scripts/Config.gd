@@ -9,9 +9,11 @@ var SERVER_KEY := ""
 const CONFIG_PATH = "user://config.cfg"
 
 # Predmeti koje prodavnica ne nudi ni ne prodaje (pored quest predmeta i predmeta bez cene iz baze): iron_gloves nema
-# slot, a najbolja oprema pada samo od trola nivoa 10. Proveravaju i MerchantUI i game server (zatrazi_kupovinu).
+# slot, najbolja oprema pada samo od trola nivoa 10, a T3/T4 oprema zone 2 samo od njenih neprijatelja (min_nivo) ili
+# kao nagrada questa. Proveravaju i MerchantUI i game server (zatrazi_kupovinu).
 const VAN_PRODAVNICE := ["iron_gloves", "dragon_scale_armor", "dragon_staff", "golden_helmet", "golden_sword",
-	"shadow_cloak", "shadow_dagger"]
+	"shadow_cloak", "shadow_dagger",
+	"steel_greaves", "steel_sabatons", "tower_shield", "dragonscale_leggings", "shadow_boots", "dragon_shield"]
 
 func _ready() -> void:
 	_ucitaj_iz_fajla()
