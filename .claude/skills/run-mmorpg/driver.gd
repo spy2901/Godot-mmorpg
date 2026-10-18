@@ -2123,6 +2123,7 @@ func _server_quest() -> void:
 	if not _q_srv_provere:
 		_q_srv_provere = true
 		_q_provere_scene()
+		_q_provera_liste()
 		_q_provere_xp()
 		_q_provere_loota()
 		_q_provere_questova()
@@ -2179,6 +2180,30 @@ func _q_provere_scene() -> void:
 				preklapanja.append("%s-%s" % [a.name, n.name])
 	_provera("neprijatelji_nivoi_i_spawn_tacke", nivoi_ok and preklapanja.is_empty(),
 		"tačke %s (očekivano broj %s, nivoi %s, trol 10), preklapanja %s" % [po_vrsti, BROJ_TACAKA, NIVOI_VRSTA, preklapanja])
+
+# jedna lista vrsta (spawn_point.VRSTE): spawner je koristi, enum u editoru se gradi iz nje, svaka vrsta ima scenu sa
+# Enemy skriptom, ime (ime.to_lower() = ključ, kill questovi) i red u teksti.csv
+func _q_provera_liste() -> void:
+	var sp = load("res://Scripts/World/spawn_point.gd")
+	var vrste: Dictionary = sp.get_script_constant_map().get("VRSTE", {})
+	var ws: Dictionary = load("res://Scripts/Multiplayer/world_spawner.gd").get_script_constant_map()
+	var t := Marker3D.new()
+	t.set_script(sp)
+	var hint := ""
+	for pr in t.get_property_list():
+		if pr.name == "vrsta": hint = pr.hint_string
+	t.free()
+	var csv := FileAccess.get_file_as_string("res://translations/teksti.csv")
+	var lose := []
+	for v in vrste:
+		var w = vrste[v].instantiate()
+		var e = w.get_node_or_null("CharacterBody3D")
+		if e == null or not e.has_method("baci_loot") or str(e.ime).to_lower() != v: lose.append("%s: scena/ime" % v)
+		elif not csv.contains("\n%s," % e.ime): lose.append("%s: nema u teksti.csv" % e.ime)
+		w.free()
+	_provera("vrste_neprijatelja_jedna_lista", vrste.size() == 3 and hint == ",".join(vrste.keys()) and ws.get("ENEMY_SCENES") == vrste
+		and lose.is_empty(), "VRSTE %s, enum '%s', spawner ENEMY_SCENES ista lista=%s, greške %s" % [vrste.keys(), hint,
+		ws.get("ENEMY_SCENES") == vrste, lose])
 
 # XP: svi pragovi razlike nivoa (-12..+6) i minimum 10% (nikad 0); osnovni XP ~15 ubistava po nivou
 func _q_provere_xp() -> void:

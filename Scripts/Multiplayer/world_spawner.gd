@@ -1,11 +1,7 @@
 extends Node3D
 
 const PLAYER_SCENE = preload("res://Scenes/player.tscn")
-const ENEMY_SCENES := {
-	"goblin": preload("res://Scenes/Enemies/goblin.tscn"),
-	"skeleton": preload("res://Scenes/Enemies/skeleton.tscn"),
-	"troll": preload("res://Scenes/Enemies/troll.tscn"),
-}
+const ENEMY_SCENES := preload("res://Scripts/World/spawn_point.gd").VRSTE # jedina lista vrsta
 const RESPAWN_DELAY := 5.0
 
 @onready var spawner := $MultiplayerSpawner
