@@ -104,6 +104,20 @@ func _initialize():
 			_korak = int(a.substr(6))
 
 func _nm(): return root.get_node("NetworkManager")
+
+# Server prima najviše NetworkManager.MAX_PLAYERS (8) peer-a, a run.sh pokreće ~15 klijenata: klijent koji se javi dok
+# su sva mesta zauzeta dobije connection_failed. Ponovo se povezuje kad se mesto oslobodi (rok POVEZIVANJE_ROK s).
+const POVEZIVANJE_ROK := 60.0
+var _pokusaji_veze := 0
+func _ponovi_povezivanje() -> void:
+	_pokusaji_veze += 1
+	if t > POVEZIVANJE_ROK:
+		print("[T] konekcija neuspešna, rok od %.0f s istekao posle %d pokušaja" % [POVEZIVANJE_ROK, _pokusaji_veze])
+		return
+	print("[T] konekcija neuspešna (server pun?), pokušaj %d za 1 s" % (_pokusaji_veze + 1))
+	_nm().prekini()
+	await create_timer(1.0).timeout
+	_nm().pridruzi_se("127.0.0.1")
 func _world(): return current_scene.get_node_or_null("World") if current_scene else null
 func _id() -> String:
 	return str(get_multiplayer().get_unique_id()) if get_multiplayer().has_multiplayer_peer() else ""
@@ -170,7 +184,9 @@ func _process(d):
 		if t < 1.0: return false
 		_faza = "mreza"
 		if uloga == "server": _nm().hostuj()
-		else: _nm().pridruzi_se("127.0.0.1")
+		else:
+			_nm().connection_failed.connect(_ponovi_povezivanje)
+			_nm().pridruzi_se("127.0.0.1")
 	_log_t += d
 	_meri_zastoj(d)
 	var log := _log_t >= 0.5
@@ -260,9 +276,7 @@ func _server(log: bool) -> bool:
 				var st := "%d %d %s" % [p.hp, p.max_hp, p.mrtav]
 				if st != _server_hp_upisan:
 					_server_hp_upisan = st
-					var fh := FileAccess.open(dir + "/server_hp", FileAccess.WRITE)
-					fh.store_string(st)
-					fh.close()
+					_pisi("server_hp", st)
 	_server_cilj()
 	_server_raspored()
 	_server_ai()
@@ -485,9 +499,7 @@ var _upisana_faza := ""
 func _upisi_fazu(faza: String, id: String) -> void:
 	if dir == "" or faza == _upisana_faza: return
 	_upisana_faza = faza
-	var f := FileAccess.open(dir + "/faza", FileAccess.WRITE)
-	f.store_string(faza + " " + id)
-	f.close()
+	_pisi("faza", faza + " " + id)
 
 # Server se gasi dok je klijent živ: klijent mora da se vrati na login sa porukom
 func _mover_ceka_gasenje() -> bool:
@@ -785,9 +797,14 @@ func _snimak(kat: String) -> bool:
 # ---------------------------------------------------------------- ZASTOJ (za seq_bez_rupa_bez_gubitka)
 # Rupa u seq obradi nekog lika je opravdana (WARN) samo ako je proces koji šalje inpute za TAJ lik
 # imao frame > ZASTOJ_PRAG u prozoru +-ZASTOJ_PROZOR oko trenutka rupe (posle zastoja Godot nadoknađuje
-# tick-ove brže od 1.2x i token bucket ih odbaci). Inače FAIL. Server ne šalje inpute: ne meri se.
+# tick-ove brže od 1.2x i token bucket ih odbaci), ili ako je u tom prozoru zastao sam server: tada rupe dobiju svi
+# povezani likovi u istom trenutku (pod opterećenjem mašine: server frame 134 ms, rupe 9-10 kod četiri peer-a u t=12.23).
+# Inače FAIL.
+var _server_zastoji := [] # server: [t_kraj, delta] (unix s)
 
 func _meri_zastoj(d: float) -> void:
+	if uloga == "server" and d > ZASTOJ_PRAG:
+		_server_zastoji.append([Time.get_unix_time_from_system(), d])
 	if dir == "" or uloga == "server" or _moj() == null:
 		return
 	var f := FileAccess.get_file_as_string(dir + "/faza").split(" ")
@@ -804,9 +821,7 @@ func _meri_zastoj(d: float) -> void:
 	if d > ZASTOJ_PRAG:
 		_zastoji.append("%f %f" % [sad, d])
 	if promena: # fajl po peer-u: uloga, najduži frame, pa zastoji
-		var fh := FileAccess.open(dir + "/zastoj_" + _id(), FileAccess.WRITE)
-		fh.store_string("%s\n%f\n%s" % [uloga, _max_delta, "\n".join(_zastoji)])
-		fh.close()
+		_pisi("zastoj_" + _id(), "%s\n%f\n%s" % [uloga, _max_delta, "\n".join(_zastoji)])
 
 # [uloga, najduži frame, [[t_kraj, delta], ...]] za peer; [] ako proces nije merio
 func _zastoj_peer(peer: String) -> Array:
@@ -822,20 +837,24 @@ func _zastoj_peer(peer: String) -> Array:
 func _proveri_rupe() -> void:
 	var naj := [0.0, "-"]
 	for f in DirAccess.get_files_at(dir):
-		if f.begins_with("zastoj_"):
+		if f.begins_with("zastoj_") and not f.ends_with(".tmp"):
 			var z := _zastoj_peer(f.substr(7))
 			if z.size() == 3 and z[1] > naj[0]: naj = [z[1], z[0]]
 	var opravdane := 0
+	var od_servera := 0
 	var neopravdane := []
 	for e in _rupe_dogadjaji:
 		if e[3] != "normal" and e[3] != "teleport": continue
 		var z := _zastoj_peer(e[1])
 		var ok := false
-		for st in (z[2] if z.size() == 3 else []): # zastoj [t_kraj - d, t_kraj] seče [t - P, t + P]
-			ok = ok or (st[0] - st[1] <= e[0] + ZASTOJ_PROZOR and st[0] >= e[0] - ZASTOJ_PROZOR)
+		for st in (z[2] if z.size() == 3 else []) + _server_zastoji: # zastoj [t_kraj - d, t_kraj] seče [t - P, t + P]
+			var sece: bool = st[0] - st[1] <= e[0] + ZASTOJ_PROZOR and st[0] >= e[0] - ZASTOJ_PROZOR
+			ok = ok or sece
+			if sece and st in _server_zastoji: od_servera += e[2]
 		if ok: opravdane += e[2]
 		else: neopravdane.append("%d (%s)" % [e[2], z[0] if z.size() == 3 else "peer " + e[1]])
-	var opis := "rupe po fazi %s, opravdane zastojem %d, bez zastoja %s; najduži frame %.0f ms (%s)" % [_faza_rupe, opravdane, neopravdane, naj[0] * 1000, naj[1]]
+	var opis := "rupe po fazi %s, opravdane zastojem %d (u prozoru zastoja servera %d), bez zastoja %s; najduži frame %.0f ms (%s), zastoja servera %d" % [
+		_faza_rupe, opravdane, od_servera, neopravdane, naj[0] * 1000, naj[1], _server_zastoji.size()]
 	if not neopravdane.is_empty() or opravdane == 0:
 		_provera("seq_bez_rupa_bez_gubitka", neopravdane.is_empty(), opis)
 	else:
@@ -1150,10 +1169,14 @@ func _server_cilj() -> void:
 				_cilj_srv_upisan = st
 				_pisi("cilj_server", st)
 
+# Atomski upis: drugi proces pročita ili staro ili novo stanje, nikad prazan fajl (WRITE prvo isprazni fajl, pa bi
+# čitanje u tom trenutku vratilo "" i sva polja prazna; pod opterećenjem se to dešavalo kod fajlova koji se pišu
+# svaki frame, npr. ai_klijent_*). rename na istom disku je atomski i zamenjuje postojeći fajl.
 func _pisi(ime: String, s: String) -> void:
-	var f := FileAccess.open(dir + "/" + ime, FileAccess.WRITE)
+	var f := FileAccess.open(dir + "/" + ime + ".tmp", FileAccess.WRITE)
 	f.store_string(s)
 	f.close()
+	DirAccess.rename_absolute(dir + "/" + ime + ".tmp", dir + "/" + ime)
 
 # observer: dok CiljLik ima cilj (dir/cilj_postavljen), niko drugi ga ne vidi
 var _cilj_obs_ok := false
@@ -1565,7 +1588,10 @@ func _ai_scenario(a1, a2) -> void:
 	_provera("ai_mirovanje_ne_napada", _st(e) == "MIROVANJE" and _tab(e).is_empty() and _xz(e.global_position, AI_POCETAK) < 0.3
 		and a1.hp == hp1 and a2.hp == hp2 and d1 > e.aggro_range and d2 > e.aggro_range,
 		"stanje %s, pretnja %s, od početka %.2f m, igrači na %.1f / %.1f m, hp %d->%d / %d->%d" % [_st(e), _tab(e), _xz(e.global_position, AI_POCETAK), d1, d2, hp1, a1.hp, hp2, a2.hp])
-	var k_bez := _ai_kl("AiLik") # cilj izabran, pretnje nema: traka sakrivena
+	# cilj izabran, pretnje nema: traka sakrivena. Čeka se zapis klijenta sa tim ciljem i nacrtanim okvirom (rok 2 s),
+	# pa se proverava traka (okvir i traka se osvežavaju u _process okvira, posle zapisa u istom frame-u)
+	await _cekaj(func(): return _ai_kl("AiLik")[0] == AI_ID and _ai_kl("AiLik")[3] == "true", 2.0)
+	var k_bez := _ai_kl("AiLik")
 
 	# u aggro dometu: JURENJE sa početnom pretnjom, pa napad
 	a1.server_postavi_poziciju(Vector3(20, 1.16, 17), true)
@@ -1608,7 +1634,8 @@ func _ai_scenario(a1, a2) -> void:
 	_provera("ai_traka_pretnje_sa_servera", ok_pre and ok_posle,
 		"meta AiLik: AiLik %s, Ai2Lik %s; meta Ai2Lik: AiLik %s, Ai2Lik %s (pretnja|meta|traka|vrednost)" % ["|".join(pre[0].slice(1)), "|".join(pre[1].slice(1)), "|".join(posle[0].slice(1)), "|".join(posle[1].slice(1))])
 	_ai_cmd("AiLik", "cilj -")
-	await _cekaj(func(): return _ai_kl("AiLik")[0] == "", 2.0)
+	# bez cilja: čeka se da klijent javi da je cilj skinut i okvir sakriven (isti frame kao zapis ne mora da ga sakrije)
+	await _cekaj(func(): return _ai_kl("AiLik")[0] == "" and _ai_kl("AiLik")[3] == "false", 2.0)
 	var k_nema := _ai_kl("AiLik")
 	_ai_cmd("AiLik", "cilj " + AI_ID)
 	_provera("ai_traka_pretnje_sakrivena", pre[0][4] == "true" and k_bez[0] == AI_ID and k_bez[4] == "false" and k_nema[0] == "" and k_nema[4] == "false",

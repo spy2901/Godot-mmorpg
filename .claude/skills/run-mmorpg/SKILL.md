@@ -52,6 +52,14 @@ Deo B (predikcija + reconciliation), nastavak iste vremenske ose:
   Rupa bez zastoja = FAIL. Napomena: Godot seče frame delta na `max_physics_steps_per_frame` (8 tick-ova =
   133 ms), pa zastoj klijenta nadoknadi najviše 8 unosa, što token bucket (10) propusti: rupe od zastoja su
   retke, a rupa bez zastoja je pravi nalaz. Ako je seq FAIL jedini FAIL, `run.sh` ponovi ceo krug jednom.
+  Zastoj **servera** (frame > `ZASTOJ_PRAG`, meri ga server drajver) opravdava rupu u istom prozoru za svakog lika:
+  posle zastoja servera rupe dobiju svi povezani likovi u istom trenutku (pod opterećenjem: server frame 134 ms, rupe
+  9-10 kod četiri peer-a u t=12.23). Rupa bez ikakvog zastoja i dalje je FAIL (mutacija "svaki 97. unos izgubljen" pada).
+- Fajlovi stanja između procesa (`_pisi`) pišu se atomski (`.tmp` pa `rename`): ranije je čitanje u trenutku kad
+  pisac isprazni fajl (WRITE) vraćalo "" i sva polja prazna (npr. `ai_posmatrac_ne_vidi_pretnju`: Ai2Lik "cilj ''").
+- Server prima najviše `MAX_PLAYERS` (8) peer-a, a run.sh pokreće ~15 klijenata: klijent koji dobije
+  `connection_failed` (server pun) ponovo se povezuje svake sekunde do `POVEZIVANJE_ROK` (60 s); ranije su sve provere
+  tog klijenta izostajale (npr. `server_prekid_vraca_na_login`, QuestLik, OpremaLik).
 
 Napitci (`potion` klijent, provere preko stanja: HUD hp, `prebroj_item`, količina u stub "bazi"):
 `potion_lik_ucitan`, `napitak_leci` (+30, količina -1 u bazi i UI-ju, poruka "+30 HP"),
@@ -119,7 +127,9 @@ upiše `$OUT/ai_gotov` (`run.sh` čeka i to pre gašenja). Provere: `ai_mirovanj
 `ai_smrt_brise_pretnju` (Ai2Lik umre i odmah se odjavi, pre respawn-a na spawn-u), `ai_leash_povratak_ne_napada`,
 `ai_povratak_ne_jurenje`, `ai_povratak_stize_regen`, `ai_napadnut_van_dometa_jurenje`, `ai_respawn_mirovanje`
 (sopstvena spawn tačka (20, -20): test server ne pali tačke scene), `ai_odjava_brise_pretnju`. Svih 14 pada bez
-implementacije (provereno).
+implementacije (provereno). `ai_traka_pretnje_sakrivena` stanje "bez pretnje" i "bez cilja" čita tek kad klijent javi
+izabran cilj sa vidljivim okvirom, odnosno skinut cilj sa sakrivenim okvirom (rok 2 s), ne jedno čitanje posle fiksnog
+čekanja; mutacije (tuđa pretnja vidljiva, traka uvek vidljiva) i dalje obaraju obe provere.
 
 Nameplate (observer gleda TestLik-a; server upisuje njegov "hp max mrtav" u `$OUT/server_hp`):
 `nameplate_sync_poklapa` (hp_sync/max_hp_sync/mrtav_sync/ime_sync = server), `hp_sync_prati_stetu`
