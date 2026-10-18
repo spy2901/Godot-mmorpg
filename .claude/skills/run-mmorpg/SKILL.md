@@ -210,7 +210,7 @@ drajver na početku proverava scenu i podatke: `neprijatelji_nivoi_i_spawn_tacke
 nivoa 4-6, trol 2 nivoa 8-10 sa jednim nivoa 10; tačke ≥ 12 m od spawna igrača, aggro zone se ne preklapaju, quest
 NPC-ovi van aggro zona), `xp_po_razlici_nivoa_pragovi` (`Enemy.xp_mnozilac` za razliku -12..+6, 10-20 ubistava po
 nivou, minimum 1 XP), `najbolja_oprema_samo_trol_nivoa_10` (šest predmeta samo u troll.tscn sa `min_nivo` 10 i šansom
-1-3%; `baci_loot` 30000 puta za trola 10: 0.5-3.5% po predmetu, 0 za ostale vrste i nivoe), `iron_gloves_van_loota_i_prodavnice`,
+0.4%; `baci_loot` 30000 puta za trola 10: 0.2-0.6% po predmetu (na 1% pada), 0 za ostale vrste i nivoe), `iron_gloves_van_loota_i_prodavnice`,
 `questovi_dostupni_u_svetu` (svaki quest iz `/quests` dostupan lancem od nekog quest NPC-a u sceni; kill cilj se spawn-uje,
 fetch cilj pada sa spawn tačke ili je nagrada). Komande `$OUT/quest_cmd` ("ubij NIVO NAPADAČ [LIK_SA_ŠTETOM_0]",
 "spawn VRSTA ID NIVO"), potvrda `$OUT/quest_server`. QuestLik (nivo 1, dva mača, 1.1 m ispred Village Elder-a):

@@ -85,6 +85,7 @@ mesh = SubResource("BoxMesh_fs8mr")
 
 [node name="NPC" parent="." unique_id=1161211969 instance=ExtResource("4_h58xs")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.6940236, -10)
+npc_name = "Merchant"
 interaction_type = 1
 
 [node name="QuestNPC_Lanac" parent="." instance=ExtResource("4_h58xs")]

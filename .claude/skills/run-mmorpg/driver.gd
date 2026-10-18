@@ -2197,7 +2197,7 @@ func _q_provere_xp() -> void:
 			lose.append("minimum: %d, %d" % [E.xp_za_razliku(7, -11), E.xp_za_razliku(1, -20)])
 	_provera("xp_po_razlici_nivoa_pragovi", ima and lose.is_empty(), "funkcije postoje=%s, odstupanja %s" % [ima, lose])
 
-# loot tabele: najbolja oprema samo od trola nivoa 10 (šansa 1-3%, i stvarno bacanje kockica), iron_gloves nigde
+# loot tabele: najbolja oprema samo od trola nivoa 10 (šansa 0.4% po predmetu, i stvarno bacanje kockica), iron_gloves nigde
 func _q_provere_loota() -> void:
 	var lose := []
 	var ima := false
@@ -2209,7 +2209,7 @@ func _q_provere_loota() -> void:
 				if l["id"] == "iron_gloves":
 					lose.append("iron_gloves u %s" % v)
 				if l["id"] in NAJBOLJA_OPREMA and n == 1 and (v != "troll" or int(l.get("min_nivo", 0)) != 10 \
-						or float(l["sansa"]) < 1.0 or float(l["sansa"]) > 3.0):
+						or not is_equal_approx(float(l["sansa"]), 0.4)):
 					lose.append("%s u %s: %s" % [l["id"], v, l])
 			if e.has_method("baci_loot") and n in [NIVOI_VRSTA[v][0], NIVOI_VRSTA[v][1], 9]:
 				ima = true
@@ -2221,7 +2221,7 @@ func _q_provere_loota() -> void:
 				if v == "troll" and n == 10:
 					for id in NAJBOLJA_OPREMA:
 						var udeo: float = 100.0 * br.get(id, 0) / puta
-						if udeo < 0.5 or udeo > 3.5: lose.append("trol 10 %s %.2f%%" % [id, udeo])
+						if udeo < 0.2 or udeo > 0.6: lose.append("trol 10 %s %.2f%%" % [id, udeo])
 				elif not br.is_empty():
 					lose.append("%s nivo %d: %s" % [v, n, br])
 			we[0].free()
