@@ -1,0 +1,63 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" uid="uid://ctkdna1af7i4a" path="res://Scripts/Enemy.gd" id="1_xm08b"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_rijkx"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_7wnqn"]
+albedo_color = Color(0.25, 0.1, 0.3, 1)
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_rijkx"]
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_7wnqn"]
+properties/0/path = NodePath(".:hp")
+properties/0/spawn = true
+properties/0/replication_mode = 1
+properties/1/path = NodePath(".:rotation")
+properties/1/spawn = true
+properties/1/replication_mode = 1
+properties/2/path = NodePath(".:position")
+properties/2/spawn = true
+properties/2/replication_mode = 1
+
+[node name="Node3D" type="Node3D" unique_id=1075531957]
+
+[node name="CharacterBody3D" type="CharacterBody3D" parent="." unique_id=567055309]
+script = ExtResource("1_xm08b")
+ime = "Spider"
+max_hp = 70
+brzina = 3.0
+napad_damage = 7
+aggro_range = 6.0
+napad_range = 1.2
+napad_cooldown = 2.0
+loot_tabela = [{
+"id": "spider_web",
+"sansa": 100
+}, {
+"id": "poison_gland",
+"sansa": 60
+}, {
+"id": "herb_bundle",
+"sansa": 30
+}, {
+"id": "steel_greaves",
+"min_nivo": 11,
+"sansa": 3
+}]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="CharacterBody3D" unique_id=747303743]
+mesh = SubResource("CapsuleMesh_rijkx")
+surface_material_override/0 = SubResource("StandardMaterial3D_7wnqn")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="CharacterBody3D" unique_id=631741011]
+shape = SubResource("CapsuleShape3D_rijkx")
+
+[node name="ImeLabel" type="Label3D" parent="CharacterBody3D" unique_id=1284770107]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, 0)
+
+[node name="HpLabel" type="Label3D" parent="CharacterBody3D" unique_id=445655244]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, 0)
+
+[node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="CharacterBody3D" unique_id=1136444108]
+replication_config = SubResource("SceneReplicationConfig_7wnqn")

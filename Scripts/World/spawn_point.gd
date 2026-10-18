@@ -7,6 +7,9 @@ const VRSTE := {
 	"goblin": preload("res://Scenes/Enemies/goblin.tscn"),
 	"skeleton": preload("res://Scenes/Enemies/skeleton.tscn"),
 	"troll": preload("res://Scenes/Enemies/troll.tscn"),
+	"wolf": preload("res://Scenes/Enemies/wolf.tscn"),
+	"spider": preload("res://Scenes/Enemies/spider.tscn"),
+	"wraith": preload("res://Scenes/Enemies/wraith.tscn"),
 }
 
 @export var vrsta: String = "goblin"
