@@ -11,6 +11,8 @@ Ceo tok je u `run.sh` (bash) i `driver.gd` (SceneTree skripta, kao kod `run-mmor
 .claude/skills/test-pi/run.sh                 # lokalno -> deploy -> 2 klijenta (igrac1 u prozoru + screenshot)
 .claude/skills/test-pi/run.sh --bez-prozora   # isto, bez screenshot-a
 .claude/skills/test-pi/run.sh --registruj     # agent_test nalog koji ne postoji registruje preko /auth/register
+.claude/skills/test-pi/run.sh --bez-deploya   # deploy je već urađen (npr. pi_010.sh): bez koraka 1-2, Pi se ne restartuje,
+                                              # journal od poslednjeg starta mmorpg-game
 ```
 
 Postavi `OUT=<scratchpad>/pi1` da bi Read alat mogao da otvori `$OUT/pi_igrac1.png`.

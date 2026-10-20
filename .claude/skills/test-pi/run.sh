@@ -3,6 +3,8 @@
 # Upotreba (iz korena repoa): .claude/skills/test-pi/run.sh [--bez-prozora] [--registruj]
 #   --bez-prozora: igrac1 headless, bez screenshot-a
 #   --registruj:   ako agent_test nalog ne postoji, registruj ga preko /auth/register
+#   --bez-deploya: preskače lokalne provere i deploy (deploy je već urađen, npr. migracionom pi skriptom); journal se
+#                  gleda od poslednjeg starta mmorpg-game, Pi se ne restartuje
 # Tajne (.env.test) idu samo kroz env procesa; nikad echo, argumenti ni log.
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
@@ -11,9 +13,9 @@ D=res://.claude/skills/test-pi/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/test-pi}"
 PI="${PI:-spy2901@100.79.170.67}"
 PI_DIR="mmorpg-server"
-PROZOR=1; REG=0
+PROZOR=1; REG=0; DEPLOY=1
 for a in "$@"; do
-  case "$a" in --bez-prozora) PROZOR=0;; --registruj) REG=1;; esac
+  case "$a" in --bez-prozora) PROZOR=0;; --registruj) REG=1;; --bez-deploya) DEPLOY=0;; esac
 done
 mkdir -p "$OUT"; rm -rf "$OUT"/*.log "$OUT"/*.png "$OUT"/igrac* "$OUT"/lokalno
 pad() { echo "FAIL $*"; echo "REZULTAT: prekinuto ($*)"; exit 1; }
@@ -28,6 +30,11 @@ for u in "$TEST_USER_1" "$TEST_USER_2"; do
   case "$u" in agent_test*) ;; *) pad "env: TEST_USER_n mora počinjati sa agent_test";; esac
 done
 
+if [ $DEPLOY = 0 ]; then
+  echo "== 1-2/4 preskočeno (--bez-deploya): Pi se ne menja"
+  SINCE=$(ssh "$PI" "date -d \"\$(systemctl show -p ActiveEnterTimestamp --value mmorpg-game)\" '+%Y-%m-%d %H:%M:%S'") || pad "ssh"
+  echo "   mmorpg-game radi od $SINCE"
+else
 # ---------------------------------------------------------------- 1. lokalne provere
 echo "== 1/4 lokalne provere (run-mmorpg)"
 if OUT="$OUT/lokalno" .claude/skills/run-mmorpg/run.sh > "$OUT/lokalno.log" 2>&1; then
@@ -52,6 +59,7 @@ ssh "$PI" 'sudo -n systemctl restart mmorpg-game' || pad "deploy: restart"
 sleep 3
 [ "$(ssh "$PI" 'systemctl is-active mmorpg-game')" = active ] || pad "deploy: servis nije active (rollback: $OUT/pi-prethodni.pck)"
 echo "PASS deploy  (prethodni .pck: $OUT/pi-prethodni.pck)"
+fi
 
 # ---------------------------------------------------------------- 3. čekanje API-ja i game servera
 echo "== 3/4 čekam API i game server"
