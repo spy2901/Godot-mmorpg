@@ -1219,7 +1219,8 @@ func _cilj() -> bool:
 	if not _cilj_krenuo and p and p.get_node("ui/Control")._ucitano:
 		_cilj_krenuo = true
 		_cilj_scenario(p)
-	return _cilj_kraj or t > MAX_T
+	# čeka DrugiLik-a do PARTNER_ROK; izlaz i kad server ode (nema mog lika)
+	return _cilj_kraj or t > 2 * MAX_T or (_cilj_krenuo and p == null)
 
 func _cilj_komanda(c: String) -> void:
 	_cilj_br += 1
@@ -1417,7 +1418,7 @@ func _cilj_scenario(p) -> void:
 
 	# g) drugi igrač (DrugiLik 2.5 m od goblin_904, bez cilja): klik + R ne štete tuđem cilju
 	_pisi("drugi_kreni", "1")
-	await _cekaj(func(): return FileAccess.file_exists(dir + "/drugi_gotov"), 15.0)
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/drugi_gotov"), PARTNER_ROK)
 
 	# f) cilj van dometa napada (6 m, ali u dometu cilja): "Predaleko"
 	await _cilj_komanda("pomeri goblin_904 -19 -14")
