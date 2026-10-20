@@ -1905,7 +1905,7 @@ func _oprema_scenario(p, inv) -> void:
 
 	# drugi igrač šalje zahtev za MOJ lik (moj iron_sword u weapon): server ga ignoriše
 	_pisi("oprema_tudji_kreni", str(p.get_multiplayer_authority()))
-	await _cekaj(func(): return FileAccess.file_exists(dir + "/oprema_tudji_poslato"), 30.0)
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/oprema_tudji_poslato"), PARTNER_ROK)
 	await create_timer(1.0).timeout
 	_provera("drugi_igrac_ne_oprema_tudji_predmet", FileAccess.file_exists(dir + "/oprema_tudji_poslato") and _opr_srv_ok(25, 0, 100)
 		and _opr_srv().get("oprema") is Dictionary and _opr_srv().get("oprema").is_empty(),
