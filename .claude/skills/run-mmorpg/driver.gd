@@ -78,6 +78,10 @@ var _t0 := -1.0         # mover: početak vremenske ose (lik stao na pod)
 var _spawn = null       # mover: [vreme, pozicija] pojave lika (za ispis kad na_podu padne)
 const PODLOGA_TIMEOUT := 5.0
 const MAX_T := 120.0    # zaštita od zaglavljivanja
+# s: rok za drugi proces iste provere (PosmatracLik, DrugiLik, Oprema2Lik, Buff2Lik). Server prima MAX_PLAYERS (8) peer-a, pa
+# klijenti čekaju mesto, a redosled ulaska nije određen (PosmatracLik ume da uđe posle QuestLik-a i 20 drugih prijava).
+# Rok je gornja granica: čeka se uslov. Uloga koja čeka partnera živi 2 * MAX_T.
+const PARTNER_ROK := MAX_T
 const PORUKA_SLEDECA := 2.3 # s: duže od TopBar.PORUKA_TRAJANJE
 var _max_t := MAX_T     # server u repro_login.sh radi duže (maxt=)
 var _aktivnost := false # prijava: reliable zahtevi za predmet dok traje sesija
@@ -2424,13 +2428,13 @@ var _q_br := 0
 func _uloga_quest() -> bool:
 	var p = _moj()
 	if p == null or not p.get_node("ui/Control")._ucitano:
-		return (_q_krenuo and p == null) or t > MAX_T
+		return (_q_krenuo and p == null) or t > 2 * MAX_T
 	if not _q_krenuo:
 		_q_krenuo = true
 		if _korak == 1: _quest_scenario(p)
 		elif _korak == 3: _lovac_scenario(p)
 		else: _posmatrac_scenario(p)
-	return _q_kraj or t > MAX_T
+	return _q_kraj or t > 2 * MAX_T
 
 func _q_cmd_posalji(cmd: String) -> void:
 	var kanal := "lovac" if _korak == 3 else "quest"
@@ -2442,7 +2446,7 @@ func _q_cmd_posalji(cmd: String) -> void:
 func _posmatrac_scenario(p) -> void:
 	_pisi("quest_posmatrac", "spreman")
 	var qm = root.get_node("QuestManager")
-	while not FileAccess.file_exists(dir + "/quest_gotov") and t < MAX_T:
+	while not FileAccess.file_exists(dir + "/quest_gotov") and t < 2 * MAX_T:
 		_pisi("quest_posmatrac", "progres %d" % qm.progres)
 		await create_timer(0.2).timeout
 	_q_kraj = true
@@ -2504,7 +2508,7 @@ func _quest_scenario(p) -> void:
 		"goblin_killer pre reda: %s; prva ponuda '%s', posle predaje '%s', aktivan '%s'" % [preskok, ponuda1, ponuda2, qm.aktivni_quest.get("id", "")])
 
 	# loot i kill/quest credit: QuestLik ubije goblina, PosmatracLik (pored, aktivan goblin_killer) samo udarac od 0
-	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/quest_posmatrac").begins_with("progres"), 10.0)
+	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/quest_posmatrac").begins_with("progres"), PARTNER_ROK)
 	await _q_cmd_posalji("ubij 1 QuestLik PosmatracLik")
 	await _cekaj(func(): return qm.progres == 1, 3.0)
 	await create_timer(0.5).timeout
