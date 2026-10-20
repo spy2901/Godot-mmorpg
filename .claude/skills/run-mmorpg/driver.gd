@@ -2887,7 +2887,7 @@ func _buff_scenario(p) -> void:
 	var x1 := await _b_xp_ore("BuffLik")
 	_provera("wisdom_ne_prelazi_limit", wisdom and x1[0] - x0[0] == 25,
 		"BuffLik nivo 1, wisdom aktivan na serveru=%s, vuk 11: +%d XP (limit 25; bez limita 308 * 1.25)" % [wisdom, x1[0] - x0[0]])
-	await _cekaj(func(): return FileAccess.file_exists(dir + "/buff2_spreman"), 30.0)
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/buff2_spreman"), PARTNER_ROK)
 	var b0 := await _b_xp_ore("Buff2Lik")
 	var r := await _b_cmd_posalji("ubijn 4242")
 	var x2 := await _b_xp_ore("BuffLik")
