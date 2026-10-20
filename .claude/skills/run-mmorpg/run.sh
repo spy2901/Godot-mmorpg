@@ -109,7 +109,7 @@ sleep 0.3
 pokreni quest3 "$OUT/quest3.log" "$G" --headless --path . --script $D -- quest korak=3 "dir=$OUT" "$API"
 Q3=$PID
 # buffovi: BuffLik (eliksiri) i Buff2Lik (napadač bez buff-a) istovremeno, tek kad cilj i drugi izađu: server prima
-# najviše MAX_PLAYERS (8), pa bi dva klijenta više na početku odložila PosmatracLik-a (QuestLik ga čeka 10 s)
+# najviše MAX_PLAYERS (8), pa bi dva klijenta više na početku odložila PosmatracLik-a (QuestLik ga čeka do PARTNER_ROK)
 ( while kill -0 $C 2>/dev/null || kill -0 $DR 2>/dev/null; do sleep 0.5; done
   pokreni buff1 "$OUT/buff1.log" "$G" --headless --path . --script $D -- buff korak=1 "dir=$OUT" "$API"
   B1=$PID

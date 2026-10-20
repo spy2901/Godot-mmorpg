@@ -64,7 +64,33 @@ Deo B (predikcija + reconciliation), nastavak iste vremenske ose:
   pisac isprazni fajl (WRITE) vraćalo "" i sva polja prazna (npr. `ai_posmatrac_ne_vidi_pretnju`: Ai2Lik "cilj ''").
 - Server prima najviše `MAX_PLAYERS` (8) peer-a, a run.sh pokreće ~15 klijenata: klijent koji dobije
   `connection_failed` (server pun) ponovo se povezuje svake sekunde do `POVEZIVANJE_ROK` (60 s); ranije su sve provere
-  tog klijenta izostajale (npr. `server_prekid_vraca_na_login`, QuestLik, OpremaLik).
+  tog klijenta izostajale (npr. `server_prekid_vraca_na_login`, QuestLik, OpremaLik). Klijent koji stigne dok je server pun
+  često ne dobije `connection_failed`, već čeka u ENet handshake-u dok se mesto ne oslobodi: redosled ulaska čekajućih
+  klijenata nije određen (PosmatracLik je ulazio kao 21. prijava, posle QuestLik-a).
+
+### Čekanje: uslov sa rokom, ne fiksno vreme
+
+Pravilo: kad provera zavisi od drugog procesa, servera ili backenda (stub), čeka se **uslov** (`_cekaj`, `_cekaj_stub`,
+petlja u `run.sh`) sa rokom koji pokriva najgori slučaj pod opterećenjem. Rok je gornja granica, ne čekanje: uspeh je
+čim je uslov ispunjen. Rok se ne skraćuje da bi krug bio brži, a tolerancije provera se ne šire. Fiksno vreme ostaje
+samo tamo gde se proverava da se nešto **ne** desi (prozor posmatranja, npr. `klik_preko_ui_ne_napada`), za cooldown
+u vremenu igre i za vremensku osu movera. Rokovi moraju biti usklađeni: uloga koja čeka partnera živi `2 * MAX_T`,
+`run.sh` čeka uloge do 240 s, mover gašenje do 250 s, a server živi `3 * MAX_T`.
+
+Promenjeno (grana popravke-2; pre toga 0/5 padova pod load-om 29-50, ali deterministički reprodukovano kašnjenjem partnera):
+- `PARTNER_ROK` (= `MAX_T`, 120 s) za drugi proces iste provere: QuestLik → PosmatracLik (bilo 10 s; obarao
+  `bez_stete_bez_kill_i_quest_credita` i `xp_po_razlici_nivoa_po_napadacu`), CiljLik → DrugiLik (bilo 15 s,
+  `drugi_ne_napada_tudji_cilj`), OpremaLik → Oprema2Lik (bilo 30 s, `drugi_igrac_ne_oprema_tudji_predmet`), BuffLik →
+  Buff2Lik (bilo 30 s, `buff_po_igracu_wisdom_i_luck`). Quest uloge i cilj žive `2 * MAX_T` (bilo `MAX_T`).
+- `run.sh` čeka uloge posle movera do 240 s (bilo 60 s) i ispisuje `uloge završile N s posle movera`; mover čeka gašenje
+  250 s (bilo 70 s); server `_max_t` = `3 * MAX_T` (bilo `MAX_T`, pa se gasio 120 s od starta).
+- `_cekaj_stub(ime, uslov)` (rok `STUB_ROK` 10 s) umesto fiksnog čekanja pre čitanja stub-a: loot/kill/progres QuestLik-a
+  (bilo 0,5 s), XP po ubistvu PosmatracLik-a i LovacLik-a posle **svakog** ubistva (bilo 1 s / 0,5 s na kraju; redosled
+  dnevnika = redosled ubistava), XP i iron_ore BuffLik-a i Buff2Lik-a (bilo 2 s na serveru).
+- Provereno: 5/5 pod load-om 27-107 (24 `yes` petlje), 157 provera; mutacije pod load-om i dalje obaraju: napadač sa
+  štetom 0 dobija kredit (`Enemy.gd` `kolicina >= 0`) → `bez_stete_bez_kill_i_quest_credita`, XP bez razlike nivoa
+  (`xp_ubistva` sa razlikom 0) → `xp_po_razlici_nivoa_po_napadacu`. Kašnjenje partnera se proverava kopijom `run.sh`
+  koja ga pokreće kasnije (npr. PosmatracLik 90 s posle QuestLik-ove predaje: 157, `uloge završile 92 s posle movera`).
 
 Napitci (`potion` klijent, provere preko stanja: HUD hp, `prebroj_item`, količina u stub "bazi"):
 `potion_lik_ucitan`, `napitak_leci` (+30, količina -1 u bazi i UI-ju, poruka "+30 HP"),
@@ -200,7 +226,7 @@ upisuje statistike po serveru u `$OUT/oprema_server` i izvršava `$OUT/oprema_cm
 `odbija_pogresan_slot`, `odbija_isti_predmet_dvaput`, `iron_gloves_se_ne_oprema` (klik ne šalje zahtev, opis "Can't be
 equipped"), `skidanje_vraca_stare_vrednosti`, `drugi_igrac_ne_oprema_tudji_predmet`, `statistike_prezive_prijavu`,
 `hp_iznad_osnovnog_prezivi_prijavu`. Svih 15 pada bez implementacije (provereno). Stub `/save` čuva inventar i opremu
-samo kad se broj komada slaže (kao backend). Mover čeka gašenje servera do 70 s (`run.sh` čeka uloge do 60 s).
+samo kad se broj komada slaže (kao backend). Mover čeka gašenje servera do 250 s (`run.sh` čeka uloge do 240 s).
 `hp_iznad_osnovnog_prezivi_prijavu`: korak 1 se odjavi sa HP 150 (pun maksimum, regeneracija ga ne menja) i upiše ga
 u `$OUT/oprema_korak1`; server drajver upiše HP u prvom frame-u posle učitavanja (`$OUT/oprema_ucitan`); HP pri
 odjavi, HP koji je stub snimio i HP posle učitavanja moraju biti jednaki (stub koji snimi 3 manje -> FAIL).
