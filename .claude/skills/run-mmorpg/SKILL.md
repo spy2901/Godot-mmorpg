@@ -25,10 +25,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 142 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 142 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 155 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 155 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `buff1.log`, `buff2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -252,6 +252,20 @@ oružja iz baze se nudi; stub ima sve oružje iz baze). `korak=3` LovacLik (nivo
 Stub: `/items`, `/quests`, `/quests/{id}`, `/quests/completed/{ime}`, `quest/accept|kill|turnin|abandon` (kao
 routers/players.py, lanac i redosled grešaka), `inventory/change` (loot). Bez implementacije (loot svima) RasporedLik i
 OpremaLik dobijaju tuđi loot pa padaju i njihove provere inventara.
+
+Buffovi (uloga `buff`, migracija 010: `items.buff_tip/buff_vrednost/buff_trajanje_ms`; stanje samo u memoriji servera,
+`Player_Movement._buffovi`, vlasniku `primi_buffove` sa preostalim ms). `run.sh` pokreće `korak=1` BuffLik i `korak=2` Buff2Lik
+tek kad `cilj` i `drugi` izađu (MAX_PLAYERS 8: inače kasni PosmatracLik). BuffLik: nivo 1, napad 10 + iron_sword 25 = 35,
+oklop 68; komande `$OUT/buff_cmd` ("steta N", "ubij", "ubijv VRSTA NIVO", "ubijn SEME"), stanje po serveru `$OUT/buff_server`.
+Stub ima pet buff predmeta kao posle 010 i `test_kratki_eliksir` (napad +20% 2 s, samo u testu) za istek. Provere:
+`buff_istek_posle_trajanja`, `buff_napad_x1_2` (35 -> 42), `buff_oklop_plus_30` (25 štete uz 68: 14, uz 98: 12),
+`buff_razliciti_istovremeno`, `buff_osvezavanje_bez_sabiranja` (trajanje ponovo puno, napad 42 a ne 49),
+`klijent_ne_postavlja_buff` (jedini buff RPC je `primi_buffove`; lažni poziv ka serveru ništa ne menja),
+`wisdom_ne_prelazi_limit` (nivo 1, vuk 11: 25), `buff_po_igracu_wisdom_i_luck` (Buff2Lik udari prvi, BuffLik ubije goblina sa
+30 x iron_ore 40%: XP 9 i 7, iron_ore tačno po napadaču za isto seme), `smrt_brise_buffove` (posle respawn-a server vrati
+BuffLik-a na (-22, -2), van putanje movera), `prodavnica_nudi_pet_buff_predmeta`, `buff_hud_i_tooltip`; server:
+`luck_bacanje_isto_bez_buffa_x1_5_sa_buffom` (30000), `luck_retka_oprema_samo_trol_10`. Svih 13 pada bez implementacije
+(provereno). HUD labela se osveži u `TopBar._process`, koji ide posle `_process` drajvera: provera čeka osvežen tekst.
 
 Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
 igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u

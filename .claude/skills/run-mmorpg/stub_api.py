@@ -66,7 +66,8 @@ def _los_format(inv, eq):  # "" = ispravan, inače prvi neispravan deo
 
 def _item(id, ime, tip, **x):
     d = {"id": id, "ime": ime, "tip": tip, "ikonica": "?", "vrednost": 1, "quest_item": 0, "stackable": 1,
-         "max_stack": 20, "damage": 0, "armor": 0, "hp_bonus": 0, "slot": None, "hp_efekat": 0, "mana_efekat": 0, "cooldown_ms": 0}
+         "max_stack": 20, "damage": 0, "armor": 0, "hp_bonus": 0, "slot": None, "hp_efekat": 0, "mana_efekat": 0, "cooldown_ms": 0,
+         "buff_tip": None, "buff_vrednost": 0, "buff_trajanje_ms": 0}
     d.update(x)
     return d
 
@@ -116,6 +117,17 @@ ITEMS = {i["id"]: i for i in [
         ("steel_longsword", "Steel Longsword", 35, 50))],
     _item("stamina_potion", "Stamina Potion", "consumable", mana_efekat=40, cooldown_ms=5000),
     _item("antidote", "Antidote", "consumable", hp_efekat=20, cooldown_ms=5000),
+    # migracija 010: buffovi (vrednost kao na Pi-ju; elixir_of_luck više nije quest_item), cooldown 5 s
+    *[_item(i, ime, "consumable", vrednost=v, cooldown_ms=5000, buff_tip=bt, buff_vrednost=bv, buff_trajanje_ms=bms)
+      for i, ime, v, bt, bv, bms in (
+        ("elixir_of_strength", "Elixir of Strength", 100, "napad", 20, 60000),
+        ("elixir_of_defense", "Elixir of Defense", 100, "oklop", 30, 60000),
+        ("elixir_of_wisdom", "Elixir of Wisdom", 100, "xp", 25, 300000),
+        ("elixir_of_luck", "Elixir of Luck", 200, "loot", 50, 300000),
+        ("speed_potion", "Speed Potion", 30, "brzina", 30, 20000))],
+    # samo u testu (nije u bazi): napad +20% 2 s, za istek buff-a
+    _item("test_kratki_eliksir", "Test Short Elixir", "consumable", vrednost=0, cooldown_ms=5000, buff_tip="napad",
+          buff_vrednost=20, buff_trajanje_ms=2000),
 ]}
 for _i in ("golden_sword", "dragon_scale_armor"):
     ITEMS[_i]["quest_item"] = 1
@@ -251,10 +263,23 @@ PLAYERS["PosmatracLik"] = dict(PLAYERS["TestLik"], ime="PosmatracLik", level=12,
 # LovacLik (uloga quest, korak 3): nivo 1 sa 6 vučjih krzna, 1.1 m ispred Hunter-a (29, 0) u zoni 2, gleda ka njemu (-z)
 PLAYERS["LovacLik"] = dict(PLAYERS["TestLik"], ime="LovacLik", napad_damage=10, hp=100, max_hp=100, gold=100,
                            pos_x=29, pos_y=1.16, pos_z=1.1, inventory=[{"slot": 0, "id": "wolf_pelt", "kolicina": 6}])
-XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik", "LovacLik"}
+# BuffLik (uloga buff, korak 1): nivo 1 (napad 10 + iron_sword 25 = 35), oklop 68 kao OpremaLik (25 štete -> 14), eliksiri.
+# Buff2Lik (korak 2): nivo 1 bez buff-a, udara isti cilj (wisdom i luck se računaju po napadaču). Van ostalih likova.
+_OKLOP_68 = {"weapon": "iron_sword", "head": "iron_helmet", "chest": "iron_chestplate", "legs": "iron_leggings",
+             "boots": "iron_boots", "shield": "steel_shield"}
+PLAYERS["BuffLik"] = dict(PLAYERS["TestLik"], ime="BuffLik", napad_damage=10, hp=110, max_hp=100, pos_x=-22, pos_y=1.16,
+                          pos_z=-2, equipment=dict(_OKLOP_68), inventory=[
+                              {"slot": 0, "id": "elixir_of_strength", "kolicina": 3},
+                              {"slot": 1, "id": "elixir_of_defense", "kolicina": 1},
+                              {"slot": 2, "id": "elixir_of_wisdom", "kolicina": 1},
+                              {"slot": 3, "id": "elixir_of_luck", "kolicina": 1},
+                              {"slot": 4, "id": "test_kratki_eliksir", "kolicina": 1}])
+PLAYERS["Buff2Lik"] = dict(PLAYERS["TestLik"], ime="Buff2Lik", napad_damage=10, hp=100, max_hp=100, pos_x=-22, pos_y=1.16,
+                           pos_z=3, equipment={}, inventory=[])
+XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik", "LovacLik", "BuffLik", "Buff2Lik"}
 TOKENI = {"napredak-token": "NapredakLik", "oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik", "quest-token": "QuestLik",
-          "posmatrac-token": "PosmatracLik", "lovac-token": "LovacLik"}
+          "posmatrac-token": "PosmatracLik", "lovac-token": "LovacLik", "buff-token": "BuffLik", "buff2-token": "Buff2Lik"}
 LOCK = threading.Lock()
 
 
@@ -370,7 +395,7 @@ class H(BaseHTTPRequestHandler):
                     return self._odgovor({"error": "Player not found"})
                 if not it:
                     return self._odgovor({"error": "Item not found"})
-                if it["tip"] != "consumable" or it["hp_efekat"] + it["mana_efekat"] <= 0:
+                if it["tip"] != "consumable" or (it["hp_efekat"] + it["mana_efekat"] <= 0 and not it["buff_tip"]):
                     return self._odgovor({"error": "Item nije potrosni"})
                 inv = pl["inventory"]
                 if sum(e["kolicina"] for e in inv if e["id"] == it["id"]) < 1:
@@ -382,7 +407,8 @@ class H(BaseHTTPRequestHandler):
                 pl["item_use_br"] = pl.get("item_use_br", 0) + 1  # test: koliko puta je backend trošio
                 return self._odgovor({"status": "ok", "item_id": it["id"], "hp_efekat": it["hp_efekat"],
                                       "mana_efekat": it["mana_efekat"], "cooldown_ms": it["cooldown_ms"],
-                                      "inventory": inv})
+                                      "buff_tip": it["buff_tip"], "buff_vrednost": it["buff_vrednost"],
+                                      "buff_trajanje_ms": it["buff_trajanje_ms"], "inventory": inv})
         self._nepoznato()
 
     def _quest(self, pl, ime, akcija, d):

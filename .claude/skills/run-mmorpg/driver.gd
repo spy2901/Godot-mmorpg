@@ -170,6 +170,10 @@ func _process(d):
 				root.get_node("GameState").token = ["", "quest-token", "posmatrac-token", "lovac-token"][_korak]
 				root.get_node("GameState").ime_igraca = ["", "QuestLik", "PosmatracLik", "LovacLik"][_korak]
 				root.size = Vector2i(1280, 720)
+			elif uloga == "buff": # korak=1 BuffLik (eliksiri), korak=2 Buff2Lik (napadač bez buff-a)
+				root.size = Vector2i(1280, 720) # tooltip i HUD kao u prozoru
+				root.get_node("GameState").token = "buff-token" if _korak == 1 else "buff2-token"
+				root.get_node("GameState").ime_igraca = "BuffLik" if _korak == 1 else "Buff2Lik"
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
 				root.size = Vector2i(1280, 720) # headless je 64x64: traka bi virila van prozora, a okvir cilja ležao preko nje
@@ -205,6 +209,7 @@ func _process(d):
 		"oprema": return _uloga_oprema()
 		"napredak": return _uloga_napredak()
 		"quest": return _uloga_quest()
+		"buff": return _uloga_buff()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -283,6 +288,7 @@ func _server(log: bool) -> bool:
 	_server_oprema()
 	_server_napredak()
 	_server_quest()
+	_server_buff()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -2636,3 +2642,290 @@ func _lovac_scenario(p) -> void:
 		"svila_za_krojaca pre reda: %s; prva ponuda '%s', posle predaje '%s'" % [preskok, ponuda1, ponuda2])
 	_klikni(_dugme("Decline"))
 	_q_kraj = true
+
+# ---------------------------------------------------------------- BUFFOVI (uloga buff: korak 1 BuffLik, korak 2 Buff2Lik)
+# Server: komande BuffLik-a iz dir/buff_cmd ("br steta N" | "br ubij" | "br ubijv VRSTA NIVO" | "br ubijn SEME"), stanje
+# BuffLik-a po serveru u dir/buff_server; jednom, bez klijenta: bacanje loot-a sa buff-om (30000) i retka oprema.
+var _b_srv_provere := false
+var _b_cmd := ""
+var _b_upisano := ""
+var _b_krenuo := false
+var _b_kraj := false
+var _b_br := 0
+const B_TABELA_N := 30 # test goblin: 30 x iron_ore 40%, pa se raspodela po napadaču jasno vidi (bez buff-a ~12, luck ~18)
+
+func _server_buff() -> void:
+	if dir == "" or _world() == null: return
+	if not _b_srv_provere:
+		_b_srv_provere = true
+		_b_provere_loota()
+	var p = _ai_lik("BuffLik")
+	if p == null: return
+	var cmd := FileAccess.get_file_as_string(dir + "/buff_cmd")
+	if cmd != "" and cmd != _b_cmd:
+		_b_cmd = cmd
+		_b_izvrsi(p, cmd.split(" "))
+	var preostalo := {}
+	var bf = p.get("_buffovi")
+	if bf is Dictionary:
+		for tip in bf: preostalo[tip] = int(bf[tip][1]) - Time.get_ticks_msec()
+	var st := JSON.stringify({"attack": p.izracunaj_damage(), "armor": int(p.get("armor")) + (p.buff("oklop") if p.has_method("buff") else 0),
+		"buffovi": preostalo, "hp": p.hp, "mrtav": p.mrtav})
+	if st != _b_upisano:
+		_b_upisano = st
+		_pisi("buff_server", st)
+
+func _b_izvrsi(p, c: PackedStringArray) -> void:
+	print("[S] buff komanda: ", " ".join(c))
+	var odgovor := c[0]
+	if c[1] == "steta":
+		var pre: int = p.hp
+		p.server_primi_damage(int(c[2]))
+		odgovor = "%s %d %d" % [c[0], pre, p.hp]
+	elif c[1] == "ubij": # odgovor odmah (klijent proverava stanje mrtvog), posle respawn-a nazad van putanje movera
+		p.server_primi_damage(1000000)
+		_pisi("buff_odgovor", odgovor)
+		await _cekaj(func(): return not p.mrtav, 8.0)
+		p.server_postavi_poziciju(Vector3(-22, 1.16, -2), true)
+		return
+	elif c[1] == "ubijv" or c[1] == "ubijn": # ubijv: samo BuffLik napada; ubijn: Buff2Lik udari prvi (1), BuffLik ubije
+		var vrsta := c[2] if c[1] == "ubijv" else "goblin"
+		var id := 940 + int(c[0]) % 10
+		_world().goblin_spawner.spawn({"vrsta": vrsta, "id": id, "pos": Vector3(-27, 2, 0), "nivo": int(c[3]) if c[1] == "ubijv" else 1})
+		await _cekaj(func(): return _nep("%s_%d" % [vrsta, id]) != null, 3.0)
+		var e = _nep("%s_%d" % [vrsta, id])
+		var p2 = _ai_lik("Buff2Lik")
+		if e and c[1] == "ubijn" and p2:
+			var tabela := []
+			for _i in B_TABELA_N: tabela.append({"id": "iron_ore", "sansa": 40})
+			e.loot_tabela = tabela
+			e.primi_damage(1, p2.get_multiplayer_authority())
+			# očekivano po napadaču: isto seme, isti redosled (Buff2Lik prvi, bez buff-a; BuffLik sa svojim luck-om)
+			# seme od zadatog naviše dok bez buff-a i sa luck-om ne daju različit broj (inače se hipoteze ne razlikuju)
+			var we = _telo_scene("goblin", 1)
+			we[1].loot_tabela = tabela
+			var seme := int(c[2])
+			var a: Array = []
+			var b: Array = []
+			for _k in 50:
+				seed(seme)
+				a = we[1].baci_loot(0)
+				b = we[1].baci_loot(p.buff("loot"))
+				if a.size() != b.size(): break
+				seme += 1
+			we[0].free()
+			seed(seme)
+			odgovor = "%s %d %d" % [c[0], a.size(), b.size()]
+		if e: e.primi_damage(1000000, p.get_multiplayer_authority())
+		await create_timer(2.0).timeout # loot i XP idu backendu posle smrti
+	_pisi("buff_odgovor", odgovor)
+
+# luck: bez buff-a isto bacanje (isto seme), sa +50% šansa x1.5 (najviše 100%); retka oprema i dalje samo trol nivoa 10
+func _b_provere_loota() -> void:
+	var we = _telo_scene("goblin", 1)
+	var e = we[1]
+	var metod := (e.get_script().get_script_method_list() as Array).filter(func(m): return m.name == "baci_loot")
+	if metod.is_empty() or metod[0].args.size() < 1: # bez implementacije: nema parametra za buff
+		we[0].free()
+		_provera("luck_bacanje_isto_bez_buffa_x1_5_sa_buffom", false, "Enemy.baci_loot nema parametar za buff loot-a")
+		_provera("luck_retka_oprema_samo_trol_10", false, "Enemy.baci_loot nema parametar za buff loot-a")
+		return
+	var lose := []
+	var puta := 30000
+	seed(7)
+	var bez: Array = e.baci_loot()
+	seed(7)
+	var nula: Array = e.baci_loot(0) if e.has_method("baci_loot") else []
+	if bez != nula: lose.append("seme 7: baci_loot() %s, baci_loot(0) %s" % [bez, nula])
+	var br := [{}, {}]
+	for i in 2:
+		for _k in puta:
+			for id in e.baci_loot(0 if i == 0 else 50): br[i][id] = br[i].get(id, 0) + 1
+	for l in e.loot_tabela:
+		var s0: float = 100.0 * br[0].get(l["id"], 0) / puta
+		var s1: float = 100.0 * br[1].get(l["id"], 0) / puta
+		var ocek := minf(float(l["sansa"]) * 1.5, 100.0)
+		if absf(s0 - float(l["sansa"])) > 1.5 or absf(s1 - ocek) > 1.5:
+			lose.append("%s: %.1f%% / %.1f%% (očekivano %.0f / %.0f)" % [l["id"], s0, s1, float(l["sansa"]), ocek])
+	we[0].free()
+	_provera("luck_bacanje_isto_bez_buffa_x1_5_sa_buffom", lose.is_empty(), "goblin 1, %d bacanja: %s" % [puta, lose if not lose.is_empty() else "sve stavke u ±1.5 poena"])
+	var retka := []
+	for n in [9, 10]:
+		var wt = _telo_scene("troll", n)
+		var br_r := {}
+		for _k in puta:
+			for id in wt[1].baci_loot(50):
+				if id in NAJBOLJA_OPREMA: br_r[id] = br_r.get(id, 0) + 1
+		wt[0].free()
+		for id in NAJBOLJA_OPREMA:
+			var udeo: float = 100.0 * br_r.get(id, 0) / puta
+			if (n == 9 and udeo > 0.0) or (n == 10 and (udeo < 0.4 or udeo > 0.8)): retka.append("trol %d %s %.2f%%" % [n, id, udeo])
+	_provera("luck_retka_oprema_samo_trol_10", retka.is_empty(), "luck +50%%, trol 9: 0, trol 10: 0.4-0.8%% (0.6 očekivano); odstupanja %s" % [retka])
+
+func _uloga_buff() -> bool:
+	var p = _moj()
+	if p == null or not p.get_node("ui/Control")._ucitano:
+		return (_b_krenuo and p == null) or t > 2 * MAX_T
+	if not _b_krenuo:
+		_b_krenuo = true
+		if _korak == 1: _buff_scenario(p)
+		else: _buff2_scenario(p)
+	return _b_kraj or t > 2 * MAX_T
+
+func _b_srv() -> Dictionary:
+	var d = JSON.parse_string(FileAccess.get_file_as_string(dir + "/buff_server"))
+	return d if d is Dictionary else {}
+
+func _b_cmd_posalji(cmd: String) -> PackedStringArray:
+	_b_br += 1
+	_pisi("buff_cmd", "%d %s" % [_b_br, cmd])
+	var br := str(_b_br)
+	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/buff_odgovor").split(" ")[0] == br, 8.0)
+	return FileAccess.get_file_as_string(dir + "/buff_odgovor").split(" ")
+
+func _b_stub(ime: String) -> Dictionary:
+	return await root.get_node("ApiManager").get_player(ime)
+
+func _b_xp_ore(ime: String) -> Array:
+	var pl := await _b_stub(ime)
+	return [int(pl.get("xp", -1)), _komada(pl, "iron_ore")]
+
+func _b_klijent(p) -> Dictionary:
+	var b = p.get("buffovi")
+	return b if b is Dictionary else {"(nema buffovi)": 0}
+
+func _b_hud(hud) -> String:
+	var l = hud.get("buff_label")
+	return l.text if l != null else "(nema BuffLabel)"
+
+# BuffLik: istek, napad x1.2, oklop +30, različiti istovremeno, osvežavanje, klijent ne postavlja buff, wisdom limit,
+# buff po igraču (wisdom i luck), smrt briše buffove, prodavnica, HUD i tooltip
+func _buff_scenario(p) -> void:
+	var inv = p.get_node("ui/InventoryUI")
+	var hud = p.get_node("ui/Control")
+	await _cekaj(func(): return int(_b_srv().get("attack", -1)) == 35 and int(_b_srv().get("armor", -1)) == 68, 5.0)
+	var pocetak := _b_srv()
+	var s1 := await _b_cmd_posalji("steta 25") # bez buff-a: 25 uz 68 armora -> 14
+	var bez_buffa := int(s1[1]) - int(s1[2]) if s1.size() > 2 else -1
+
+	# tooltip pre upotrebe
+	var i_str := _inv_index(inv, "elixir_of_strength")
+	if i_str >= 0: inv._on_slot_hover(i_str)
+	var tooltip: String = inv.tooltip_label.text
+
+	# istek: test eliksir napad +20% 2 s (samo u stub-u)
+	await inv._koristi_item("test_kratki_eliksir")
+	var sa_kratkim := await _cekaj(func(): return int(_b_srv().get("attack", -1)) == 42, 3.0)
+	await _cekaj(func(): return _b_hud(hud) != "", 1.0) # TopBar osveži labelu u svom _process (posle drajvera)
+	var hud_kratki := _b_hud(hud)
+	var istekao := await _cekaj(func(): return int(_b_srv().get("attack", -1)) == 35 and _b_srv().get("buffovi", {"x": 1}).is_empty() \
+		and _b_klijent(p).is_empty() and int(p.get("stat_attack")) == 35, 5.0)
+	await _cekaj(func(): return _b_hud(hud) == "", 1.0)
+	_provera("buff_istek_posle_trajanja", sa_kratkim and istekao and hud_kratki.begins_with("Attack +20%  0:0") and _b_hud(hud) == "",
+		"2 s buff: server attack 42=%s, posle isteka server %s, klijent buffovi %s, stat_attack %s, HUD tokom '%s' posle '%s'" % [
+		sa_kratkim, _b_srv(), _b_klijent(p), p.get("stat_attack"), hud_kratki, _b_hud(hud)])
+
+	# napad x1.2: (10 + iron_sword 25) * 1.2 = 42
+	await inv._koristi_item("elixir_of_strength")
+	var t_str := Time.get_ticks_msec()
+	var poruka: String = hud._poruka_label.text if hud._poruka_label else ""
+	var napad_ok := await _cekaj(func(): return int(_b_srv().get("attack", -1)) == 42 and int(p.get("stat_attack")) == 42, 3.0)
+	await _cekaj(func(): return _b_hud(hud) != "", 1.0)
+	var hud_napad := _b_hud(hud)
+	_provera("buff_napad_x1_2", napad_ok and int(pocetak.get("attack", -1)) == 35,
+		"attack pre %s, posle eliksira server %s klijent %s (očekivano 35 -> 42)" % [pocetak.get("attack"), _b_srv().get("attack"), p.get("stat_attack")])
+
+	# oklop +30: 25 štete uz 68 armora 14, uz 98 armora 12; napad i oklop istovremeno
+	await inv._koristi_item("elixir_of_defense")
+	var oklop_ok := await _cekaj(func(): return int(_b_srv().get("armor", -1)) == 98 and int(p.get("stat_armor")) == 98, 3.0)
+	var s2 := await _b_cmd_posalji("steta 25")
+	var sa_buffom := int(s2[1]) - int(s2[2]) if s2.size() > 2 else -1
+	_provera("buff_oklop_plus_30", oklop_ok and bez_buffa == 14 and sa_buffom == 12,
+		"armor server %s klijent %s; 25 štete: bez buff-a -%d (14), sa buff-om -%d (12)" % [_b_srv().get("armor"), p.get("stat_armor"), bez_buffa, sa_buffom])
+	var oba_k := _b_klijent(p)
+	await _cekaj(func(): return _b_hud(hud).split("\n").size() == 2, 1.0)
+	var hud_oba := _b_hud(hud)
+	_provera("buff_razliciti_istovremeno", int(_b_srv().get("attack", -1)) == 42 and int(_b_srv().get("armor", -1)) == 98
+		and _b_srv().get("buffovi", {}).has("napad") and _b_srv().get("buffovi", {}).has("oklop") and oba_k.has("napad") and oba_k.has("oklop")
+		and hud_oba.split("\n").size() == 2,
+		"server %s, klijent %s, HUD '%s'" % [_b_srv(), oba_k, hud_oba.replace("\n", " | ")])
+
+	# osvežavanje: isti eliksir posle cooldown-a (5 s) -> trajanje ponovo puno, napad i dalje 42 (ne 49)
+	await create_timer(maxf(0.0, 5.3 - (Time.get_ticks_msec() - t_str) / 1000.0)).timeout
+	var pre_osv := int(_b_srv().get("buffovi", {}).get("napad", -1))
+	await inv._koristi_item("elixir_of_strength")
+	await _cekaj(func(): return int(_b_srv().get("buffovi", {}).get("napad", -1)) > pre_osv + 3000, 3.0)
+	var posle_osv := int(_b_srv().get("buffovi", {}).get("napad", -1))
+	await create_timer(0.5).timeout
+	_provera("buff_osvezavanje_bez_sabiranja", posle_osv > pre_osv + 3000 and posle_osv > 55000 and int(_b_srv().get("attack", -1)) == 42
+		and int(p.get("stat_attack")) == 42,
+		"preostalo napad pre %d ms, posle %d ms; attack server %s klijent %s (42, ne 49)" % [pre_osv, posle_osv, _b_srv().get("attack"), p.get("stat_attack")])
+
+	# klijent ne može da postavi buff: jedini buff RPC je primi_buffove, a njega server prihvata samo od sebe
+	var rpc_buff := []
+	var cfg: Dictionary = p.get_script().get_rpc_config() # RPC-ovi su deklarisani u skripti (@rpc), ne na čvoru
+	rpc_buff = cfg.keys().map(func(m): return str(m)).filter(func(m): return "buff" in m)
+	if p.has_method("primi_buffove"):
+		p.primi_buffove.rpc_id(1, {"napad": [500, 600000], "oklop": [1000, 600000], "xp": [1000, 600000]})
+	await create_timer(1.0).timeout
+	_provera("klijent_ne_postavlja_buff", rpc_buff == ["primi_buffove"] and int(_b_srv().get("attack", -1)) == 42
+		and int(_b_srv().get("armor", -1)) == 98 and not _b_srv().get("buffovi", {}).has("xp"),
+		"buff RPC-ovi %s; posle lažnog primi_buffove ka serveru: %s" % [rpc_buff, _b_srv()])
+
+	# wisdom: nivo 1 ubija vuka 11 -> i dalje 25 XP (limit 25% nivoa); buff po igraču: Buff2Lik udari prvi, BuffLik ubije
+	await inv._koristi_item("elixir_of_wisdom")
+	await inv._koristi_item("elixir_of_luck")
+	await _cekaj(func(): return _b_srv().get("buffovi", {}).has("xp") and _b_srv().get("buffovi", {}).has("loot"), 3.0)
+	var x0 := await _b_xp_ore("BuffLik")
+	var wisdom := int(_b_srv().get("buffovi", {}).get("xp", 0)) > 0 # buff aktivan na serveru u trenutku ubistva
+	await _b_cmd_posalji("ubijv wolf 11")
+	var x1 := await _b_xp_ore("BuffLik")
+	_provera("wisdom_ne_prelazi_limit", wisdom and x1[0] - x0[0] == 25,
+		"BuffLik nivo 1, wisdom aktivan na serveru=%s, vuk 11: +%d XP (limit 25; bez limita 308 * 1.25)" % [wisdom, x1[0] - x0[0]])
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/buff2_spreman"), 30.0)
+	var b0 := await _b_xp_ore("Buff2Lik")
+	var r := await _b_cmd_posalji("ubijn 4242")
+	var x2 := await _b_xp_ore("BuffLik")
+	var b1 := await _b_xp_ore("Buff2Lik")
+	var oc_a := int(r[1]) if r.size() > 2 else -1 # Buff2Lik (bez buff-a)
+	var oc_b := int(r[2]) if r.size() > 2 else -1 # BuffLik (luck +50%)
+	_provera("buff_po_igracu_wisdom_i_luck", x2[0] - x1[0] == 9 and b1[0] - b0[0] == 7 and x2[1] - x1[1] == oc_b and b1[1] - b0[1] == oc_a and oc_a != oc_b,
+		"goblin 1: XP BuffLik +%d (9 = 7 * 1.25), Buff2Lik +%d (7); iron_ore BuffLik +%d (očekivano %d sa luck), Buff2Lik +%d (očekivano %d bez)" % [
+		x2[0] - x1[0], b1[0] - b0[0], x2[1] - x1[1], oc_b, b1[1] - b0[1], oc_a])
+
+	# smrt briše buffove (server i klijent), pa respawn
+	await _b_cmd_posalji("ubij")
+	var smrt_ok := await _cekaj(func(): return bool(p.get("mrtav")) and _b_klijent(p).is_empty() and _b_srv().get("buffovi", {"x": 1}).is_empty(), 3.0)
+	await _cekaj(func(): return _b_hud(hud) == "", 1.0)
+	var hud_smrt := _b_hud(hud)
+	_provera("smrt_brise_buffove", smrt_ok and hud_smrt == "", "mrtav %s, server %s, klijent %s, HUD '%s'" % [p.get("mrtav"), _b_srv(), _b_klijent(p), hud_smrt])
+	await _cekaj(func(): return not bool(p.get("mrtav")), 8.0)
+
+	# prodavnica nudi svih pet (luck više nije quest predmet), kupovina luck-a prolazi
+	var mu = root.get_node("MerchantUI")
+	mu.open("Merchant")
+	await _cekaj(func(): return mu._list != null and mu._list.get_child_count() > 3, 5.0)
+	var ponuda := []
+	for row in mu._list.get_children():
+		var l = row.get_child(0) if row.get_child_count() > 0 else null
+		if l is Label: ponuda.append(l.text.trim_prefix("? "))
+	var pet := ["Elixir of Strength", "Elixir of Defense", "Elixir of Wisdom", "Elixir of Luck", "Speed Potion"]
+	var fali := pet.filter(func(x): return not ponuda.has(x))
+	var kup: Dictionary = await p.kupi_na_serveru("elixir_of_luck")
+	mu._close()
+	var st := await _b_stub("BuffLik")
+	_provera("prodavnica_nudi_pet_buff_predmeta", fali.is_empty() and kup.get("ok", false) and _komada(st, "elixir_of_luck") == 1,
+		"nedostaje u ponudi %s, kupovina elixir_of_luck %s, u bazi %d" % [fali, kup, _komada(st, "elixir_of_luck")])
+
+	_provera("buff_hud_i_tooltip", "Click: Attack +20% for 60 s  |  cooldown 5 s" in tooltip and poruka == "Attack +20% for 60 s"
+		and hud_napad.begins_with("Attack +20%  ") and (hud_napad.ends_with("1:00") or hud_napad.ends_with("0:59")),
+		"tooltip '%s', poruka '%s', HUD '%s'" % [tooltip.replace("\n", " | "), poruka, hud_napad])
+	_pisi("buff_gotov", "1")
+	_b_kraj = true
+
+# Buff2Lik: samo napadač bez buff-a; ostaje prijavljen dok BuffLik ne završi
+func _buff2_scenario(_p) -> void:
+	_pisi("buff2_spreman", "1")
+	while not FileAccess.file_exists(dir + "/buff_gotov") and t < 2 * MAX_T:
+		await create_timer(0.2).timeout
+	_b_kraj = true
