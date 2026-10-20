@@ -2623,9 +2623,9 @@ func _lovac_scenario(p) -> void:
 	var qm = root.get_node("QuestManager")
 	# limit: vuk 11 (308 XP uz +10 razlike) -> najviše 25% od 100 = 25; fer borba (goblin 1, 7 XP) nije ograničena
 	await _q_cmd_posalji("ubijv wolf 11 LovacLik")
+	await _cekaj_stub("LovacLik", func(s): return s.get("xp_dnevnik", []).size() >= 1) # redosled dnevnika = redosled ubistava
 	await _q_cmd_posalji("ubij 1 LovacLik")
-	await create_timer(0.5).timeout
-	var st: Dictionary = await _quest_stub("LovacLik")
+	var st: Dictionary = await _cekaj_stub("LovacLik", func(s): return s.get("xp_dnevnik", []).size() >= 2)
 	var xp_ub: Array = st.get("xp_dnevnik", []).map(func(x): return int(x))
 	_provera("xp_limit_po_ubistvu", xp_ub == [25, 7], "nivo 1: vuk 11 -> %s, goblin 1 -> %s (očekivano 25 = 25%% od 100, pa 7)" % [
 		xp_ub[0] if xp_ub.size() > 0 else "-", xp_ub[1] if xp_ub.size() > 1 else "-"])
