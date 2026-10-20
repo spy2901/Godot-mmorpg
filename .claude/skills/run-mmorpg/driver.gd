@@ -2803,8 +2803,10 @@ func _b_cmd_posalji(cmd: String) -> PackedStringArray:
 func _b_stub(ime: String) -> Dictionary:
 	return await root.get_node("ApiManager").get_player(ime)
 
-func _b_xp_ore(ime: String) -> Array:
-	var pl := await _b_stub(ime)
+func _b_xp_ore(ime: String, uslov := Callable()) -> Array: # uslov(xp, iron_ore): čeka ga u stub-u (_cekaj_stub)
+	var pl: Dictionary
+	if uslov.is_valid(): pl = await _cekaj_stub(ime, func(s): return uslov.call(int(s.get("xp", -1)), _komada(s, "iron_ore")))
+	else: pl = await _b_stub(ime)
 	return [int(pl.get("xp", -1)), _komada(pl, "iron_ore")]
 
 func _b_klijent(p) -> Dictionary:
@@ -2896,16 +2898,17 @@ func _buff_scenario(p) -> void:
 	var x0 := await _b_xp_ore("BuffLik")
 	var wisdom := int(_b_srv().get("buffovi", {}).get("xp", 0)) > 0 # buff aktivan na serveru u trenutku ubistva
 	await _b_cmd_posalji("ubijv wolf 11")
-	var x1 := await _b_xp_ore("BuffLik")
+	var x1 := await _b_xp_ore("BuffLik", func(xp, _o): return xp != x0[0])
 	_provera("wisdom_ne_prelazi_limit", wisdom and x1[0] - x0[0] == 25,
 		"BuffLik nivo 1, wisdom aktivan na serveru=%s, vuk 11: +%d XP (limit 25; bez limita 308 * 1.25)" % [wisdom, x1[0] - x0[0]])
 	await _cekaj(func(): return FileAccess.file_exists(dir + "/buff2_spreman"), PARTNER_ROK)
 	var b0 := await _b_xp_ore("Buff2Lik")
 	var r := await _b_cmd_posalji("ubijn 4242")
-	var x2 := await _b_xp_ore("BuffLik")
-	var b1 := await _b_xp_ore("Buff2Lik")
 	var oc_a := int(r[1]) if r.size() > 2 else -1 # Buff2Lik (bez buff-a)
 	var oc_b := int(r[2]) if r.size() > 2 else -1 # BuffLik (luck +50%)
+	# XP i loot stižu u stub posle smrti goblina: čeka se XP i očekivani broj iron_ore (pogrešan broj padne posle roka)
+	var x2 := await _b_xp_ore("BuffLik", func(xp, o): return xp != x1[0] and o == x1[1] + oc_b)
+	var b1 := await _b_xp_ore("Buff2Lik", func(xp, o): return xp != b0[0] and o == b0[1] + oc_a)
 	_provera("buff_po_igracu_wisdom_i_luck", x2[0] - x1[0] == 9 and b1[0] - b0[0] == 7 and x2[1] - x1[1] == oc_b and b1[1] - b0[1] == oc_a and oc_a != oc_b,
 		"goblin 1: XP BuffLik +%d (9 = 7 * 1.25), Buff2Lik +%d (7); iron_ore BuffLik +%d (očekivano %d sa luck), Buff2Lik +%d (očekivano %d bez)" % [
 		x2[0] - x1[0], b1[0] - b0[0], x2[1] - x1[1], oc_b, b1[1] - b0[1], oc_a])
