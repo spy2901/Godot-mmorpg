@@ -273,7 +273,8 @@ PLAYERS["BuffLik"] = dict(PLAYERS["TestLik"], ime="BuffLik", napad_damage=10, hp
                               {"slot": 1, "id": "elixir_of_defense", "kolicina": 1},
                               {"slot": 2, "id": "elixir_of_wisdom", "kolicina": 1},
                               {"slot": 3, "id": "elixir_of_luck", "kolicina": 1},
-                              {"slot": 4, "id": "test_kratki_eliksir", "kolicina": 1}])
+                              {"slot": 4, "id": "test_kratki_eliksir", "kolicina": 1},
+                              {"slot": 5, "id": "speed_potion", "kolicina": 1}])
 PLAYERS["Buff2Lik"] = dict(PLAYERS["TestLik"], ime="Buff2Lik", napad_damage=10, hp=100, max_hp=100, pos_x=-22, pos_y=1.16,
                            pos_z=3, equipment={}, inventory=[])
 XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik", "LovacLik", "BuffLik", "Buff2Lik"}

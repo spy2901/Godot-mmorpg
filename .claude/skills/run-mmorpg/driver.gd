@@ -2909,13 +2909,28 @@ func _buff_scenario(p) -> void:
 	for row in mu._list.get_children():
 		var l = row.get_child(0) if row.get_child_count() > 0 else null
 		if l is Label: ponuda.append(l.text.trim_prefix("? "))
-	var pet := ["Elixir of Strength", "Elixir of Defense", "Elixir of Wisdom", "Elixir of Luck", "Speed Potion"]
-	var fali := pet.filter(func(x): return not ponuda.has(x))
+	var cetiri := ["Elixir of Strength", "Elixir of Defense", "Elixir of Wisdom", "Elixir of Luck"]
+	var fali := cetiri.filter(func(x): return not ponuda.has(x))
 	var kup: Dictionary = await p.kupi_na_serveru("elixir_of_luck")
+	var speed_pre := _komada(await _b_stub("BuffLik"), "speed_potion")
+	var kup_speed: Dictionary = await p.kupi_na_serveru("speed_potion")
 	mu._close()
 	var st := await _b_stub("BuffLik")
-	_provera("prodavnica_nudi_pet_buff_predmeta", fali.is_empty() and kup.get("ok", false) and _komada(st, "elixir_of_luck") == 1,
+	_provera("prodavnica_nudi_cetiri_buff_predmeta", fali.is_empty() and kup.get("ok", false) and _komada(st, "elixir_of_luck") == 1,
 		"nedostaje u ponudi %s, kupovina elixir_of_luck %s, u bazi %d" % [fali, kup, _komada(st, "elixir_of_luck")])
+	_provera("prodavnica_ne_nudi_speed_potion", not ponuda.has("Speed Potion") and not kup_speed.get("ok", true)
+		and _komada(st, "speed_potion") == speed_pre,
+		"Speed Potion u ponudi=%s, kupovina %s, u bazi %d -> %d" % [ponuda.has("Speed Potion"), kup_speed, speed_pre, _komada(st, "speed_potion")])
+
+	# speed_potion: upotreba odbijena, komad ostaje (u bazi i u inventaru)
+	var sp_baza := _komada(await _b_stub("BuffLik"), "speed_potion")
+	var sp_odg: Dictionary = await p.koristi_item_na_serveru("speed_potion")
+	await create_timer(0.5).timeout
+	var sp_posle := _komada(await _b_stub("BuffLik"), "speed_potion")
+	var sp_inv := _inv_index(inv, "speed_potion") >= 0
+	_provera("speed_potion_upotreba_odbijena_ne_trosi", sp_baza == 1 and sp_posle == 1 and sp_inv and not sp_odg.get("ok", true)
+		and str(sp_odg.get("poruka", "")) == "This item can't be used" and not _b_srv().get("buffovi", {}).has("brzina"),
+		"u bazi %d -> %d, u inventaru=%s, odgovor %s, server buffovi %s" % [sp_baza, sp_posle, sp_inv, sp_odg, _b_srv().get("buffovi")])
 
 	_provera("buff_hud_i_tooltip", "Click: Attack +20% for 60 s  |  cooldown 5 s" in tooltip and poruka == "Attack +20% for 60 s"
 		and hud_napad.begins_with("Attack +20%  ") and (hud_napad.ends_with("1:00") or hud_napad.ends_with("0:59")),
