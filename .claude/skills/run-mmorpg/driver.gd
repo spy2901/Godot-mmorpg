@@ -83,7 +83,7 @@ const MAX_T := 120.0    # zaštita od zaglavljivanja
 # Rok je gornja granica: čeka se uslov. Uloga koja čeka partnera živi 2 * MAX_T.
 const PARTNER_ROK := MAX_T
 const PORUKA_SLEDECA := 2.3 # s: duže od TopBar.PORUKA_TRAJANJE
-var _max_t := MAX_T     # server u repro_login.sh radi duže (maxt=)
+var _max_t := 3 * MAX_T # server: duže od uloga (2 * MAX_T od svog starta); repro_login.sh zadaje svoj (maxt=)
 var _aktivnost := false # prijava: reliable zahtevi za predmet dok traje sesija
 var _izgubi_reset := false # prijava: klijent odbaci reset posle prijave (test hook)
 var _korak := 0           # raspored: 1 = menja raspored i odjavi se, 2 = ponovna prijava (novi proces)
@@ -523,8 +523,8 @@ func _mover_ceka_gasenje() -> bool:
 		var ok: bool = current_scene.get("_error_label") != null and current_scene._error_label.text == "Lost connection to the server"
 		_provera("server_prekid_vraca_na_login", ok, "scena=%s poruka='%s' token='%s'" % [scena, current_scene._error_label.text, root.get_node("GameState").token])
 		return true
-	if t - _ceka_gasenje >= 70.0: # run.sh čeka ostale uloge do 60 s pre gašenja servera
-		_provera("server_prekid_vraca_na_login", false, "nema promene scene za 70 s (scena=%s poruka='%s')" % [scena, poruka])
+	if t - _ceka_gasenje >= 250.0: # run.sh čeka ostale uloge do 240 s pre gašenja servera
+		_provera("server_prekid_vraca_na_login", false, "nema promene scene za 250 s (scena=%s poruka='%s')" % [scena, poruka])
 		return true
 	return false
 

@@ -124,10 +124,14 @@ for _ in $(seq 240); do
   kill -0 $M 2>/dev/null || break
   sleep 0.5
 done
-for _ in $(seq 120); do # raspored, cilj, drugi i AI scenario (server upiše ai_gotov) moraju da završe pre gašenja servera
+# raspored, cilj, drugi i AI scenario (server upiše ai_gotov) moraju da završe pre gašenja servera. Rok 240 s = 2 * MAX_T
+# (driver.gd): uloga koja čeka partnera (PARTNER_ROK) živi toliko; uspeh je čim sve završe. Mover čeka gašenje 250 s.
+CEKANJE_OD=$SECONDS
+for _ in $(seq 480); do
   { kill -0 $R || kill -0 $C || kill -0 $DR || kill -0 $A1 || kill -0 $A2 || kill -0 $OP || kill -0 $O3 || kill -0 $NP || kill -0 $Q1 || kill -0 $Q2 || kill -0 $Q3 || kill -0 $BF || [ ! -f "$OUT/ai_gotov" ]; } 2>/dev/null || break
   sleep 0.5
 done
+echo "uloge završile $((SECONDS - CEKANJE_OD)) s posle movera"
 touch "$OUT/ugasi_server"
 wait $M $O $S $P $V $R $C $DR $A1 $A2 $OP $O3 $NP $Q1 $Q2 $Q3 $BF
 
