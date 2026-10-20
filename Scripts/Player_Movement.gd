@@ -217,9 +217,9 @@ func _ready():
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)
 	kamera.current = true
 
-# Ukupan damage po udarcu: baza lika + bonus oružja
+# Ukupan damage po udarcu: (baza lika + bonus oružja) * buff napada
 func izracunaj_damage() -> int:
-	return napad_damage + bonus_oruzja
+	return roundi((napad_damage + bonus_oruzja) * (100 + buff("napad")) / 100.0)
 
 # Klijent: jedan pritisak = jedan zahtev. Metu, domet, cooldown i štetu određuje server.
 func napadni() -> void:
@@ -570,6 +570,8 @@ func _process(delta: float) -> void:
 		print("[SEQ-S] t=%d dugačak server frame %d ms" % [Time.get_ticks_msec(), int(delta * 1000)])
 	if not multiplayer.is_server() or not _stanje_ucitano or mrtav:
 		return
+	if not _buffovi.is_empty():
+		_proveri_istek_buffova()
 	_regen_akum += delta
 	if _regen_akum < 1.0:
 		return
@@ -594,15 +596,17 @@ func server_primi_damage(sirova_steta: int, nivo_napadaca := 1) -> void:
 		return
 	if Time.get_ticks_msec() < _neosjetljiv_do_ms:
 		return
-	var steta := steta_posle_oklopa(sirova_steta, armor, nivo_napadaca)
+	var oklop := armor + buff("oklop")
+	var steta := steta_posle_oklopa(sirova_steta, oklop, nivo_napadaca)
 	hp = maxi(hp - steta, 0)
-	print("[DMG] ", ime_lika, " -", steta, " (oklop ", armor, ") -> hp ", hp)
+	print("[DMG] ", ime_lika, " -", steta, " (oklop ", oklop, ") -> hp ", hp)
 	if hp == 0:
 		_server_umri()
 	_posalji_hp()
 
 func _server_umri() -> void:
 	mrtav = true
+	_ocisti_buffove()
 	print("[DEATH] ", ime_lika, " je poginuo, respawn za ", RESPAWN_DELAY, " s")
 	await get_tree().create_timer(RESPAWN_DELAY).timeout
 	if not is_instance_valid(self) or not mrtav or ime_lika == "":
@@ -660,7 +664,7 @@ func _preracunaj_statistike() -> void:
 	print("[OPREMA] ", ime_lika, ": attack ", izracunaj_damage(), ", armor ", armor, ", max HP ", max_hp, " ", oprema)
 
 func _javi_statistike() -> void:
-	_odgovori(primi_statistike, {"attack": izracunaj_damage(), "armor": armor, "max_hp": max_hp})
+	_odgovori(primi_statistike, {"attack": izracunaj_damage(), "armor": armor + buff("oklop"), "max_hp": max_hp})
 
 @rpc("any_peer", "reliable")
 func primi_statistike(d: Dictionary) -> void:
@@ -670,6 +674,76 @@ func primi_statistike(d: Dictionary) -> void:
 	stat_armor = int(d.get("armor", 0))
 	stat_max_hp = int(d.get("max_hp", 0))
 	statistike_promenjene.emit()
+
+# ---------------------------------------------------------------- BUFFOVI (server je autoritet)
+
+# Privremeni efekti potrošnih predmeta (items.buff_*, migracija 010). Samo u memoriji servera: smrt, odjava i restart
+# ih brišu. Isti buff ponovo osvežava trajanje (vrednost se ne sabira); različiti važe istovremeno.
+# Vrednost je procenat, osim oklopa (apsolutno). Klijent ne šalje buff: dobija ga samo kroz primi_buffove.
+const BUFF_TIPOVI := ["napad", "oklop", "xp", "loot"]
+signal buffovi_promenjeni # klijent: stiglo novo stanje buffova od servera
+var _buffovi := {} # server: tip -> [vrednost, ms kad ističe]
+var buffovi := {}  # klijent: tip -> [vrednost, lokalni ms kad ističe]
+
+# Server: trenutna vrednost buff-a (0 ako ga nema ili je istekao)
+func buff(tip: String) -> int:
+	var b = _buffovi.get(tip)
+	return int(b[0]) if b != null and Time.get_ticks_msec() < int(b[1]) else 0
+
+func _dodaj_buff(tip: String, vrednost: int, trajanje_ms: int) -> void:
+	_buffovi[tip] = [vrednost, Time.get_ticks_msec() + trajanje_ms]
+	print("[BUFF] ", ime_lika, " ", tip, " +", vrednost, " ", trajanje_ms, " ms")
+	_buffovi_promenjeni()
+
+func _ocisti_buffove() -> void:
+	if _buffovi.is_empty():
+		return
+	_buffovi.clear()
+	_buffovi_promenjeni()
+
+func _proveri_istek_buffova() -> void:
+	var sada := Time.get_ticks_msec()
+	var istekli := _buffovi.keys().filter(func(tip): return sada >= int(_buffovi[tip][1]))
+	if istekli.is_empty():
+		return
+	for tip in istekli:
+		_buffovi.erase(tip)
+		print("[BUFF] ", ime_lika, " ", tip, " istekao")
+	_buffovi_promenjeni()
+
+# Vlasniku ide preostalo vreme (ne apsolutno: satovi servera i klijenta se razlikuju); napad i oklop menjaju statistike
+func _buffovi_promenjeni() -> void:
+	var sada := Time.get_ticks_msec()
+	var d := {}
+	for tip in _buffovi:
+		d[tip] = [int(_buffovi[tip][0]), maxi(0, int(_buffovi[tip][1]) - sada)]
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik == multiplayer.get_unique_id():
+		primi_buffove(d)
+	elif vlasnik in multiplayer.get_peers(): # vlasnik je možda otišao (istek dok server snima odjavu)
+		primi_buffove.rpc_id(vlasnik, d)
+	else:
+		return
+	_javi_statistike()
+
+@rpc("any_peer", "reliable")
+func primi_buffove(d: Dictionary) -> void:
+	if not _poziv_od_servera():
+		return
+	var sada := Time.get_ticks_msec()
+	buffovi = {}
+	for tip in d:
+		buffovi[str(tip)] = [int(d[tip][0]), sada + int(d[tip][1])]
+	buffovi_promenjeni.emit()
+
+# Tekst efekta za HUD, tooltip i poruku (engleski ključevi kroz tr())
+static func opis_buffa(tip: String, vrednost: int) -> String:
+	match tip:
+		"napad": return TranslationServer.translate("Attack +%d%%") % vrednost
+		"oklop": return TranslationServer.translate("Armor +%d") % vrednost
+		"xp": return TranslationServer.translate("XP +%d%%") % vrednost
+		"loot": return TranslationServer.translate("Loot chance +%d%%") % vrednost
+	return ""
 
 # Klijent: zahtev za opremanje (item_id) ili skidanje ("") predmeta u slotu; čeka odgovor servera.
 func opremi_na_serveru(slot: String, item_id: String) -> Dictionary:
@@ -1110,11 +1184,13 @@ func _iskoristi_item(item_id: String) -> Dictionary:
 	var item: Dictionary = await ApiManager.get_item(item_id)
 	var hp_e := int(item.get("hp_efekat", 0))
 	var mana_e := int(item.get("mana_efekat", 0))
-	if item.is_empty() or item.has("error") or str(item.get("tip", "")) != "consumable" or hp_e + mana_e <= 0:
+	var buff_tip = item.get("buff_tip") # null pre migracije 010 i za predmete bez buff-a
+	var je_buff: bool = buff_tip is String and BUFF_TIPOVI.has(buff_tip)
+	if item.is_empty() or item.has("error") or str(item.get("tip", "")) != "consumable" or (hp_e + mana_e <= 0 and not je_buff):
 		return {"ok": false, "poruka": "This item can't be used"}
 	if mrtav:
 		return {"ok": false, "poruka": "You are dead"}
-	if not ((hp_e > 0 and hp < max_hp) or (mana_e > 0 and mana < max_mana)):
+	if not je_buff and not ((hp_e > 0 and hp < max_hp) or (mana_e > 0 and mana < max_mana)):
 		return {"ok": false, "poruka": "Already at full health" if hp_e > 0 else "Already at full mana"}
 	var ime := ime_lika
 	var r: Dictionary = await ApiManager.koristi_item(ime, item_id)
@@ -1130,12 +1206,21 @@ func _iskoristi_item(item_id: String) -> Dictionary:
 	var s: Dictionary = _ucitano_stanje if _poslednje_stanje.is_empty() else _poslednje_stanje
 	if r.has("inventory") and not s.is_empty():
 		s["inventory"] = r["inventory"].map(_int_unos) # JSON: brojevi kao float, /save traži int
+	# buff po backend-u (izvor istine je baza), samo poznat tip
+	var bt = r.get("buff_tip")
+	var bv := int(r.get("buff_vrednost", 0))
+	var btr := int(r.get("buff_trajanje_ms", 0))
+	if not (bt is String and BUFF_TIPOVI.has(bt) and btr > 0):
+		bt = null
 	if not mrtav: # poginuo dok smo čekali backend: komad je potrošen, efekta nema
 		hp = mini(hp + hp_e, max_hp)
 		mana = mini(mana + mana_e, max_mana)
 		_posalji_hp()
+		if bt != null:
+			_dodaj_buff(bt, bv, btr)
 	print("[ITEM] ", ime, " koristio ", item_id, " -> hp ", hp, ", mana ", mana)
-	return {"ok": true, "item_id": item_id, "hp_efekat": hp_e, "mana_efekat": mana_e, "cooldown_ms": cd}
+	return {"ok": true, "item_id": item_id, "hp_efekat": hp_e, "mana_efekat": mana_e, "cooldown_ms": cd,
+		"buff_tip": bt if bt != null else "", "buff_vrednost": bv, "buff_trajanje_ms": btr}
 
 # Enemy poziva na serveru za svakog napadača kad neprijatelj umre
 func server_zabelezi_kill(tip: String) -> void:

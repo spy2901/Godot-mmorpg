@@ -72,10 +72,11 @@ static func xp_mnozilac(razlika: int) -> float:
 static func xp_za_razliku(xp: int, razlika: int) -> int:
 	return maxi(1, roundi(xp * xp_mnozilac(razlika)))
 
-# XP jednog ubistva za igrača nivoa nivo_igraca: razlika nivoa, pa ograničenje (nizak lik ne preskače nivoe)
-static func xp_ubistva(xp: int, nivo_neprijatelja: int, nivo_igraca: int) -> int:
+# XP jednog ubistva za igrača nivoa nivo_igraca: razlika nivoa, buff XP-a igrača (%), pa ograničenje (nizak lik ne
+# preskače nivoe ni sa buff-om)
+static func xp_ubistva(xp: int, nivo_neprijatelja: int, nivo_igraca: int, buff_xp := 0) -> int:
 	var limit := maxi(1, floori(xp_do_sledeceg(nivo_igraca) * XP_UBISTVA_MAX_UDEO))
-	return mini(xp_za_razliku(xp, nivo_neprijatelja - nivo_igraca), limit)
+	return mini(roundi(xp_za_razliku(xp, nivo_neprijatelja - nivo_igraca) * (100 + buff_xp) / 100.0), limit)
 
 func _skaliraj() -> void:
 	max_hp = roundi(max_hp * (1.0 + HP_PO_NIVOU * (nivo - 1)))
@@ -253,10 +254,11 @@ func _obavesti_smrt() -> void:
 	pass  # samo "reliable" okidač da se despawn sigurno propagira i pre nego što queue_free stigne
 
 # Kockice za jednog igrača. Stavka sa "min_nivo" pada samo od instance bar tog nivoa (najbolja oprema: trol nivoa 10).
-func baci_loot() -> Array:
+# buff_loot (%) igrača povećava šansu (najviše 100%), ali ne zaobilazi min_nivo.
+func baci_loot(buff_loot := 0) -> Array:
 	var dobijeno: Array = []
 	for loot in loot_tabela:
-		if nivo >= int(loot.get("min_nivo", 0)) and randf() * 100.0 < float(loot["sansa"]):
+		if nivo >= int(loot.get("min_nivo", 0)) and randf() * 100.0 < minf(float(loot["sansa"]) * (100 + buff_loot) / 100.0, 100.0):
 			dobijeno.append(loot["id"])
 	return dobijeno
 
@@ -284,7 +286,7 @@ func _isplati_personal_loot() -> void:
 		if igrac.mrtav:
 			continue  # mrtav igrač ne dobija loot
 		# bacanje kockica je sinhrono, a upis u bazu preuzima igrač
-		var dobijeno := baci_loot()
+		var dobijeno := baci_loot(igrac.buff("loot")) # buff svakog napadača posebno
 		if not dobijeno.is_empty():
 			igrac.server_isplati_loot(dobijeno)
 
@@ -294,7 +296,7 @@ func _isplati_kill() -> void:
 		var igrac = _nadji_igraca_po_id(peer_id)
 		if igrac == null:
 			continue
-		var xp := xp_ubistva(xp_nagrada, int(nivo), int(igrac.nivo_lika))
+		var xp := xp_ubistva(xp_nagrada, int(nivo), int(igrac.nivo_lika), igrac.buff("xp")) # buff svakog napadača
 		igrac.server_zabelezi_kill(ime.to_lower())
 		igrac.server_isplati_xp(xp, "kill:" + ime.to_lower())
 		if peer_id == multiplayer.get_unique_id():

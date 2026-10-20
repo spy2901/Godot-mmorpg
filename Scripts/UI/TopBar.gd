@@ -20,6 +20,10 @@ var level = 1
 var gold = 100
 var gold_label: Label
 
+# Buffovi (stanje drži server, ovde samo prikaz sa preostalim vremenom); izgled u buff_stil.gd
+const BUFF_STIL := preload("res://Scripts/UI/buff_stil.gd")
+var buff_label: Label
+
 # Quest tracker
 var quest_tracker: Label
 var quest_abandon_btn: Button
@@ -106,6 +110,17 @@ func _ready():
 	gold_label.add_theme_font_size_override("font_size", 15)
 	gold_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 	add_child(gold_label)
+
+	buff_label = Label.new()
+	buff_label.name = "BuffLabel"
+	buff_label.position = BUFF_STIL.POZICIJA
+	buff_label.size.x = BUFF_STIL.SIRINA
+	buff_label.add_theme_font_size_override("font_size", BUFF_STIL.FONT_VELICINA)
+	buff_label.add_theme_color_override("font_color", BUFF_STIL.BOJA_TEKST)
+	buff_label.add_theme_color_override("font_shadow_color", BUFF_STIL.BOJA_SENKA)
+	buff_label.add_theme_constant_override("shadow_offset_x", BUFF_STIL.SENKA_POMERAJ)
+	buff_label.add_theme_constant_override("shadow_offset_y", BUFF_STIL.SENKA_POMERAJ)
+	add_child(buff_label)
 
 	# Quest tracker (gore desno)
 	var screen_w = get_viewport().get_visible_rect().size.x
@@ -403,7 +418,19 @@ func dodaj_item(ime):
 
 # ---------------------------------------------------------------- PROCESS
 
+# Jedan red po buff-u: "Attack +20%  0:42"; istekao lokalno se ne prikazuje (server javlja istek posebno)
+func tekst_buffova() -> String:
+	var p = get_parent().get_parent()
+	var sada := Time.get_ticks_msec()
+	var redovi: PackedStringArray = []
+	for tip in p.buffovi:
+		var ostalo := ceili((int(p.buffovi[tip][1]) - sada) / 1000.0)
+		if ostalo > 0:
+			redovi.append(p.opis_buffa(tip, int(p.buffovi[tip][0])) + BUFF_STIL.RAZMAK_VREME + "%d:%02d" % [ostalo / 60, ostalo % 60])
+	return "\n".join(redovi)
+
 func _process(delta):
+	buff_label.text = tekst_buffova()
 	if je_mrtav:
 		_osvezi_smrt_ekran()  # odbrojavanje
 	elif Input.is_action_just_pressed("ui_inventory"):

@@ -154,3 +154,11 @@ Wolf,Wolf,Vuk
 Spider,Spider,Pauk
 Wraith,Wraith,Utvara
 Hunter,Hunter,Lovac
+Attack +%d%%,Attack +%d%%,Napad +%d%%
+XP +%d%%,XP +%d%%,XP +%d%%
+Loot chance +%d%%,Loot chance +%d%%,Šansa za plen +%d%%
+%s for %d s,%s for %d s,"%s, %d s"
+"
+Click: %s for %d s  |  cooldown %.0f s","
+Click: %s for %d s  |  cooldown %.0f s","
+Klik: %s, %d s  |  cooldown %.0f s"

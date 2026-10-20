@@ -416,6 +416,8 @@ func _koristi_item(item_id: String) -> void:
 		var delovi: PackedStringArray = []
 		if int(r.get("hp_efekat", 0)) > 0: delovi.append(tr("+%d HP") % int(r.hp_efekat))
 		if int(r.get("mana_efekat", 0)) > 0: delovi.append(tr("+%d Mana") % int(r.mana_efekat))
+		var opis: String = get_parent().get_parent().opis_buffa(str(r.get("buff_tip", "")), int(r.get("buff_vrednost", 0)))
+		if opis != "": delovi.append(tr("%s for %d s") % [opis, int(r.get("buff_trajanje_ms", 0)) / 1000])
 		poruka = "  ".join(delovi)
 	var hud = get_tree().get_first_node_in_group("hud")
 	if hud:
@@ -511,6 +513,12 @@ func _on_slot_hover(index: int):
 		tooltip_label.text += tr("\nClick: %s%s  |  cooldown %.0f s") % [
 			tr("+%d HP") % hp_e + " " if hp_e > 0 else "", tr("+%d Mana") % mana_e if mana_e > 0 else "",
 			int(hovered_item.get("cooldown_ms", 0)) / 1000.0]
+	var buff_tip = hovered_item.get("buff_tip")
+	var opis: String = get_parent().get_parent().opis_buffa(str(buff_tip), int(hovered_item.get("buff_vrednost", 0))) \
+		if hovered_item.get("tip", "") == "consumable" and buff_tip is String else ""
+	if opis != "":
+		tooltip_label.text += tr("\nClick: %s for %d s  |  cooldown %.0f s") % [opis,
+			int(hovered_item.get("buff_trajanje_ms", 0)) / 1000, int(hovered_item.get("cooldown_ms", 0)) / 1000.0]
 	tooltip_label.add_theme_color_override("font_color", tip_boja)
 	tooltip_panel.visible = true
 
