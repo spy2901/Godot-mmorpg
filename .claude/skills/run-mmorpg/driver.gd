@@ -2467,6 +2467,17 @@ func _q_dijalog() -> String: # "mod naslov" otvorenog dijaloga
 func _quest_stub(ime: String) -> Dictionary:
 	return await root.get_node("ApiManager").get_player(ime)
 
+# Server javlja ubistvo posle fiksnih 1.5 s, a loot/XP/kill credit stižu backendu (stub) posebnim zahtevima: čeka se da ih
+# stub ima (rok je gornja granica), ne fiksno vreme. Vraća poslednje pročitano stanje lika.
+const STUB_ROK := 10.0
+func _cekaj_stub(ime: String, uslov: Callable, sek := STUB_ROK) -> Dictionary:
+	var kraj := Time.get_ticks_msec() + int(sek * 1000)
+	var st: Dictionary = await _quest_stub(ime)
+	while not uslov.call(st) and Time.get_ticks_msec() < kraj:
+		await create_timer(0.2).timeout
+		st = await _quest_stub(ime)
+	return st
+
 func _komada(pl: Dictionary, id: String) -> int:
 	var n := 0
 	for e in pl.get("inventory", []):
@@ -2512,8 +2523,9 @@ func _quest_scenario(p) -> void:
 	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/quest_posmatrac").begins_with("progres"), PARTNER_ROK)
 	await _q_cmd_posalji("ubij 1 QuestLik PosmatracLik")
 	await _cekaj(func(): return qm.progres == 1, 3.0)
-	await create_timer(0.5).timeout
-	st = await _quest_stub("QuestLik")
+	# QuestLik-ov loot, kill i progres su u stub-u; PosmatracLik-ov (da ga ima) šalje server u istom trenutku, pre QuestLik-ovog
+	st = await _cekaj_stub("QuestLik", func(s): return _komada(s, "goblin_ear") >= 1 and not s.get("kill_dnevnik", []).is_empty() \
+		and int(s.get("quest_progres", 0)) >= 1)
 	var po: Dictionary = await _quest_stub("PosmatracLik")
 	var po_klijent := FileAccess.get_file_as_string(dir + "/quest_posmatrac")
 	_provera("loot_samo_napadacima", _komada(st, "goblin_ear") == 1 and po.get("inventory", []).is_empty(),
@@ -2528,8 +2540,8 @@ func _quest_scenario(p) -> void:
 	for d in [3, 8, 2, 0, -2, -3, -4, -5, -6, -7, -11]:
 		await _q_cmd_posalji("ubij %d PosmatracLik" % (12 + d))
 		ocekivano.append(maxi(1, roundi(roundi(maxf(1, roundi(_xp_kriva(12 + d) / 15.0))) * _ocekivan_mnozilac(d))))
-	await create_timer(1.0).timeout
-	po = await _quest_stub("PosmatracLik")
+		var n := ocekivano.size() # sledeće ubistvo tek kad je XP ovog u stub-u: redosled dnevnika = redosled ubistava
+		po = await _cekaj_stub("PosmatracLik", func(s): return s.get("xp_dnevnik", []).size() >= n)
 	var dobijeno: Array = po.get("xp_dnevnik", []).map(func(x): return int(x))
 	_provera("xp_po_razlici_nivoa_po_napadacu", dobijeno == ocekivano and int(po.get("level", 0)) == 12,
 		"XP po ubistvu %s, očekivano %s (d = +3, +8, +2, 0, -2, -3, -4, -5, -6, -7, -11), nivo %s" % [dobijeno, ocekivano, po.get("level")])
