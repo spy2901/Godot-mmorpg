@@ -726,7 +726,13 @@ func _zakazi_brzinu(vrednost: int, trajanje_ms: int) -> void:
 	var od := najnoviji + ceili(_rtt_ms() * tps / 1000.0) + BRZINA_MARGINA_TIKOVA
 	var do_ := od + ceili(trajanje_ms * tps / 1000.0)
 	_raspored_brzine = _raspored_brzine.filter(func(x): return int(x[1]) > _poslednji_seq)
-	_raspored_brzine.append([od, do_, vrednost])
+	# osvežavanje: aktivan interval (kraj posle najnovijeg primljenog unosa) se produžava, bez rupe sporog hoda između
+	# starog kraja i novog početka. Ako zahtev stigne u poslednjem RTT-u pre kraja, vlasnik saznaje kasno i dobije jednu
+	# glatku korekciju (najviše RTT * razlika brzina), umesto rupe koju bi video i on i server.
+	if not _raspored_brzine.is_empty() and int(_raspored_brzine[-1][1]) > najnoviji and int(_raspored_brzine[-1][2]) == vrednost:
+		_raspored_brzine[-1][1] = maxi(int(_raspored_brzine[-1][1]), do_)
+	else:
+		_raspored_brzine.append([od, do_, vrednost])
 	print("[BUFF] ", ime_lika, " brzina po seq-u ", _raspored_brzine, " (najnoviji ", najnoviji, ", rtt ", _rtt_ms(), " ms)")
 	_javi_raspored_brzine()
 
