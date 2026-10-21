@@ -25,10 +25,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 168 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 168 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 187 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 187 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `buff1.log`, `buff2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `buff1.log`, `buff2.log`, `efekti1.log`, `efekti2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -309,6 +309,26 @@ backend-a). Provere: `klijent_ne_postavlja_brzinu` (lažni raspored ka serveru),
 `brzina_smrt_prekida` (6,5 -> posle respawn-a 5 m/s, raspored prazan), `brzina_odjava_prekida` (korak 2: 5 m/s, bez
 rasporeda i buffa). Server upisuje stanje BrzinaLik-a u `$OUT/brzina_server` i izvršava `$OUT/brzina_cmd` ("ubij", posle
 respawn-a vraća lik u zonu 2). Sve padaju bez implementacije (provereno: kod igre sa main-a).
+
+Efekti (uloga `efekti`, migracija 011: antidote `protivotrov`, `invisibility_potion` `nevidljivost`, `resurrection_potion`
+`vaskrsenje`; otrov pauka je debuff `otrov` u istom `_buffovi`). `run.sh` pokreće `korak=1` EfektiLik (nivo 15, T2 oprema:
+oklop 63, iron_sword) i `korak=2` Efekti2Lik (nivo 15 bez opreme, spori save 2,5 s) zajedno sa buff ulogama. Scenario vodi
+server drajver (`_efekti_scenario`) nad test goblinom `goblin_2001` (aggro 4 m, HP 100000), goblinom `goblin_2003` i paukom
+`spider_2002` nivoa 15 (aggro 0: udara samo kad ga drajver pozove, šansa otrova 100% samo u testu), svi sa metom `ai_test`,
+brzinom 0 i bez sopstvenih napada, u zoni 2 kod (35, 22). Klijenti izvršavaju `$OUT/efekti_cmd_<ime>` ("N pij ID",
+"N tooltip ID", "N lazni", "N kraj"), odgovor u `$OUT/efekti_odg_<ime>`, stanje prikaza u `$OUT/efekti_kl_<ime>` (JSON: HUD
+buff/debuff i boja, buffovi, `nevidljiv_sync` i providnost svog i tuđeg modela, nameplate). Stub ima tri predmeta kao posle
+011, `knight_shield` i `test_kratka_nevidljivost` (2 s, cooldown 0,5 s). Provere (server.log): `pauk_otrov_vrednosti_po_nivou`
+(30%, 18% napada/s = 3 HP/s na nivoima 14-16, 6 s), `nevidljiv_bez_aggro` (20 s, cooldown 60 s, 2 m od goblina: MIROVANJE),
+`napad_prekida_nevidljivost`, `nevidljiv_providan` (vlasnik i drugi: 0,7 sa nameplate-om, posle prekida 0),
+`nevidljivost_prekida_jurenje` (jedina meta: POVRATAK), `istek_nevidljivosti_vraca_aggro`, `nevidljivost_druga_meta`,
+`klijent_ne_postavlja_nevidljivost`, `xp_loot_posle_povratka` (napadač koji ode ne dobija XP ni loot kad goblina posle povratka
+ubije drugi), `otrov_mimo_oklopa_6_tikova` (udarac 13 uz oklop 63, HP po tick-u -1 = otrov 3 - regen 2, šest puta),
+`otrov_osvezava_bez_sabiranja`, `otrov_ubija`, `antidote_skida_otrov_i_imunitet` (na punom HP-u, 30 s bez novog otrova),
+`odjava_prekida_otrov` (HP ne pada dok server snima), `vaskrsenje_presrece_udarac` (50% HP, isto mesto, svi buffovi i
+debuffovi skinuti, udarac u roku od 2 s ignorisan), `vaskrsenje_jednom`, `smrt_brise_sve_buffove`, `vaskrsenje_presrece_otrov`,
+`efekti_hud_i_tooltip`. Svih 19 pada bez implementacije (provereno: kod igre sa main-a); mutacije bez presretanja u
+`_server_umri`, otrov kroz oklop i vaskrsenje koje ostavlja ostale buffove obaraju svoje provere.
 
 Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
 igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u

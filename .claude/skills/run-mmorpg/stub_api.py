@@ -116,7 +116,14 @@ ITEMS = {i["id"]: i for i in [
         ("oak_bow", "Oak Bow", 15, 15), ("rusty_sword", "Rusty Sword", 10, 5), ("spear", "Spear", 15, 35),
         ("steel_longsword", "Steel Longsword", 35, 50))],
     _item("stamina_potion", "Stamina Potion", "consumable", mana_efekat=40, cooldown_ms=5000),
-    _item("antidote", "Antidote", "consumable", hp_efekat=20, cooldown_ms=5000),
+    # migracija 011: antidote protivotrov 30 s (+20 HP ostaje), napici nevidljivosti i vaskrsenja (više nisu quest_item)
+    _item("antidote", "Antidote", "consumable", vrednost=15, hp_efekat=20, cooldown_ms=5000, buff_tip="protivotrov",
+          buff_vrednost=1, buff_trajanje_ms=30000),
+    _item("invisibility_potion", "Invisibility Potion", "consumable", vrednost=150, cooldown_ms=60000,
+          buff_tip="nevidljivost", buff_vrednost=1, buff_trajanje_ms=20000),
+    _item("resurrection_potion", "Resurrection Potion", "consumable", vrednost=500, cooldown_ms=5000,
+          buff_tip="vaskrsenje", buff_vrednost=50, buff_trajanje_ms=600000),
+    _item("knight_shield", "Knight Shield", "armor", stackable=0, max_stack=1, armor=15, slot="shield", vrednost=55),
     # migracija 010: buffovi (vrednost kao na Pi-ju; elixir_of_luck više nije quest_item), cooldown 5 s
     *[_item(i, ime, "consumable", vrednost=v, cooldown_ms=5000, buff_tip=bt, buff_vrednost=bv, buff_trajanje_ms=bms)
       for i, ime, v, bt, bv, bms in (
@@ -129,6 +136,9 @@ ITEMS = {i["id"]: i for i in [
     _item("test_kratki_eliksir", "Test Short Elixir", "consumable", vrednost=0, cooldown_ms=5000, buff_tip="napad",
           buff_vrednost=20, buff_trajanje_ms=2000),
     # samo u testu: brzina +30% 1,5 s, cooldown 1 s (ivice buff-a brzine pod veštačkim RTT-om, bez čekanja 20 s)
+    # samo u testu: nevidljivost 2 s, cooldown 0,5 s (prekid jurenja, istek, druga meta)
+    _item("test_kratka_nevidljivost", "Test Short Invisibility", "consumable", vrednost=0, cooldown_ms=500,
+          buff_tip="nevidljivost", buff_vrednost=1, buff_trajanje_ms=2000),
     _item("test_kratki_speed", "Test Short Speed", "consumable", vrednost=0, cooldown_ms=1000, buff_tip="brzina",
           buff_vrednost=30, buff_trajanje_ms=1500),
 ]}
@@ -284,11 +294,24 @@ PLAYERS["Buff2Lik"] = dict(PLAYERS["TestLik"], ime="Buff2Lik", napad_damage=10, 
 PLAYERS["BrzinaLik"] = dict(PLAYERS["TestLik"], ime="BrzinaLik", hp=100, max_hp=100, pos_x=45, pos_y=1.16, pos_z=-20,
                             equipment={}, inventory=[{"slot": 0, "id": "test_kratki_speed", "kolicina": 10},
                                                      {"slot": 1, "id": "speed_potion", "kolicina": 2}])
+# EfektiLik (uloga efekti, korak 1): nivo 15 sa T2 opremom (gvozdeni komplet + knight_shield = oklop 63, iron_sword),
+# kao u računu za otrov; napici efekata. Efekti2Lik (korak 2): nivo 15 bez opreme, druga meta, posmatrač providnosti i
+# odjava pod otrovom (spori save kao Oprema2Lik). Zona 2 kod (35, 22), van ostalih likova.
+_s15 = statistike_za_nivo(15)
+_EF = dict(PLAYERS["TestLik"], level=15, xp=0, max_xp=_s15["max_xp"], max_hp=_s15["max_hp"], hp=_s15["max_hp"],
+           max_mana=_s15["max_mana"], mana=_s15["max_mana"], napad_damage=_s15["napad_damage"], pos_y=1.16, pos_z=22)
+PLAYERS["EfektiLik"] = dict(_EF, ime="EfektiLik", pos_x=35, equipment=dict(_OKLOP_68, shield="knight_shield"), inventory=[
+    {"slot": 0, "id": "invisibility_potion", "kolicina": 1}, {"slot": 1, "id": "test_kratka_nevidljivost", "kolicina": 4},
+    {"slot": 2, "id": "antidote", "kolicina": 1}, {"slot": 3, "id": "resurrection_potion", "kolicina": 2},
+    {"slot": 4, "id": "elixir_of_defense", "kolicina": 3}])
+PLAYERS["Efekti2Lik"] = dict(_EF, ime="Efekti2Lik", pos_x=38, equipment={}, inventory=[])
+SPORI_SAVE["Efekti2Lik"] = 2.5
 BEZ_ITEM_KASNJENJA = {"BrzinaLik"}  # kašnjenje početka buff-a brzine se meri bez veštačkih 0,3 s backend-a
-XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik", "LovacLik", "BuffLik", "Buff2Lik"}
+XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik", "LovacLik", "BuffLik", "Buff2Lik", "EfektiLik", "Efekti2Lik"}
 TOKENI = {"napredak-token": "NapredakLik", "oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik", "quest-token": "QuestLik",
-          "posmatrac-token": "PosmatracLik", "lovac-token": "LovacLik", "buff-token": "BuffLik", "buff2-token": "Buff2Lik", "brzina-token": "BrzinaLik"}
+          "posmatrac-token": "PosmatracLik", "lovac-token": "LovacLik", "buff-token": "BuffLik", "buff2-token": "Buff2Lik", "brzina-token": "BrzinaLik",
+          "efekti-token": "EfektiLik", "efekti2-token": "Efekti2Lik"}
 LOCK = threading.Lock()
 
 

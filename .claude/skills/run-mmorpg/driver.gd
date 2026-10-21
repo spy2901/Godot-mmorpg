@@ -181,6 +181,10 @@ func _process(d):
 			elif uloga == "brzina": # korak=1 BrzinaLik (buff brzine pod veštačkim RTT-om), korak=2 ponovna prijava
 				root.get_node("GameState").token = "brzina-token"
 				root.get_node("GameState").ime_igraca = "BrzinaLik"
+			elif uloga == "efekti": # korak=1 EfektiLik (napici efekata, otrov), korak=2 Efekti2Lik (druga meta, posmatrač)
+				root.size = Vector2i(1280, 720) # tooltip i HUD kao u prozoru
+				root.get_node("GameState").token = "efekti-token" if _korak == 1 else "efekti2-token"
+				root.get_node("GameState").ime_igraca = "EfektiLik" if _korak == 1 else "Efekti2Lik"
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
 				root.size = Vector2i(1280, 720) # headless je 64x64: traka bi virila van prozora, a okvir cilja ležao preko nje
@@ -218,6 +222,7 @@ func _process(d):
 		"quest": return _uloga_quest()
 		"buff": return _uloga_buff()
 		"brzina": return _uloga_brzina()
+		"efekti": return _uloga_efekti()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -298,6 +303,7 @@ func _server(log: bool) -> bool:
 	_server_quest()
 	_server_buff()
 	_server_brzina()
+	_server_efekti()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -3184,3 +3190,411 @@ func _brzina_relog(p) -> void:
 		and kl is Array and kl.is_empty() and bf is Dictionary and bf.is_empty(),
 		"pre odjave %s; posle prijave brzina po serveru %.2f m/s, raspored server %s klijent %s, buffovi %s" % [pre, v, srv, kl, bf])
 	_br_kraj = true
+
+# ---------------------------------------------------------------- EFEKTI (uloga efekti: korak 1 EfektiLik, korak 2 Efekti2Lik)
+# Otrov pauka, antidote, nevidljivost i vaskrsenje (migracija 011). Scenario vodi server drajver (_efekti_scenario) nad
+# test goblinom i paukom (meta ai_test, brzina 0, bez sopstvenih napada) u zoni 2 kod (35, 22). Klijenti izvršavaju
+# komande iz dir/efekti_cmd_<ime> ("N pij ID" | "N tooltip ID" | "N lazni" | "N kraj"), odgovor u dir/efekti_odg_<ime>
+# ("N tekst"), a stanje prikaza (HUD, buffovi, providnost svog i tuđeg lika) upisuju u dir/efekti_kl_<ime> (JSON).
+const EF_DOM1 := Vector3(35, 1.16, 22)
+const EF_DOM2 := Vector3(38, 1.16, 22)
+const EF_GOBLIN := Vector3(35, 2, 14)
+const EF_PAUK := Vector3(42, 2, 14)
+const EF_GOBLIN2 := Vector3(45, 2, 20)
+const EF_DALEKO := Vector3(38, 1.16, -10) # 20+ m od oba goblina: leash (POVRATAK)
+var _ef_krenuo := false
+var _ef_kraj := false
+var _ef_cmd := ""
+var _ef_upisano := ""
+var _ef_cmd_br := 0
+var _ef_srv_krenuo := false
+
+func _uloga_efekti() -> bool:
+	var p = _moj()
+	if p == null or not p.get_node("ui/Control")._ucitano:
+		return (_ef_krenuo and p == null) or t > 2 * MAX_T
+	_ef_krenuo = true
+	var ime: String = root.get_node("GameState").ime_igraca
+	var cmd := FileAccess.get_file_as_string(dir + "/efekti_cmd_" + ime)
+	if cmd != "" and cmd != _ef_cmd:
+		_ef_cmd = cmd
+		_ef_izvrsi(p, ime, cmd.split(" "))
+	_ef_upisi_stanje(p, ime)
+	return _ef_kraj or FileAccess.file_exists(dir + "/efekti_gotov") or t > 2 * MAX_T
+
+# vlasnik vidi sebe, a Efekti2Lik vidi EfektiLik-a providno (nevidljiv) ili normalno, nameplate ostaje
+func _ef_prikaz(nevidljiv: bool) -> bool:
+	var k1 := _ef_kl("EfektiLik")
+	var k2 := _ef_kl("Efekti2Lik")
+	var pr := 0.7 if nevidljiv else 0.0
+	return k1.get("sync") == nevidljiv and is_equal_approx(float(k1.get("providnost", -1)), pr) \
+		and k2.get("drugi_sync") == nevidljiv and is_equal_approx(float(k2.get("drugi_providnost", -1)), pr) \
+		and k2.get("drugi_nameplate") == true
+
+func _ef_kl_prazno() -> bool: # klijent EfektiLik: bez buffova i debuffova, HUD prazan
+	var k := _ef_kl("EfektiLik")
+	return (k.get("buffovi", [1]) as Array).is_empty() and k.get("buff") == "" and k.get("debuff") == ""
+
+func _ef_providnost(lik) -> float:
+	var model = lik.get_node_or_null("CharacterMain") if lik else null
+	var m: Array = model.find_children("*", "GeometryInstance3D", true, false) if model else []
+	return snappedf(m[0].transparency, 0.01) if not m.is_empty() else -1.0
+
+func _ef_upisi_stanje(p, ime: String) -> void:
+	var hud = p.get_node("ui/Control")
+	var dl = hud.get("debuff_label")
+	var drugi = null
+	for n in _world().get_children() if _world() else []:
+		if n != p and n.is_in_group("player") and str(n.get("ime_sync")) in ["EfektiLik", "Efekti2Lik"]: drugi = n
+	var np = drugi.get_node_or_null("Nameplate") if drugi else null
+	var st := JSON.stringify({"buff": _b_hud(hud), "debuff": dl.text if dl != null else "(nema DebuffLabel)",
+		"debuff_boja": dl.get_theme_color("font_color").to_html() if dl != null else "", "buffovi": _b_klijent(p).keys(),
+		"sync": p.get("nevidljiv_sync"), "providnost": _ef_providnost(p),
+		"drugi_sync": drugi.get("nevidljiv_sync") if drugi else null, "drugi_providnost": _ef_providnost(drugi),
+		"drugi_nameplate": np != null and np.visible})
+	if st != _ef_upisano:
+		_ef_upisano = st
+		_pisi("efekti_kl_" + ime, st)
+
+func _ef_izvrsi(p, ime: String, c: PackedStringArray) -> void:
+	print("[EF-K] ", ime, " komanda: ", " ".join(c))
+	var inv = p.get_node("ui/InventoryUI")
+	var hud = p.get_node("ui/Control")
+	var odg := ""
+	match c[1]:
+		"pij":
+			await inv._koristi_item(c[2])
+			odg = hud._poruka_label.text if hud._poruka_label else ""
+		"tooltip":
+			var i := _inv_index(inv, c[2])
+			if i >= 0: inv._on_slot_hover(i)
+			odg = inv.tooltip_label.text.replace("\n", " | ")
+		"lazni": # klijent sebi postavi nevidljivost lokalno i pošalje lažni buff serveru; posle 1 s vrati lokalno stanje
+			if "nevidljiv_sync" in p: p.nevidljiv_sync = true
+			p.primi_buffove.rpc_id(1, {"nevidljivost": [1, 60000]})
+			await create_timer(1.0).timeout
+			if "nevidljiv_sync" in p: p.nevidljiv_sync = false
+		"kraj":
+			_ef_kraj = true
+	_pisi("efekti_odg_" + ime, "%s %s" % [c[0], odg])
+
+func _ef_kl(ime: String) -> Dictionary:
+	var d = JSON.parse_string(FileAccess.get_file_as_string(dir + "/efekti_kl_" + ime))
+	return d if d is Dictionary else {}
+
+func _ef_posalji(ime: String, cmd: String) -> String:
+	_ef_cmd_br += 1
+	var br := str(_ef_cmd_br)
+	_pisi("efekti_cmd_" + ime, "%s %s" % [br, cmd])
+	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/efekti_odg_" + ime).get_slice(" ", 0) == br, 8.0)
+	var o := FileAccess.get_file_as_string(dir + "/efekti_odg_" + ime)
+	return o.substr(o.find(" ") + 1) if o.get_slice(" ", 0) == br else "(bez odgovora)"
+
+func _server_efekti() -> void:
+	if _ef_srv_krenuo or dir == "": return
+	var p1 = _ai_lik("EfektiLik")
+	var p2 = _ai_lik("Efekti2Lik")
+	if p1 and p2 and p1.get("_stanje_ucitano") and p2.get("_stanje_ucitano"):
+		_ef_srv_krenuo = true
+		_efekti_scenario(p1, p2)
+
+func _ef_bf(p) -> Dictionary: # buffovi po serveru: tip -> [vrednost, preostalo ms]
+	var d := {}
+	var bf = p.get("_buffovi")
+	if bf is Dictionary:
+		for tip in bf: d[tip] = [int(bf[tip][0]), int(bf[tip][1]) - Time.get_ticks_msec()]
+	return d
+
+func _ef_nevidljiv(p) -> bool:
+	return p.has_method("nevidljiv") and p.nevidljiv()
+
+func _ef_spawn(vrsta: String, id: int, poz: Vector3, nivo: int):
+	_world().goblin_spawner.spawn({"vrsta": vrsta, "id": id, "pos": poz, "nivo": nivo})
+	await _cekaj(func(): return _nep("%s_%d" % [vrsta, id]) != null, 3.0)
+	var e = _nep("%s_%d" % [vrsta, id])
+	if e:
+		e.set_meta("ai_test", true)
+		e.brzina = 0.0
+		e.moze_napasti = false
+	return e
+
+# Pauk udari metu (server, kao njegov napad u dometu): ishod [šteta udarca, otrov posle]
+func _ef_ujed(s, p) -> Array:
+	s.player = p
+	var pre: int = p.hp
+	s.napadni_igraca()
+	return [pre - p.hp, _ef_bf(p).get("otrov")]
+
+func _ef_umri_respawn(p) -> void: # posle smrti: respawn, nazad kući, pa kraj neosetljivosti
+	await _cekaj(func(): return not p.mrtav, 8.0)
+	p.server_postavi_poziciju(EF_DOM1, true)
+	await create_timer(2.2).timeout
+
+func _efekti_scenario(p1, p2) -> void:
+	var id1: int = p1.get_multiplayer_authority()
+	var id2: int = p2.get_multiplayer_authority()
+	await _cekaj(func(): return not _ef_kl("EfektiLik").is_empty() and not _ef_kl("Efekti2Lik").is_empty(), 20.0)
+	p1.server_postavi_poziciju(EF_DOM1, true)
+	p2.server_postavi_poziciju(EF_DOM2, true)
+	var g = await _ef_spawn("goblin", 2001, EF_GOBLIN, 1)
+	var s = await _ef_spawn("spider", 2002, EF_PAUK, 15)
+	if g == null or s == null:
+		_provera("efekti_scenario", false, "test goblin %s, pauk %s" % [g, s])
+		_pisi("efekti_gotov", "1")
+		return
+	g.aggro_range = 4.0
+	g.max_hp = 100000 # napad EfektiLik-a (63) ne sme da ga ubije
+	g.hp = 100000
+	s.aggro_range = 0.0 # pauk ne bira metu sam: udara samo kad ga drajver pozove (_ef_ujed)
+	var hud := {} # tekstovi HUD-a i tooltip-a za efekti_hud_i_tooltip
+	var tt := [] # tooltip-ovi dok su napici još u inventaru
+	for id in ["invisibility_potion", "resurrection_potion", "antidote"]:
+		tt.append(await _ef_posalji("EfektiLik", "tooltip " + id))
+	print("[S-EF] start, EfektiLik=%d Efekti2Lik=%d, armor %d, max HP %d" % [id1, id2, p1.armor, p1.max_hp])
+
+	# vrednosti otrova po nivou pauka (scena): 30% po udarcu, 18% napada po sekundi (3 HP/s na nivoima 14-16), 6 s
+	var po_nivou := []
+	for n in [14, 15, 16]:
+		var we = _telo_scene("spider", n)
+		var e = we[1]
+		if e.has_method("_skaliraj"): e._skaliraj()
+		po_nivou.append([n, e.get("napad_damage"), e.get("otrov_sansa"), e.get("otrov_procenat"), e.get("otrov_trajanje"),
+			e.otrov_steta() if e.has_method("otrov_steta") else -1])
+		we[0].free()
+	_provera("pauk_otrov_vrednosti_po_nivou", po_nivou == [[14, 16, 30, 18, 6.0, 3], [15, 17, 30, 18, 6.0, 3], [16, 18, 30, 18, 6.0, 3]],
+		"[nivo, napad, šansa %%, %% napada/s, trajanje s, šteta/s]: %s" % [po_nivou])
+
+	# --- NEVIDLJIVOST
+	# napitak: 20 s, cooldown 60 s; nevidljiv u aggro dometu (2 m od goblina, aggro 4 m): goblin ostaje u MIROVANJU
+	var poruka := await _ef_posalji("EfektiLik", "pij invisibility_potion")
+	await _cekaj(func(): return _ef_nevidljiv(p1), 2.0)
+	var preostalo := int(_ef_bf(p1).get("nevidljivost", [0, 0])[1])
+	var cd := int(p1.get("_item_cd_do_ms").get("invisibility_potion", 0)) - Time.get_ticks_msec()
+	p1.server_postavi_poziciju(EF_GOBLIN + Vector3(0, -0.84, 2), true)
+	await create_timer(1.0).timeout
+	_provera("nevidljiv_bez_aggro", _ef_nevidljiv(p1) and preostalo > 18000 and preostalo <= 20000 and cd > 58000 and cd <= 60000
+		and _st(g) == "MIROVANJE" and _tab(g).is_empty(),
+		"poruka '%s', nevidljiv=%s (preostalo %d ms, cooldown %d ms), 2 m od goblina: stanje %s, pretnja %s" % [poruka,
+		_ef_nevidljiv(p1), preostalo, cd, _st(g), _tab(g)])
+	# prikaz: vlasnik i drugi igrač vide providan lik (0,7) sa nameplate-om
+	var vid: bool = await _cekaj(func(): return _ef_prikaz(true), 3.0)
+	var k_vid := [_ef_kl("EfektiLik"), _ef_kl("Efekti2Lik")]
+	hud["nevidljiv"] = str(k_vid[0].get("buff", ""))
+
+	# napad prekida nevidljivost (pre štete), goblin juri napadača
+	var bio_nevidljiv := _ef_nevidljiv(p1)
+	p1.set("_cilj_srv", "goblin_2001")
+	p1.set("_napad_spreman_ms", 0)
+	var napad: Dictionary = p1._napadni_cilj()
+	await create_timer(0.3).timeout
+	_provera("napad_prekida_nevidljivost", bio_nevidljiv and napad.get("ok", false) and not _ef_nevidljiv(p1)
+		and not _ef_bf(p1).has("nevidljivost") and _st(g) == "JURENJE" and _meta(g) == id1 and _pr(g, p1) > 0,
+		"nevidljiv pre napada=%s, napad %s, posle: nevidljiv=%s, goblin %s meta %d (EfektiLik %d), pretnja %s" % [bio_nevidljiv,
+		napad, _ef_nevidljiv(p1), _st(g), _meta(g), id1, _tab(g)])
+	var nevid: bool = await _cekaj(func(): return _ef_prikaz(false), 3.0)
+	_provera("nevidljiv_providan", vid and nevid,
+		"za vreme: vlasnik %s, drugi %s; posle prekida: vlasnik %s, drugi %s" % [k_vid[0], k_vid[1], _ef_kl("EfektiLik"), _ef_kl("Efekti2Lik")])
+
+	# jedina meta postane nevidljiva (test napitak 2 s): goblin odustaje (POVRATAK, pa MIROVANJE na početku)
+	await _ef_posalji("EfektiLik", "pij test_kratka_nevidljivost")
+	var odustao: bool = await _cekaj(func(): return _st(g) != "JURENJE" and _tab(g).is_empty(), 1.5)
+	var st_odustao := _st(g)
+	_provera("nevidljivost_prekida_jurenje", odustao and _ef_nevidljiv(p1),
+		"nevidljiv=%s, goblin %s, pretnja %s" % [_ef_nevidljiv(p1), st_odustao, _tab(g)])
+	# istek (2 s): goblin ga ponovo vidi u aggro dometu
+	var vraca: bool = await _cekaj(func(): return not _ef_nevidljiv(p1) and _st(g) == "JURENJE" and _meta(g) == id1, 4.0)
+	_provera("istek_nevidljivosti_vraca_aggro", odustao and vraca,
+		"za vreme nevidljivosti %s, posle isteka goblin %s meta %d (EfektiLik %d)" % [st_odustao, _st(g), _meta(g), id1])
+
+	# dva igrača u tabeli: meta postane nevidljiva -> goblin prelazi na drugog (ostaje u JURENJU)
+	p2.server_postavi_poziciju(EF_GOBLIN + Vector3(2, -0.84, 0), true)
+	await _cekaj(func(): return _pr(g, p2) > 0, 2.0)
+	await create_timer(0.6).timeout # cooldown test napitka 0,5 s
+	await _ef_posalji("EfektiLik", "pij test_kratka_nevidljivost")
+	var prelaz: bool = await _cekaj(func(): return _ef_nevidljiv(p1) and _meta(g) == id2 and _st(g) == "JURENJE", 1.5)
+	_provera("nevidljivost_druga_meta", prelaz and _pr(g, p1) < 0,
+		"nevidljiv=%s, goblin %s meta %d (Efekti2Lik %d), pretnja %s" % [_ef_nevidljiv(p1), _st(g), _meta(g), id2, _tab(g)])
+	await _cekaj(func(): return not _ef_nevidljiv(p1), 3.0)
+
+	# klijent ne postavlja nevidljivost: lokalno sync polje i lažni primi_buffove ne menjaju server (goblin ga vidi)
+	p1.server_postavi_poziciju(EF_DALEKO, true)
+	p2.server_postavi_poziciju(EF_DALEKO + Vector3(3, 0, 0), true)
+	await _cekaj(func(): return _st(g) == "MIROVANJE", 3.0)
+	p2.server_postavi_poziciju(EF_DOM2, true)
+	_ef_posalji("EfektiLik", "lazni") # bez čekanja: klijent drži lažno lokalno stanje 1 s
+	await create_timer(0.3).timeout
+	p1.server_postavi_poziciju(EF_GOBLIN + Vector3(0, -0.84, 2), true)
+	var vidi: bool = await _cekaj(func(): return _st(g) == "JURENJE" and _meta(g) == id1, 1.5)
+	await create_timer(1.0).timeout
+	_provera("klijent_ne_postavlja_nevidljivost", "nevidljiv_sync" in p1 and vidi and not _ef_nevidljiv(p1) and not p1.nevidljiv_sync,
+		"sync polje postoji=%s, posle lažnog: server nevidljiv=%s, sync %s, goblin %s meta %d" % ["nevidljiv_sync" in p1,
+		_ef_nevidljiv(p1), p1.get("nevidljiv_sync"), _st(g), _meta(g)])
+	p1.server_postavi_poziciju(EF_DOM1, true)
+
+	# napadač koji ode (POVRATAK, regeneracija do punog) ne dobija XP ni loot kad goblina posle ubije drugi
+	var g2 = await _ef_spawn("goblin", 2003, EF_GOBLIN2, 1)
+	g2.aggro_range = 0.0
+	var x1 := await _b_xp_ore("EfektiLik")
+	var st2: Dictionary = await _b_stub("Efekti2Lik")
+	p2.server_postavi_poziciju(EF_GOBLIN2 + Vector3(1, -0.84, 0), true)
+	await create_timer(0.3).timeout
+	g2.primi_damage(5, id2)
+	await _cekaj(func(): return _st(g2) == "JURENJE", 1.0)
+	p2.server_postavi_poziciju(EF_DALEKO, true)
+	var povratak: bool = await _cekaj(func(): return _st(g2) == "MIROVANJE", 3.0)
+	g2.primi_damage(1000000, id1)
+	var x2 := await _b_xp_ore("EfektiLik", func(xp, _o): return xp != x1[0])
+	await create_timer(1.0).timeout
+	var st2b: Dictionary = await _b_stub("Efekti2Lik")
+	_provera("xp_loot_posle_povratka", povratak and x2[0] > x1[0] and int(st2b.get("xp", -1)) == int(st2.get("xp", -2))
+		and str(st2b.get("inventory")) == str(st2.get("inventory")),
+		"povratak do MIROVANJA=%s; EfektiLik (ubio) XP %d -> %d; Efekti2Lik (udario pa otišao) XP %s -> %s, inventar %s -> %s" % [
+		povratak, x1[0], x2[0], st2.get("xp"), st2b.get("xp"), st2.get("inventory"), st2b.get("inventory")])
+	p2.server_postavi_poziciju(EF_DOM2, true)
+
+	# --- OTROV (EfektiLik 1 m od pauka nivoa 15; šansa 100% samo u testu)
+	s.set("otrov_sansa", 100) # set: bez greške i kad svojstvo ne postoji (provera bez implementacije)
+	p1.server_postavi_poziciju(EF_PAUK + Vector3(-1, -0.84, 0), true)
+	await create_timer(0.3).timeout
+	var u1 := await _ef_ujed(s, p1)
+	# tick 1/s zajedno sa regeneracijom (+2): 3 mimo oklopa -> -1 po tick-u, 6 tick-ova, pa samo regeneracija (+2)
+	var promene := []
+	var hp_pre: int = p1.hp
+	var do_ := Time.get_ticks_msec() + 7500
+	while Time.get_ticks_msec() < do_:
+		await process_frame
+		if p1.hp != hp_pre:
+			promene.append(p1.hp - hp_pre)
+			hp_pre = p1.hp
+		if promene.size() == 3 and not hud.has("otrov"):
+			hud["otrov"] = str(_ef_kl("EfektiLik").get("debuff", ""))
+			hud["otrov_boja"] = str(_ef_kl("EfektiLik").get("debuff_boja", ""))
+	_provera("otrov_mimo_oklopa_6_tikova", u1[0] == 13 and u1[1] is Array and u1[1][0] == 3 and u1[1][1] > 5500
+		and promene.slice(0, 7) == [-1, -1, -1, -1, -1, -1, 2],
+		"oklop %d: udarac -%d (13), otrov %s; promene HP-a (tick 3 - regen 2) %s" % [p1.armor, u1[0], u1[1], promene])
+
+	# osvežavanje: drugi ujed usred otrova vraća trajanje na 6 s, šteta ostaje 3
+	await _ef_ujed(s, p1)
+	await create_timer(3.0).timeout
+	var pre_osv: Array = _ef_bf(p1).get("otrov", [0, 0])
+	var u3 := await _ef_ujed(s, p1)
+	_provera("otrov_osvezava_bez_sabiranja", pre_osv[1] > 2000 and pre_osv[1] < 3500 and u3[1] is Array and u3[1][0] == 3 and u3[1][1] > 5500,
+		"posle 3 s preostalo %s, posle novog ujeda %s (3 HP/s, ~6000 ms)" % [pre_osv, u3[1]])
+
+	# otrov ubija: smrt skida sve (otrov i elixir_of_defense), respawn bez otrova sa punim HP-om
+	await _ef_posalji("EfektiLik", "pij elixir_of_defense")
+	await _cekaj(func(): return _ef_bf(p1).has("oklop"), 2.0)
+	var pre_smrti := _ef_bf(p1).keys()
+	p1.hp = 2
+	var umro: bool = await _cekaj(func(): return p1.mrtav, 2.0)
+	var bf_smrt := _ef_bf(p1)
+	var kl_smrt: bool = await _cekaj(func(): return _ef_kl_prazno(), 2.0)
+	await _ef_umri_respawn(p1)
+	_provera("otrov_ubija", pre_smrti.has("otrov") and pre_smrti.has("oklop") and umro and bf_smrt.is_empty() and kl_smrt
+		and p1.hp == p1.max_hp and not _ef_bf(p1).has("otrov"),
+		"pre smrti %s, mrtav=%s, posle smrti server %s, klijent %s, posle respawn-a hp %d/%d buffovi %s" % [pre_smrti, umro,
+		bf_smrt, _ef_kl("EfektiLik"), p1.hp, p1.max_hp, _ef_bf(p1)])
+
+	# antidote pod otrovom na punom HP-u: skida otrov, +20 HP (do maksimuma), 30 s ne može novi otrov
+	p1.server_postavi_poziciju(EF_PAUK + Vector3(-1, -0.84, 0), true)
+	await create_timer(0.3).timeout
+	var u4 := await _ef_ujed(s, p1)
+	p1.hp = p1.max_hp
+	p1._posalji_hp()
+	poruka = await _ef_posalji("EfektiLik", "pij antidote")
+	await _cekaj(func(): return _ef_bf(p1).has("protivotrov"), 2.0)
+	var bf_anti := _ef_bf(p1)
+	var u5 := await _ef_ujed(s, p1)
+	await _cekaj(func(): return str(_ef_kl("EfektiLik").get("buff", "")).begins_with("Poison immunity"), 1.0)
+	hud["imunitet"] = str(_ef_kl("EfektiLik").get("buff", ""))
+	_provera("antidote_skida_otrov_i_imunitet", u4[1] is Array and not bf_anti.has("otrov") and bf_anti.has("protivotrov")
+		and int(bf_anti["protivotrov"][1]) > 28000 and u5[1] == null and str(_ef_kl("EfektiLik").get("debuff", "x")) == "",
+		"otrov pre %s, poruka '%s', posle antidota %s, novi ujed: otrov %s" % [u4[1], poruka, bf_anti, u5[1]])
+
+	# odjava pod otrovom: server briše otrov pri odjavi, HP ne pada dok snima (spori save 2,5 s)
+	p2.server_postavi_poziciju(EF_PAUK + Vector3(1, -0.84, 0), true)
+	await create_timer(0.3).timeout
+	var u6 := await _ef_ujed(s, p2)
+	await create_timer(0.5).timeout
+	_ef_posalji("Efekti2Lik", "kraj")
+	await _cekaj(func(): return not is_instance_valid(p2) or not p2.is_in_group("player"), 5.0)
+	var hp_odj: int = p2.hp if is_instance_valid(p2) else -1
+	var pad := false
+	var bf_odj := {}
+	do_ = Time.get_ticks_msec() + 2000
+	while Time.get_ticks_msec() < do_ and is_instance_valid(p2):
+		await process_frame
+		if not is_instance_valid(p2): break
+		pad = pad or p2.hp < hp_odj
+		bf_odj = _ef_bf(p2)
+	await create_timer(1.5).timeout # spori save se završi
+	var sacuvano: Dictionary = await _b_stub("Efekti2Lik")
+	_provera("odjava_prekida_otrov", u6[1] is Array and hp_odj > 0 and not pad and bf_odj.is_empty() and int(sacuvano.get("hp", -1)) >= hp_odj,
+		"otrov pre odjave %s, HP pri odjavi %d, pao tokom snimanja=%s, buffovi tokom snimanja %s, sačuvan HP %s" % [u6[1], hp_odj,
+		pad, bf_odj, sacuvano.get("hp")])
+
+	# --- VASKRSENJE (EfektiLik kod kuće; imunitet od antidota je još aktivan i mora da nestane sa ostalim)
+	p1.server_postavi_poziciju(EF_DOM1, true)
+	await create_timer(5.2).timeout # cooldown elixir_of_defense
+	await _ef_posalji("EfektiLik", "pij elixir_of_defense")
+	await _ef_posalji("EfektiLik", "pij resurrection_potion")
+	await _cekaj(func(): return _ef_bf(p1).has("vaskrsenje") and _ef_bf(p1).has("oklop"), 2.0)
+	await _cekaj(func(): return "Resurrection" in str(_ef_kl("EfektiLik").get("buff", "")), 1.0)
+	hud["vaskrsenje"] = str(_ef_kl("EfektiLik").get("buff", ""))
+	var bf_v := _ef_bf(p1)
+	var poz: Vector3 = p1.global_position
+	p1.server_primi_damage(1000000)
+	var r1 := [p1.mrtav, p1.hp, _ef_bf(p1), p1.global_position.distance_to(poz)]
+	p1.server_primi_damage(100) # u roku od 2 s: neosetljiv
+	var hp_neos: int = p1.hp
+	var kl_v: bool = await _cekaj(func(): return _ef_kl_prazno(), 2.0)
+	_provera("vaskrsenje_presrece_udarac", bf_v.has("vaskrsenje") and int(bf_v["vaskrsenje"][0]) == 50 and int(bf_v["vaskrsenje"][1]) > 590000
+		and bf_v.has("oklop") and bf_v.has("protivotrov") and r1[0] == false and r1[1] == p1.max_hp / 2 and (r1[2] as Dictionary).is_empty()
+		and r1[3] < 0.05 and hp_neos == r1[1] and kl_v,
+		"pre %s; posle smrtonosnog udarca mrtav=%s hp %d/%d buffovi %s pomeren %.2f m; udarac 100 u roku od 2 s: hp %d; klijent %s" % [
+		bf_v, r1[0], r1[1], p1.max_hp, r1[2], r1[3], hp_neos, _ef_kl("EfektiLik")])
+
+	# posle vaskrsenja buff-a nema: druga smrtonosna šteta je prava smrt i skida sve (oklop i otrov)
+	await create_timer(5.2).timeout # neosetljivost i cooldown elixir_of_defense
+	p1.server_postavi_poziciju(EF_PAUK + Vector3(-1, -0.84, 0), true)
+	await create_timer(0.3).timeout
+	await _ef_ujed(s, p1)
+	await _ef_posalji("EfektiLik", "pij elixir_of_defense")
+	await _cekaj(func(): return _ef_bf(p1).has("oklop"), 2.0)
+	var bf_pre := _ef_bf(p1).keys()
+	p1.server_primi_damage(1000000)
+	var umro2: bool = p1.mrtav
+	var bf_s2 := _ef_bf(p1)
+	var kl_s2: bool = await _cekaj(func(): return _ef_kl_prazno(), 2.0)
+	_provera("vaskrsenje_jednom", r1[0] == false and not bf_pre.has("vaskrsenje") and umro2,
+		"prvi put živ=%s, buffovi pre drugog udarca %s, mrtav=%s" % [r1[0] == false, bf_pre, umro2])
+	_provera("smrt_brise_sve_buffove", bf_pre.has("oklop") and bf_pre.has("otrov") and umro2 and bf_s2.is_empty() and kl_s2,
+		"pre smrti %s, posle: server %s, klijent %s" % [bf_pre, bf_s2, _ef_kl("EfektiLik")])
+	await _ef_umri_respawn(p1)
+
+	# vaskrsenje presreće i smrt od otrova: otrov skinut, 50% HP, isto mesto
+	await _ef_posalji("EfektiLik", "pij resurrection_potion")
+	await _cekaj(func(): return _ef_bf(p1).has("vaskrsenje"), 2.0)
+	p1.server_postavi_poziciju(EF_PAUK + Vector3(-1, -0.84, 0), true)
+	await create_timer(0.3).timeout
+	var u7 := await _ef_ujed(s, p1)
+	poz = p1.global_position
+	p1.hp = 2
+	var otrov_tick: bool = await _cekaj(func(): return p1.hp == p1.max_hp / 2 or p1.mrtav, 2.0)
+	var r3 := [p1.mrtav, p1.hp, _ef_bf(p1), p1.global_position.distance_to(poz)]
+	await create_timer(1.5).timeout
+	_provera("vaskrsenje_presrece_otrov", u7[1] is Array and otrov_tick and r3[0] == false and r3[1] == p1.max_hp / 2
+		and (r3[2] as Dictionary).is_empty() and r3[3] < 0.05 and p1.hp >= r3[1],
+		"otrov %s, posle tick-a na 2 HP: mrtav=%s hp %d/%d buffovi %s pomeren %.2f m, 1,5 s kasnije hp %d" % [u7[1], r3[0], r3[1],
+		p1.max_hp, r3[2], r3[3], p1.hp])
+
+	# HUD (dva reda: buff i debuff u BOJA_DEBUFF) i tooltip-ovi
+	p1.server_postavi_poziciju(EF_DOM1, true)
+	var boja := Color(1.0, 0.4, 0.35).to_html()
+	_provera("efekti_hud_i_tooltip", hud.get("nevidljiv", "").begins_with("Invisible  0:") and hud.get("otrov", "").begins_with("Poisoned -3 HP/s  0:0")
+		and hud.get("otrov_boja", "") == boja and hud.get("imunitet", "").begins_with("Poison immunity  0:")
+		and (hud.get("vaskrsenje", "").ends_with("Resurrection 50% HP  10:00") or hud.get("vaskrsenje", "").ends_with("Resurrection 50% HP  9:59"))
+		and "Click: Invisible for 20 s  |  cooldown 60 s" in tt[0] and "Click: Resurrection 50% HP for 600 s  |  cooldown 5 s" in tt[1]
+		and "Click: +20 HP" in tt[2] and "Click: Poison immunity for 30 s  |  cooldown 5 s" in tt[2],
+		"HUD %s (debuff boja %s), tooltip %s" % [hud, boja, tt])
+	_pisi("efekti_gotov", "1")
