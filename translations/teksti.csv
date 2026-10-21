@@ -159,6 +159,7 @@ XP +%d%%,XP +%d%%,XP +%d%%
 Loot chance +%d%%,Loot chance +%d%%,Šansa za plen +%d%%
 Speed +%d%%,Speed +%d%%,Brzina +%d%%
 Poison immunity,Poison immunity,Zaštita od otrova
+Invisible,Invisible,Nevidljiv
 Poisoned -%d HP/s,Poisoned -%d HP/s,Otrovan -%d HP/s
 %s for %d s,%s for %d s,"%s, %d s"
 "

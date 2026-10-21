@@ -181,6 +181,7 @@ func _povratak() -> void:
 func _promeni_stanje(novo: Stanje) -> void:
 	if novo != Stanje.JURENJE:
 		pretnja.clear()
+		napadaci.clear() # posle povratka regeneriše do punog: delimična borba ne daje XP ni loot (i u POVRATKU udarac upisuje)
 		_meta_id = 0
 		player = null
 	_regen = novo == Stanje.MIROVANJE and stanje == Stanje.POVRATAK
@@ -188,18 +189,18 @@ func _promeni_stanje(novo: Stanje) -> void:
 	print("[AI] %s %s -> %s" % [get_parent().name, Stanje.keys()[stanje], Stanje.keys()[novo]])
 	stanje = novo
 
-# Živi igrači u aggro_range koji još nisu u tabeli dobiju početnu pretnju.
+# Živi i vidljivi igrači u aggro_range koji još nisu u tabeli dobiju početnu pretnju.
 func _dodaj_aggro() -> void:
 	for p in get_tree().get_nodes_in_group("player"):
 		var id: int = p.get_multiplayer_authority()
-		if not p.mrtav and not pretnja.has(id) and global_position.distance_to(p.global_position) <= aggro_range:
+		if not p.mrtav and not p.nevidljiv() and not pretnja.has(id) and global_position.distance_to(p.global_position) <= aggro_range:
 			pretnja[id] = POCETNA_PRETNJA
 
-# Mrtav, odjavljen (nije više u grupi player) ili dalji od leash-a -> van tabele.
+# Mrtav, nevidljiv, odjavljen (nije više u grupi player) ili dalji od leash-a -> van tabele.
 func _ocisti_pretnju() -> void:
 	for id in pretnja.keys():
 		var p := _nadji_igraca_po_id(id)
-		if p == null or p.mrtav or global_position.distance_to(p.global_position) > LEASH_OD_META:
+		if p == null or p.mrtav or p.nevidljiv() or global_position.distance_to(p.global_position) > LEASH_OD_META:
 			pretnja.erase(id)
 
 # Najveća pretnja; trenutna meta ostaje dok je drugi ne pređe za PRAG_PROMENE_META.

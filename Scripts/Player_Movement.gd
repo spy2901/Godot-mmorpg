@@ -192,6 +192,15 @@ var ime_sync := "":
 	set(v):
 		ime_sync = v
 		_osvezi_nameplate()
+# nevidljivost: svi klijenti (i vlasnik) vide providan model; postavlja ga samo _buffovi_promenjeni
+const PROVIDNOST_NEVIDLJIV := 0.7
+var nevidljiv_sync := false:
+	set(v):
+		nevidljiv_sync = v
+		var model := get_node_or_null("CharacterMain")
+		if model:
+			for m in model.find_children("*", "GeometryInstance3D", true, false):
+				m.transparency = PROVIDNOST_NEVIDLJIV if v else 0.0
 var _nameplate: Node3D
 var _ime_label: Label3D
 var _hp_traka: MeshInstance3D
@@ -259,6 +268,10 @@ func _napadni_cilj() -> Dictionary:
 	if sada < _napad_spreman_ms:
 		return {"ok": false, "poruka": "Not ready yet"}
 	_napad_spreman_ms = sada + int(napad_cooldown * 1000)
+	if _buffovi.has("nevidljivost"): # napad prekida nevidljivost pre štete, pa pretnja odmah važi
+		_buffovi.erase("nevidljivost")
+		print("[BUFF] ", ime_lika, " nevidljivost prekinuta napadom")
+		_buffovi_promenjeni()
 	e.primi_damage(izracunaj_damage(), get_multiplayer_authority())
 	return {"ok": true}
 
@@ -702,13 +715,18 @@ func primi_statistike(d: Dictionary) -> void:
 # ih brišu. Isti buff ponovo osvežava trajanje (vrednost se ne sabira); različiti važe istovremeno.
 # Vrednost je procenat, osim oklopa (apsolutno). Klijent ne šalje buff: dobija ga samo kroz primi_buffove.
 # protivotrov (antidote): skida otrov i ne da novi dok traje (vrednost bez značenja).
-const BUFF_TIPOVI := ["napad", "oklop", "xp", "loot", "brzina", "protivotrov"]
+# nevidljivost: neprijatelji ne vide lik (Enemy: aggro i tabela pretnje), napad je prekida; ostali vide providan lik.
+const BUFF_TIPOVI := ["napad", "oklop", "xp", "loot", "brzina", "protivotrov", "nevidljivost"]
 # Debuffovi su u istom _buffovi (istek, smrt, odjava, primi_buffove), ali ih nijedan predmet ne daje.
 # otrov: [šteta po sekundi, kraj]; nanosi ga neprijatelj (Enemy.otrov_*), osvežava trajanje bez sabiranja.
 const DEBUFF_TIPOVI := ["otrov"]
 signal buffovi_promenjeni # klijent: stiglo novo stanje buffova od servera
 var _buffovi := {} # server: tip -> [vrednost, ms kad ističe]
 var buffovi := {}  # klijent: tip -> [vrednost, lokalni ms kad ističe]
+
+# Server: nevidljiv za neprijatelje (Enemy._dodaj_aggro, _ocisti_pretnju)
+func nevidljiv() -> bool:
+	return buff("nevidljivost") > 0
 
 # Server: trenutna vrednost buff-a (0 ako ga nema ili je istekao)
 func buff(tip: String) -> int:
@@ -858,6 +876,7 @@ func _proveri_istek_buffova() -> void:
 
 # Vlasniku ide preostalo vreme (ne apsolutno: satovi servera i klijenta se razlikuju); napad i oklop menjaju statistike
 func _buffovi_promenjeni() -> void:
+	nevidljiv_sync = nevidljiv()
 	var sada := Time.get_ticks_msec()
 	var d := {}
 	for tip in _buffovi:
@@ -891,6 +910,7 @@ static func opis_buffa(tip: String, vrednost: int) -> String:
 		"brzina": return TranslationServer.translate("Speed +%d%%") % vrednost
 		"protivotrov": return TranslationServer.translate("Poison immunity")
 		"otrov": return TranslationServer.translate("Poisoned -%d HP/s") % vrednost
+		"nevidljivost": return TranslationServer.translate("Invisible")
 	return ""
 
 # Klijent: zahtev za opremanje (item_id) ili skidanje ("") predmeta u slotu; čeka odgovor servera.

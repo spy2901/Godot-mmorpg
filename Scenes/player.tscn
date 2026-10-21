@@ -34,6 +34,9 @@ properties/5/replication_mode = 2
 properties/6/path = NodePath(".:ime_sync")
 properties/6/spawn = true
 properties/6/replication_mode = 2
+properties/7/path = NodePath(".:nevidljiv_sync")
+properties/7/spawn = true
+properties/7/replication_mode = 2
 
 [node name="Player" type="CharacterBody3D" unique_id=1441937363]
 script = ExtResource("1_vgqql")
