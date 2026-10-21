@@ -1,7 +1,8 @@
 extends CharacterBody3D
 
 #MOVEMNT
-var brzina = 5.0
+const BRZINA := 5.0 # m/s bez buff-a
+var brzina = BRZINA # za simuliraj_korak: postavlja se po unosu (_brzina_za_seq), na serveru i kod vlasnika
 var gravitacija = -9.8
 var mouse_sensitivity = 0.3
 var rotacija_misa = false
@@ -693,13 +694,80 @@ func buff(tip: String) -> int:
 func _dodaj_buff(tip: String, vrednost: int, trajanje_ms: int) -> void:
 	_buffovi[tip] = [vrednost, Time.get_ticks_msec() + trajanje_ms]
 	print("[BUFF] ", ime_lika, " ", tip, " +", vrednost, " ", trajanje_ms, " ms")
+	if tip == "brzina":
+		_zakazi_brzinu(vrednost, trajanje_ms)
 	_buffovi_promenjeni()
 
 func _ocisti_buffove() -> void:
+	if not _raspored_brzine.is_empty():
+		_raspored_brzine.clear()
+		_javi_raspored_brzine()
 	if _buffovi.is_empty():
 		return
 	_buffovi.clear()
 	_buffovi_promenjeni()
+
+# Brzina (speed_potion) ne važi po satu, nego po seq-u unosa vlasnika: server zakaže [od, do) seq-ova unapred za procenjeni
+# RTT i javi raspored vlasniku, a server, predikcija i replay simuliraju svaki unos brzinom za njegov seq. Varijanta "po
+# satu" (server menja brzinu odmah, vlasnik kad stigne poruka) daje 0,3-0,4 m greške predikcije pri RTT 150-250 ms.
+# Brzinu, trajanje i početak određuje samo server; _buffovi["brzina"] služi za HUD i istek po satu.
+var _raspored_brzine: Array = [] # server i vlasnik: [[od_seq, do_seq, vrednost u %]]
+const BRZINA_MARGINA_TIKOVA := 3  # rezerva preko procenjenog RTT-a (jitter, frame u kom stiže raspored)
+
+func _brzina_za_seq(seq: int) -> float:
+	for x in _raspored_brzine:
+		if seq >= int(x[0]) and seq < int(x[1]):
+			return BRZINA * (100 + int(x[2])) / 100.0
+	return BRZINA
+
+func _zakazi_brzinu(vrednost: int, trajanje_ms: int) -> void:
+	var tps := Engine.physics_ticks_per_second
+	var najnoviji: int = _red[-1][0] if not _red.is_empty() else _poslednji_seq # vlasnik je već poslao bar ovoliko
+	var od := najnoviji + ceili(_rtt_ms() * tps / 1000.0) + BRZINA_MARGINA_TIKOVA
+	var do_ := od + ceili(trajanje_ms * tps / 1000.0)
+	_raspored_brzine = _raspored_brzine.filter(func(x): return int(x[1]) > _poslednji_seq)
+	_raspored_brzine.append([od, do_, vrednost])
+	print("[BUFF] ", ime_lika, " brzina po seq-u ", _raspored_brzine, " (najnoviji ", najnoviji, ", rtt ", _rtt_ms(), " ms)")
+	_javi_raspored_brzine()
+
+func _javi_raspored_brzine() -> void:
+	var vlasnik := get_multiplayer_authority()
+	if vlasnik == multiplayer.get_unique_id():
+		primi_raspored_brzine(_raspored_brzine)
+	elif vlasnik in multiplayer.get_peers():
+		primi_raspored_brzine.rpc_id(vlasnik, _raspored_brzine)
+
+# samo od servera: klijent ne može da postavi brzinu (ni sebi preko servera, ni serveru)
+@rpc("any_peer", "reliable")
+func primi_raspored_brzine(lista: Array) -> void:
+	if not _poziv_od_servera():
+		return
+	_raspored_brzine = lista.duplicate(true)
+
+# RTT za zakazivanje: server šalje vlasniku ping, vlasnik vraća isti broj (ceo krug, sa frame-ovima obe strane)
+const PING_RAZMAK_MS := 250
+var _ping_ms := 0
+var _rtt_uzorci: Array = []
+
+func _rtt_ms() -> int:
+	var m := 0
+	for x in _rtt_uzorci:
+		m = maxi(m, x)
+	return m
+
+@rpc("any_peer", "unreliable_ordered")
+func ping_brzine(t_ms: int) -> void:
+	if not _poziv_od_servera():
+		return
+	pong_brzine.rpc_id(1, t_ms)
+
+@rpc("any_peer", "unreliable_ordered")
+func pong_brzine(t_ms: int) -> void:
+	if not multiplayer.is_server() or not _posiljalac_je_vlasnik():
+		return
+	_rtt_uzorci.append(Time.get_ticks_msec() - t_ms)
+	if _rtt_uzorci.size() > 8:
+		_rtt_uzorci.pop_front()
 
 func _proveri_istek_buffova() -> void:
 	var sada := Time.get_ticks_msec()
@@ -1493,6 +1561,7 @@ func _klijent_korak(dt: float) -> void:
 		return # čekamo prvo stanje od servera
 	for i in test_ubrzanje:
 		var u := _novi_unos()
+		brzina = _brzina_za_seq(u[0])
 		simuliraj_korak(u, dt)
 		_buffer.append(u)
 		_za_slanje.append(u)
@@ -1584,6 +1653,7 @@ func _uskladi(s: Array, dt: float) -> void:
 	global_position = s[1]
 	velocity = s[2]
 	for u in _buffer:
+		brzina = _brzina_za_seq(u[0])
 		simuliraj_korak(u, dt)
 	rotation.y = pre_yaw
 	var greska := pre_poz.distance_to(global_position)
@@ -1754,6 +1824,7 @@ func _server_korak(dt: float) -> void:
 		_tokeni -= 1.0
 		if mrtav:
 			u = [u[0], Vector2.ZERO, false, u[3]]
+		brzina = _brzina_za_seq(u[0])
 		simuliraj_korak(u, dt)
 		_poslednji_seq = u[0]
 	_prati_red()
@@ -1768,6 +1839,9 @@ func _server_korak(dt: float) -> void:
 			if _debug_seq:
 				_dbg_seq("RESET poslat (id %d, seq %d, poz %s)" % [rid, _poslednji_seq, global_position])
 		primi_stanje.rpc_id(vlasnik, _poslednji_seq, global_position, velocity, rid)
+		if sad - _ping_ms >= PING_RAZMAK_MS:
+			_ping_ms = sad
+			ping_brzine.rpc_id(vlasnik, sad)
 
 # Host koji igra nema mrežnu potvrdu (unosi mu nose _reset_id direktno): za njega se ne čeka
 func _ceka_reset() -> bool:
