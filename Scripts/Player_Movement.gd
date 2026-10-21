@@ -744,16 +744,24 @@ func primi_raspored_brzine(lista: Array) -> void:
 		return
 	_raspored_brzine = lista.duplicate(true)
 
-# RTT za zakazivanje: server šalje vlasniku ping, vlasnik vraća isti broj (ceo krug, sa frame-ovima obe strane)
+# RTT za zakazivanje: server šalje vlasniku ping, vlasnik vraća isti broj (ceo krug, sa frame-ovima obe strane).
+# Procena je 75. percentil poslednjih PING_UZORAKA, bez uzoraka iz prvih PING_ZAGREVANJE_MS posle učitavanja lika: klijent
+# tada učitava scenu i odgovara sa zakašnjenjem (izmereno 333-532 ms pri RTT 150-250), pa je prvi napitak kasnio
+# 250-300 ms više od narednih. Dok nema uzoraka: ENet RTT (pravo mrežno kašnjenje, bez frame-ova).
 const PING_RAZMAK_MS := 250
+const PING_UZORAKA := 12
+const PING_ZAGREVANJE_MS := 2000
 var _ping_ms := 0
 var _rtt_uzorci: Array = []
 
 func _rtt_ms() -> int:
-	var m := 0
-	for x in _rtt_uzorci:
-		m = maxi(m, x)
-	return m
+	if _rtt_uzorci.is_empty():
+		var mp := multiplayer.multiplayer_peer
+		var p = mp.get_peer(get_multiplayer_authority()) if mp is ENetMultiplayerPeer else null
+		return int(p.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)) if p != null else 0
+	var u := _rtt_uzorci.duplicate()
+	u.sort()
+	return u[mini(u.size() - 1, (u.size() * 3) / 4)]
 
 @rpc("any_peer", "unreliable_ordered")
 func ping_brzine(t_ms: int) -> void:
@@ -765,8 +773,10 @@ func ping_brzine(t_ms: int) -> void:
 func pong_brzine(t_ms: int) -> void:
 	if not multiplayer.is_server() or not _posiljalac_je_vlasnik():
 		return
+	if _ucitan_ms < 0 or t_ms - _ucitan_ms < PING_ZAGREVANJE_MS:
+		return # klijent još učitava scenu: odgovor kasni zbog frame-ova, ne mreže
 	_rtt_uzorci.append(Time.get_ticks_msec() - t_ms)
-	if _rtt_uzorci.size() > 8:
+	if _rtt_uzorci.size() > PING_UZORAKA:
 		_rtt_uzorci.pop_front()
 
 func _proveri_istek_buffova() -> void:
