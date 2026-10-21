@@ -14,8 +14,7 @@ const CONFIG_PATH = "user://config.cfg"
 const VAN_PRODAVNICE := ["iron_gloves", "dragon_scale_armor", "dragon_staff", "golden_helmet", "golden_sword",
 	"shadow_cloak", "shadow_dagger",
 	"steel_greaves", "steel_sabatons", "tower_shield", "dragonscale_leggings", "shadow_boots", "dragon_shield",
-	"arcane_staff", # napad 45: jače od ostalog oružja u prodavnici (do 35), ostaje samo van nje
-	"speed_potion"] # buff brzine isključen u igri (predikcija: previše korekcija pri RTT 150 ms), pa se i ne prodaje
+	"arcane_staff"] # napad 45: jače od ostalog oružja u prodavnici (do 35), ostaje samo van nje
 
 func _ready() -> void:
 	_ucitaj_iz_fajla()

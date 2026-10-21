@@ -683,7 +683,7 @@ func primi_statistike(d: Dictionary) -> void:
 # Privremeni efekti potrošnih predmeta (items.buff_*, migracija 010). Samo u memoriji servera: smrt, odjava i restart
 # ih brišu. Isti buff ponovo osvežava trajanje (vrednost se ne sabira); različiti važe istovremeno.
 # Vrednost je procenat, osim oklopa (apsolutno). Klijent ne šalje buff: dobija ga samo kroz primi_buffove.
-const BUFF_TIPOVI := ["napad", "oklop", "xp", "loot"]
+const BUFF_TIPOVI := ["napad", "oklop", "xp", "loot", "brzina"]
 signal buffovi_promenjeni # klijent: stiglo novo stanje buffova od servera
 var _buffovi := {} # server: tip -> [vrednost, ms kad ističe]
 var buffovi := {}  # klijent: tip -> [vrednost, lokalni ms kad ističe]
@@ -843,6 +843,7 @@ static func opis_buffa(tip: String, vrednost: int) -> String:
 		"oklop": return TranslationServer.translate("Armor +%d") % vrednost
 		"xp": return TranslationServer.translate("XP +%d%%") % vrednost
 		"loot": return TranslationServer.translate("Loot chance +%d%%") % vrednost
+		"brzina": return TranslationServer.translate("Speed +%d%%") % vrednost
 	return ""
 
 # Klijent: zahtev za opremanje (item_id) ili skidanje ("") predmeta u slotu; čeka odgovor servera.

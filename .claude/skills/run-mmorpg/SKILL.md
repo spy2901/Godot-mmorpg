@@ -289,8 +289,9 @@ Stub ima pet buff predmeta kao posle 010 i `test_kratki_eliksir` (napad +20% 2 s
 `klijent_ne_postavlja_buff` (jedini buff RPC je `primi_buffove`; lažni poziv ka serveru ništa ne menja),
 `wisdom_ne_prelazi_limit` (nivo 1, vuk 11: 25), `buff_po_igracu_wisdom_i_luck` (Buff2Lik udari prvi, BuffLik ubije goblina sa
 30 x iron_ore 40%: XP 9 i 7, iron_ore tačno po napadaču za isto seme), `smrt_brise_buffove` (posle respawn-a server vrati
-BuffLik-a na (-22, -2), van putanje movera), `prodavnica_nudi_cetiri_buff_predmeta`, `prodavnica_ne_nudi_speed_potion` i
-`speed_potion_upotreba_odbijena_ne_trosi` (speed isključen: `Config.VAN_PRODAVNICE`, server ga ne prihvata), `buff_hud_i_tooltip`; server:
+BuffLik-a na (-22, -2), van putanje movera), `prodavnica_nudi_cetiri_buff_predmeta`, `prodavnica_nudi_speed_potion` (kupovina +1) i
+`speed_potion_upotreba_trosi_6_5_na_20s` (komad -1, raspored brzine na serveru i kod vlasnika +30% = 6,5 m/s na 1200 unosa,
+druga upotreba pre 5 s "Not ready yet" bez trošenja), `buff_hud_i_tooltip`; server:
 `luck_bacanje_isto_bez_buffa_x1_5_sa_buffom` (30000), `luck_retka_oprema_samo_trol_10`. Svih 15 pada bez implementacije
 (provereno). HUD labela se osveži u `TopBar._process`, koji ide posle `_process` drajvera: provera čeka osvežen tekst.
 

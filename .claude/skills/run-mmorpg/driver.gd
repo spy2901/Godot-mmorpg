@@ -2688,7 +2688,7 @@ func _server_buff() -> void:
 	if bf is Dictionary:
 		for tip in bf: preostalo[tip] = int(bf[tip][1]) - Time.get_ticks_msec()
 	var st := JSON.stringify({"attack": p.izracunaj_damage(), "armor": int(p.get("armor")) + (p.buff("oklop") if p.has_method("buff") else 0),
-		"buffovi": preostalo, "hp": p.hp, "mrtav": p.mrtav})
+		"buffovi": preostalo, "hp": p.hp, "mrtav": p.mrtav, "raspored": p.get("_raspored_brzine")})
 	if st != _b_upisano:
 		_b_upisano = st
 		_pisi("buff_server", st)
@@ -2800,6 +2800,9 @@ func _b_cmd_posalji(cmd: String) -> PackedStringArray:
 	var br := str(_b_br)
 	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/buff_odgovor").split(" ")[0] == br, 8.0)
 	return FileAccess.get_file_as_string(dir + "/buff_odgovor").split(" ")
+
+func _b_rasp_int(r) -> Array: # raspored brzine iz JSON-a (float) ili RPC-a (int) kao int
+	return (r as Array).map(func(x): return (x as Array).map(func(y): return int(y))) if r is Array else []
 
 func _b_stub(ime: String) -> Dictionary:
 	return await root.get_node("ApiManager").get_player(ime)
@@ -2939,19 +2942,26 @@ func _buff_scenario(p) -> void:
 	var st := await _b_stub("BuffLik")
 	_provera("prodavnica_nudi_cetiri_buff_predmeta", fali.is_empty() and kup.get("ok", false) and _komada(st, "elixir_of_luck") == 1,
 		"nedostaje u ponudi %s, kupovina elixir_of_luck %s, u bazi %d" % [fali, kup, _komada(st, "elixir_of_luck")])
-	_provera("prodavnica_ne_nudi_speed_potion", not ponuda.has("Speed Potion") and not kup_speed.get("ok", true)
-		and _komada(st, "speed_potion") == speed_pre,
+	_provera("prodavnica_nudi_speed_potion", ponuda.has("Speed Potion") and kup_speed.get("ok", false)
+		and _komada(st, "speed_potion") == speed_pre + 1,
 		"Speed Potion u ponudi=%s, kupovina %s, u bazi %d -> %d" % [ponuda.has("Speed Potion"), kup_speed, speed_pre, _komada(st, "speed_potion")])
 
-	# speed_potion: upotreba odbijena, komad ostaje (u bazi i u inventaru)
+	# speed_potion: upotreba troši komad; server zakaže +30% (6,5 m/s) na 20 s = 1200 unosa i javi raspored vlasniku;
+	# druga upotreba pre cooldown-a (5 s) se odbija i ne troši (BuffLik ima 2: stub 1 + kupljen)
 	var sp_baza := _komada(await _b_stub("BuffLik"), "speed_potion")
 	var sp_odg: Dictionary = await p.koristi_item_na_serveru("speed_potion")
-	await create_timer(0.5).timeout
+	await _cekaj(func(): return not (_b_srv().get("raspored", []) as Array).is_empty() and not (p.get("_raspored_brzine") as Array).is_empty(), 3.0)
+	var rasp: Array = _b_srv().get("raspored", [])
 	var sp_posle := _komada(await _b_stub("BuffLik"), "speed_potion")
-	var sp_inv := _inv_index(inv, "speed_potion") >= 0
-	_provera("speed_potion_upotreba_odbijena_ne_trosi", sp_baza == 1 and sp_posle == 1 and sp_inv and not sp_odg.get("ok", true)
-		and str(sp_odg.get("poruka", "")) == "This item can't be used" and not _b_srv().get("buffovi", {}).has("brzina"),
-		"u bazi %d -> %d, u inventaru=%s, odgovor %s, server buffovi %s" % [sp_baza, sp_posle, sp_inv, sp_odg, _b_srv().get("buffovi")])
+	var sp_cd: Dictionary = await p.koristi_item_na_serveru("speed_potion")
+	var sp_posle_cd := _komada(await _b_stub("BuffLik"), "speed_potion")
+	var r0: Array = rasp[0] if rasp.size() == 1 else [0, 0, 0]
+	var v_buff: float = p.BRZINA * (100 + int(r0[2])) / 100.0
+	_provera("speed_potion_upotreba_trosi_6_5_na_20s", sp_odg.get("ok", false) and sp_baza - sp_posle == 1 and rasp.size() == 1
+		and is_equal_approx(v_buff, 6.5) and int(r0[1]) - int(r0[0]) == 1200 and _b_rasp_int(p.get("_raspored_brzine")) == _b_rasp_int(rasp)
+		and not sp_cd.get("ok", true) and str(sp_cd.get("poruka", "")) == "Not ready yet" and sp_posle_cd == sp_posle,
+		"u bazi %d -> %d -> %d, odgovor %s, raspored server %s klijent %s (%.2f m/s, %d unosa), druga upotreba %s" % [sp_baza, sp_posle,
+		sp_posle_cd, sp_odg, rasp, p.get("_raspored_brzine"), v_buff, int(r0[1]) - int(r0[0]), sp_cd])
 
 	_provera("buff_hud_i_tooltip", "Click: Attack +20% for 60 s  |  cooldown 5 s" in tooltip and poruka == "Attack +20% for 60 s"
 		and hud_napad.begins_with("Attack +20%  ") and (hud_napad.ends_with("1:00") or hud_napad.ends_with("0:59")),
