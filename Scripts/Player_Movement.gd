@@ -715,10 +715,23 @@ var _raspored_brzine: Array = [] # server i vlasnik: [[od_seq, do_seq, vrednost 
 const BRZINA_MARGINA_TIKOVA := 3  # rezerva preko procenjenog RTT-a (jitter, frame u kom stiže raspored)
 
 func _brzina_za_seq(seq: int) -> float:
+	return BRZINA * (100 + _buff_brzine_za_seq(seq)) / 100.0
+
+func _buff_brzine_za_seq(seq: int) -> int:
 	for x in _raspored_brzine:
 		if seq >= int(x[0]) and seq < int(x[1]):
-			return BRZINA * (100 + int(x[2])) / 100.0
-	return BRZINA
+			return int(x[2])
+	return 0
+
+# Vlasnik: rezerva kad raspored kasni ili ne stigne. Stanje nosi buff brzine kojim je server obradio potvrđeni unos;
+# ako se ne slaže sa rasporedom za taj seq, nepotvrđeni unosi idu brzinom potvrđenog (inače bi se predikcija razilazila
+# svaki drugi tick do kraja buff-a: izmereno 181 korekcija za izgubljen raspored, 9 za raspored koji kasni 500 ms; sa
+# rezervom po 1).
+var _buff_ack := 0          # buff brzine potvrđenog unosa (iz primi_stanje)
+var _raspored_kasni := false
+
+func _brzina_vlasnik(seq: int) -> float:
+	return BRZINA * (100 + _buff_ack) / 100.0 if _raspored_kasni else _brzina_za_seq(seq)
 
 func _zakazi_brzinu(vrednost: int, trajanje_ms: int) -> void:
 	var tps := Engine.physics_ticks_per_second
@@ -1577,7 +1590,7 @@ func _klijent_korak(dt: float) -> void:
 		return # čekamo prvo stanje od servera
 	for i in test_ubrzanje:
 		var u := _novi_unos()
-		brzina = _brzina_za_seq(u[0])
+		brzina = _brzina_vlasnik(u[0])
 		simuliraj_korak(u, dt)
 		_buffer.append(u)
 		_za_slanje.append(u)
@@ -1613,7 +1626,7 @@ func _klijent_korak(dt: float) -> void:
 
 # Server -> vlasnik, svaki physics tick: stanje posle obrade unosa `seq`.
 @rpc("any_peer", "unreliable_ordered")
-func primi_stanje(seq: int, poz: Vector3, vel: Vector3, reset_id: int) -> void:
+func primi_stanje(seq: int, poz: Vector3, vel: Vector3, reset_id: int, buff_brzine := 0) -> void:
 	if not _poziv_od_servera() or randf() < test_gubitak:
 		return
 	if test_izgubi_reset_prijave and reset_id >= 2: # prvo stanje sa reset-om posle prijave (učitavanje)
@@ -1628,7 +1641,7 @@ func primi_stanje(seq: int, poz: Vector3, vel: Vector3, reset_id: int) -> void:
 		return # duplikat već primenjenog reset-a (server ga ponavlja do potvrde, ili zakasni): ignoriše se
 	server_poz = poz
 	# više stanja u istom frame-u: važi poslednje, ali reset se ne gubi
-	_stanje = [seq, poz, vel, maxi(reset_id, _stanje[3] if _stanje != null else 0)]
+	_stanje = [seq, poz, vel, maxi(reset_id, _stanje[3] if _stanje != null else 0), buff_brzine]
 
 # Test: zakasneli duplikat reset-a stiže pošto je klijent već hodao (mora da se ignoriše)
 func test_ubaci_zakasneli_reset() -> bool:
@@ -1668,8 +1681,10 @@ func _uskladi(s: Array, dt: float) -> void:
 	var pre_yaw := rotation.y
 	global_position = s[1]
 	velocity = s[2]
+	_buff_ack = s[4]
+	_raspored_kasni = _buff_ack != _buff_brzine_za_seq(seq)
 	for u in _buffer:
-		brzina = _brzina_za_seq(u[0])
+		brzina = _brzina_vlasnik(u[0])
 		simuliraj_korak(u, dt)
 	rotation.y = pre_yaw
 	var greska := pre_poz.distance_to(global_position)
@@ -1854,7 +1869,12 @@ func _server_korak(dt: float) -> void:
 			reset_paketa += 1
 			if _debug_seq:
 				_dbg_seq("RESET poslat (id %d, seq %d, poz %s)" % [rid, _poslednji_seq, global_position])
-		primi_stanje.rpc_id(vlasnik, _poslednji_seq, global_position, velocity, rid)
+		# buff brzine potvrđenog unosa (rezerva za vlasnika) ide samo dok nije 0: bez buff-a paket je isti kao ranije
+		var bb := _buff_brzine_za_seq(_poslednji_seq)
+		if bb != 0:
+			primi_stanje.rpc_id(vlasnik, _poslednji_seq, global_position, velocity, rid, bb)
+		else:
+			primi_stanje.rpc_id(vlasnik, _poslednji_seq, global_position, velocity, rid)
 		if sad - _ping_ms >= PING_RAZMAK_MS:
 			_ping_ms = sad
 			ping_brzine.rpc_id(vlasnik, sad)
