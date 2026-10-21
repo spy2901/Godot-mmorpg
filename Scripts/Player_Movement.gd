@@ -638,7 +638,17 @@ func server_primi_damage(sirova_steta: int, nivo_napadaca := 1) -> void:
 		_server_umri()
 	_posalji_hp()
 
+# Jedini punkt smrti (udarac: server_primi_damage, otrov: _process). Vaskrsenje se računa kao smrt: skida sve buffove i
+# debuffove (i sam buff vaskrsenja), ali lik ostaje živ na istom mestu, mana ista, sa NEOSJETLJIVOST_MS; tabela pretnje
+# neprijatelja se ne dira. Pozivalac posle šalje HP (_posalji_hp).
 func _server_umri() -> void:
+	var vaskrsenje := buff("vaskrsenje")
+	if vaskrsenje > 0:
+		_ocisti_buffove()
+		hp = maxi(1, max_hp * vaskrsenje / 100)
+		_neosjetljiv_do_ms = Time.get_ticks_msec() + NEOSJETLJIVOST_MS
+		print("[VASKRSENJE] ", ime_lika, " -> hp ", hp, "/", max_hp)
+		return
 	mrtav = true
 	_ocisti_buffove()
 	print("[DEATH] ", ime_lika, " je poginuo, respawn za ", RESPAWN_DELAY, " s")
@@ -716,7 +726,8 @@ func primi_statistike(d: Dictionary) -> void:
 # Vrednost je procenat, osim oklopa (apsolutno). Klijent ne šalje buff: dobija ga samo kroz primi_buffove.
 # protivotrov (antidote): skida otrov i ne da novi dok traje (vrednost bez značenja).
 # nevidljivost: neprijatelji ne vide lik (Enemy: aggro i tabela pretnje), napad je prekida; ostali vide providan lik.
-const BUFF_TIPOVI := ["napad", "oklop", "xp", "loot", "brzina", "protivotrov", "nevidljivost"]
+# vaskrsenje: smrtonosna šteta ostavlja lik živim na mestu sa vrednost % max HP-a (_server_umri).
+const BUFF_TIPOVI := ["napad", "oklop", "xp", "loot", "brzina", "protivotrov", "nevidljivost", "vaskrsenje"]
 # Debuffovi su u istom _buffovi (istek, smrt, odjava, primi_buffove), ali ih nijedan predmet ne daje.
 # otrov: [šteta po sekundi, kraj]; nanosi ga neprijatelj (Enemy.otrov_*), osvežava trajanje bez sabiranja.
 const DEBUFF_TIPOVI := ["otrov"]
@@ -911,6 +922,7 @@ static func opis_buffa(tip: String, vrednost: int) -> String:
 		"protivotrov": return TranslationServer.translate("Poison immunity")
 		"otrov": return TranslationServer.translate("Poisoned -%d HP/s") % vrednost
 		"nevidljivost": return TranslationServer.translate("Invisible")
+		"vaskrsenje": return TranslationServer.translate("Resurrection %d%% HP") % vrednost
 	return ""
 
 # Klijent: zahtev za opremanje (item_id) ili skidanje ("") predmeta u slotu; čeka odgovor servera.
