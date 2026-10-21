@@ -18,6 +18,10 @@ var xp_nagrada = 0  # iz nivoa (xp_za_nivo), ne iz scene
 	{"id": "rusty_sword", "sansa": 10}
 ]
 @export var moze_napasti = true
+# Otrov (debuff na igraču posle udarca): šansa u %, šteta po sekundi u % napad_damage (posle skaliranja nivoom), trajanje
+@export var otrov_sansa := 0
+@export var otrov_procenat := 0
+@export var otrov_trajanje := 0.0
 
 var hp = 100:
 	set(value):
@@ -77,6 +81,9 @@ static func xp_za_razliku(xp: int, razlika: int) -> int:
 static func xp_ubistva(xp: int, nivo_neprijatelja: int, nivo_igraca: int, buff_xp := 0) -> int:
 	var limit := maxi(1, floori(xp_do_sledeceg(nivo_igraca) * XP_UBISTVA_MAX_UDEO))
 	return mini(roundi(xp_za_razliku(xp, nivo_neprijatelja - nivo_igraca) * (100 + buff_xp) / 100.0), limit)
+
+func otrov_steta() -> int:
+	return maxi(1, roundi(napad_damage * otrov_procenat / 100.0)) if otrov_procenat > 0 else 0
 
 func _skaliraj() -> void:
 	max_hp = roundi(max_hp * (1.0 + HP_PO_NIVOU * (nivo - 1)))
@@ -313,6 +320,8 @@ func napadni_igraca():
 		return
 	moze_napasti = false
 	player.server_primi_damage(napad_damage, nivo)
+	if otrov_sansa > 0 and randf() * 100.0 < otrov_sansa:
+		player.server_otruj(otrov_steta(), roundi(otrov_trajanje * 1000))
 
 	await get_tree().create_timer(napad_cooldown).timeout
 	moze_napasti = true

@@ -158,6 +158,8 @@ Attack +%d%%,Attack +%d%%,Napad +%d%%
 XP +%d%%,XP +%d%%,XP +%d%%
 Loot chance +%d%%,Loot chance +%d%%,Šansa za plen +%d%%
 Speed +%d%%,Speed +%d%%,Brzina +%d%%
+Poison immunity,Poison immunity,Zaštita od otrova
+Poisoned -%d HP/s,Poisoned -%d HP/s,Otrovan -%d HP/s
 %s for %d s,%s for %d s,"%s, %d s"
 "
 Click: %s for %d s  |  cooldown %.0f s","

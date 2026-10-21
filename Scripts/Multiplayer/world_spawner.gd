@@ -86,6 +86,7 @@ func _on_peer_disconnected(id: int) -> void:
 		p.remove_from_group("player")
 		p.hide()
 		p.set_physics_process(false) # bez simulacije i primi_stanje ka peer-u koji je otišao
+		p._ocisti_buffove() # i debuffove: otrov ne otkucava dok server snima odjavu
 		await p.server_sacuvaj_konacno()
 	if is_instance_valid(p):
 		p.queue_free()

@@ -588,7 +588,16 @@ func _process(delta: float) -> void:
 	if _regen_akum < 1.0:
 		return
 	_regen_akum -= 1.0
-	if hp < max_hp or mana < max_mana:
+	# otrov (debuff): tick u istom ritmu kao regeneracija, pre nje, mimo oklopa
+	var otrov := buff("otrov")
+	if otrov > 0:
+		hp = maxi(hp - otrov, 0)
+		print("[OTROV] ", ime_lika, " -", otrov, " -> hp ", hp)
+		if hp == 0:
+			_server_umri()
+			_posalji_hp()
+			return
+	if otrov > 0 or hp < max_hp or mana < max_mana:
 		hp = mini(hp + HP_REGEN, max_hp)
 		mana = mini(mana + MANA_REGEN, max_mana)
 		_posalji_hp()
@@ -692,7 +701,11 @@ func primi_statistike(d: Dictionary) -> void:
 # Privremeni efekti potrošnih predmeta (items.buff_*, migracija 010). Samo u memoriji servera: smrt, odjava i restart
 # ih brišu. Isti buff ponovo osvežava trajanje (vrednost se ne sabira); različiti važe istovremeno.
 # Vrednost je procenat, osim oklopa (apsolutno). Klijent ne šalje buff: dobija ga samo kroz primi_buffove.
-const BUFF_TIPOVI := ["napad", "oklop", "xp", "loot", "brzina"]
+# protivotrov (antidote): skida otrov i ne da novi dok traje (vrednost bez značenja).
+const BUFF_TIPOVI := ["napad", "oklop", "xp", "loot", "brzina", "protivotrov"]
+# Debuffovi su u istom _buffovi (istek, smrt, odjava, primi_buffove), ali ih nijedan predmet ne daje.
+# otrov: [šteta po sekundi, kraj]; nanosi ga neprijatelj (Enemy.otrov_*), osvežava trajanje bez sabiranja.
+const DEBUFF_TIPOVI := ["otrov"]
 signal buffovi_promenjeni # klijent: stiglo novo stanje buffova od servera
 var _buffovi := {} # server: tip -> [vrednost, ms kad ističe]
 var buffovi := {}  # klijent: tip -> [vrednost, lokalni ms kad ističe]
@@ -707,6 +720,18 @@ func _dodaj_buff(tip: String, vrednost: int, trajanje_ms: int) -> void:
 	print("[BUFF] ", ime_lika, " ", tip, " +", vrednost, " ", trajanje_ms, " ms")
 	if tip == "brzina":
 		_zakazi_brzinu(vrednost, trajanje_ms)
+	if tip == "protivotrov":
+		_buffovi.erase("otrov")
+	_buffovi_promenjeni()
+
+# Server, zove Enemy posle udarca: mrtav, neosetljiv i lik pod protivotrovom se ne truju
+func server_otruj(steta: int, trajanje_ms: int) -> void:
+	if not multiplayer.is_server() or not _stanje_ucitano or mrtav or steta <= 0 or trajanje_ms <= 0:
+		return
+	if Time.get_ticks_msec() < _neosjetljiv_do_ms or buff("protivotrov") > 0:
+		return
+	_buffovi["otrov"] = [steta, Time.get_ticks_msec() + trajanje_ms]
+	print("[OTROV] ", ime_lika, " otrovan ", steta, "/s ", trajanje_ms, " ms")
 	_buffovi_promenjeni()
 
 func _ocisti_buffove() -> void:
@@ -864,6 +889,8 @@ static func opis_buffa(tip: String, vrednost: int) -> String:
 		"xp": return TranslationServer.translate("XP +%d%%") % vrednost
 		"loot": return TranslationServer.translate("Loot chance +%d%%") % vrednost
 		"brzina": return TranslationServer.translate("Speed +%d%%") % vrednost
+		"protivotrov": return TranslationServer.translate("Poison immunity")
+		"otrov": return TranslationServer.translate("Poisoned -%d HP/s") % vrednost
 	return ""
 
 # Klijent: zahtev za opremanje (item_id) ili skidanje ("") predmeta u slotu; čeka odgovor servera.

@@ -31,6 +31,9 @@ napad_damage = 7
 aggro_range = 6.0
 napad_range = 1.2
 napad_cooldown = 2.0
+otrov_sansa = 30
+otrov_procenat = 18
+otrov_trajanje = 6.0
 loot_tabela = [{
 "id": "spider_web",
 "sansa": 100

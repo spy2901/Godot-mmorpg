@@ -23,6 +23,7 @@ var gold_label: Label
 # Buffovi (stanje drži server, ovde samo prikaz sa preostalim vremenom); izgled u buff_stil.gd
 const BUFF_STIL := preload("res://Scripts/UI/buff_stil.gd")
 var buff_label: Label
+var debuff_label: Label
 
 # Quest tracker
 var quest_tracker: Label
@@ -111,16 +112,14 @@ func _ready():
 	gold_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 	add_child(gold_label)
 
-	buff_label = Label.new()
-	buff_label.name = "BuffLabel"
-	buff_label.position = BUFF_STIL.POZICIJA
-	buff_label.size.x = BUFF_STIL.SIRINA
-	buff_label.add_theme_font_size_override("font_size", BUFF_STIL.FONT_VELICINA)
-	buff_label.add_theme_color_override("font_color", BUFF_STIL.BOJA_TEKST)
-	buff_label.add_theme_color_override("font_shadow_color", BUFF_STIL.BOJA_SENKA)
-	buff_label.add_theme_constant_override("shadow_offset_x", BUFF_STIL.SENKA_POMERAJ)
-	buff_label.add_theme_constant_override("shadow_offset_y", BUFF_STIL.SENKA_POMERAJ)
-	add_child(buff_label)
+	var buff_kutija := VBoxContainer.new()
+	buff_kutija.position = BUFF_STIL.POZICIJA
+	buff_kutija.custom_minimum_size.x = BUFF_STIL.SIRINA
+	add_child(buff_kutija)
+	buff_label = _napravi_buff_label("BuffLabel", BUFF_STIL.BOJA_TEKST)
+	buff_kutija.add_child(buff_label)
+	debuff_label = _napravi_buff_label("DebuffLabel", BUFF_STIL.BOJA_DEBUFF)
+	buff_kutija.add_child(debuff_label)
 
 	# Quest tracker (gore desno)
 	var screen_w = get_viewport().get_visible_rect().size.x
@@ -418,12 +417,26 @@ func dodaj_item(ime):
 
 # ---------------------------------------------------------------- PROCESS
 
-# Jedan red po buff-u: "Attack +20%  0:42"; istekao lokalno se ne prikazuje (server javlja istek posebno)
-func tekst_buffova() -> String:
+func _napravi_buff_label(ime: String, boja: Color) -> Label:
+	var l := Label.new()
+	l.name = ime
+	l.visible = false # prazan ne zauzima red u kutiji
+	l.add_theme_font_size_override("font_size", BUFF_STIL.FONT_VELICINA)
+	l.add_theme_color_override("font_color", boja)
+	l.add_theme_color_override("font_shadow_color", BUFF_STIL.BOJA_SENKA)
+	l.add_theme_constant_override("shadow_offset_x", BUFF_STIL.SENKA_POMERAJ)
+	l.add_theme_constant_override("shadow_offset_y", BUFF_STIL.SENKA_POMERAJ)
+	return l
+
+# Jedan red po buff-u: "Attack +20%  0:42"; istekao lokalno se ne prikazuje (server javlja istek posebno).
+# debuff = true: samo debuffovi (otrov), inače samo buffovi.
+func tekst_buffova(debuff := false) -> String:
 	var p = get_parent().get_parent()
 	var sada := Time.get_ticks_msec()
 	var redovi: PackedStringArray = []
 	for tip in p.buffovi:
+		if p.DEBUFF_TIPOVI.has(tip) != debuff:
+			continue
 		var ostalo := ceili((int(p.buffovi[tip][1]) - sada) / 1000.0)
 		if ostalo > 0:
 			redovi.append(p.opis_buffa(tip, int(p.buffovi[tip][0])) + BUFF_STIL.RAZMAK_VREME + "%d:%02d" % [ostalo / 60, ostalo % 60])
@@ -431,6 +444,9 @@ func tekst_buffova() -> String:
 
 func _process(delta):
 	buff_label.text = tekst_buffova()
+	buff_label.visible = buff_label.text != ""
+	debuff_label.text = tekst_buffova(true)
+	debuff_label.visible = debuff_label.text != ""
 	if je_mrtav:
 		_osvezi_smrt_ekran()  # odbrojavanje
 	elif Input.is_action_just_pressed("ui_inventory"):
