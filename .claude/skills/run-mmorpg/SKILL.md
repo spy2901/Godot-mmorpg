@@ -43,7 +43,7 @@ Deo B (predikcija + reconciliation), nastavak iste vremenske ose:
 - 24–27 s `test_ubrzanje = 3` (3 unosa po tick-u) → `speedhack_max_1.2x` (server ~1.2x, token bucket).
 - 27.5–33 s `test_gubitak = 0.3` (klijent odbacuje 30% paketa u oba smera), hod 28–30 s →
   `gubitak_30%_konvergira`.
-- observer: `observer_korak_max_2x` (korak tuđeg lika po frame-u ≤ brzina·dt·2; snap > PRAG_SNAP se broji posebno).
+- observer: `observer_korak_max_2x` (korak tuđeg lika po frame-u ≤ `BRZINA_MAX`·dt·2, najveća moguća brzina sa buff-om jer posmatrač ne zna tuđi buff; snap > PRAG_SNAP se broji posebno).
 - server: `seq_bez_rupa_bez_gubitka` (rupe u seq obradi po fazi; u fazama bez gubitka mora 0. U fazi
   gubitka rupa ima kad se izgube 3 uzastopna paketa (~0.3³ ≈ 2.7% tick-ova), u speed-hack-u su to odbijeni unosi).
   Rupa se vodi po liku (peer-u) sa vremenom kad je server primeti. WARN "neodlučno (zastoj klijenta)" samo ako

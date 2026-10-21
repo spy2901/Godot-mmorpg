@@ -357,10 +357,11 @@ func _observer(log: bool, d: float) -> bool:
 		# _process čvora, pa je izmereni korak napravljen sa delta-om PRETHODNOG frame-a.
 		if _obs_pre != null and t - _obs_od > 1.0 and _obs_d > 0:
 			var korak: float = o.global_position.distance_to(_obs_pre)
+			var v_max: float = o.BRZINA_MAX # prikaz: 2x najveća moguća brzina (posmatrač ne zna tuđi buff)
 			if korak > o.PRAG_SNAP: _obs_snap += 1
 			else:
-				_obs_max = maxf(_obs_max, korak / (o.brzina * _obs_d))
-				if korak > o.brzina * _obs_d * 2 * 1.001: _obs_kraci += 1
+				_obs_max = maxf(_obs_max, korak / (v_max * _obs_d))
+				if korak > v_max * _obs_d * 2 * 1.001: _obs_kraci += 1
 		_obs_d = d
 		_obs_pre = o.global_position
 		if absf(o.yaw_sync - PI / 2) < 0.05 and absf(o.rotation.y - o.yaw_sync) < 0.01:
@@ -388,7 +389,7 @@ func _observer(log: bool, d: float) -> bool:
 		_provera("novi_lik_000_se_pojavljuje", not ml.is_empty() and ml[0].distance_to(ml[1]) < POJAVA_TOLERANCIJA,
 			"MoverLik (bez pozicije u bazi) prvi put viđen na %s, server %s" % [ml[0] if not ml.is_empty() else "-", ml[1] if not ml.is_empty() else "-"])
 		_provera("drugi_ne_vidi_cilj", _cilj_obs_ok, _cilj_obs_detalj if _cilj_obs_detalj != "" else "CiljLik nije javio cilj (dir/cilj_postavljen)")
-		_provera("observer_korak_max_2x", _obs_kraci == 0, "prekoracenja=%d, max korak=%.2f x brzina*dt, snap-ova=%d" % [_obs_kraci, _obs_max, _obs_snap])
+		_provera("observer_korak_max_2x", _obs_kraci == 0, "prekoracenja=%d, max korak=%.2f x BRZINA_MAX*dt, snap-ova=%d" % [_obs_kraci, _obs_max, _obs_snap])
 		return true
 	return false
 

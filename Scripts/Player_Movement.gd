@@ -2,6 +2,8 @@ extends CharacterBody3D
 
 #MOVEMNT
 const BRZINA := 5.0 # m/s bez buff-a
+const BRZINA_BUFF_MAX := 30 # %: najveći buff brzine (speed_potion, migracija 010); server ograničava raspored na ovo
+const BRZINA_MAX := BRZINA * (100 + BRZINA_BUFF_MAX) / 100.0 # najveća moguća brzina (ograničenje prikaza tuđeg lika)
 var brzina = BRZINA # za simuliraj_korak: postavlja se po unosu (_brzina_za_seq), na serveru i kod vlasnika
 var gravitacija = -9.8
 var mouse_sensitivity = 0.3
@@ -734,6 +736,7 @@ func _brzina_vlasnik(seq: int) -> float:
 	return BRZINA * (100 + _buff_ack) / 100.0 if _raspored_kasni else _brzina_za_seq(seq)
 
 func _zakazi_brzinu(vrednost: int, trajanje_ms: int) -> void:
+	vrednost = clampi(vrednost, 0, BRZINA_BUFF_MAX)
 	var tps := Engine.physics_ticks_per_second
 	var najnoviji: int = _red[-1][0] if not _red.is_empty() else _poslednji_seq # vlasnik je već poslao bar ovoliko
 	var od := najnoviji + ceili(_rtt_ms() * tps / 1000.0) + BRZINA_MARGINA_TIKOVA
@@ -1742,12 +1745,13 @@ func _interpoliraj(delta: float) -> void:
 	_postavi(b[1] + v * minf(t - b[0], MAX_EKSTRAPOLACIJA * tps), b[2], delta)
 
 # Server obrađuje unose kako stignu (2+ koraka u jednom tick-u posle rafala), pa se prikaz
-# ograničava na 2x brzinu hoda; razlika veća od PRAG_SNAP je teleport/respawn i ide snap.
+# ograničava na 2x najveću moguću brzinu (posmatrač ne zna tuđi buff brzine); razlika veća od PRAG_SNAP je
+# teleport/respawn i ide snap.
 func _postavi(poz: Vector3, yaw: float, delta: float) -> void:
 	if global_position.distance_to(poz) > PRAG_SNAP:
 		global_position = poz
 	else:
-		global_position = global_position.move_toward(poz, brzina * 2.0 * delta)
+		global_position = global_position.move_toward(poz, BRZINA_MAX * 2.0 * delta)
 	rotation.y = yaw
 
 # ---------------------------------------------------------------- SERVER: UNOSI
