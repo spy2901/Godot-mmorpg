@@ -61,6 +61,15 @@ var _za_slanje: Array = [] # klijent: nepotvrđeni unosi za slanje (najviše UNO
 var test_izgubi_posle_reseta := false # test: paketi kasne 1 tick, a onaj na putu kad stigne reset se izgubi
 var test_izgubljen_paket := false     # test: hook je zaista izgubio paket
 var test_izgubi_reset_prijave := false # test: klijent odbaci prvo reset stanje posle inicijalizacije (učitavanje iz baze)
+# test (brzina): veštački RTT vlasnika, pola na izlazu (unosi, pong) i pola na ulazu (stanje, raspored brzine, ping), uz
+# jitter +-ms bez preuređivanja poruka; prvi raspored brzine kasni ("kasni:N" ms) ili se izgubi ("izgubi")
+var test_rtt_ms := 0
+var test_jitter_ms := 0
+var test_raspored_brzine := ""
+var test_brzina_pocela_ms := 0 # test postavi -1: ovde se upiše vreme prvog lokalnog koraka bržeg od BRZINA
+var _t_izlaz: Array = [] # [rok ms, Callable]
+var _t_ulaz: Array = []
+var _t_isporuka := false
 var test_reset_izgubljen := false      # test: hook je zaista odbacio reset
 var test_zakasni_reset := false        # test: sačuvaj kopiju prvog reset stanja (za test_ubaci_zakasneli_reset)
 var _test_reset_kopija = null
@@ -764,6 +773,15 @@ func _javi_raspored_brzine() -> void:
 func primi_raspored_brzine(lista: Array) -> void:
 	if not _poziv_od_servera():
 		return
+	if _t_kasni_ulaz(primi_raspored_brzine.bind(lista)):
+		return
+	if test_raspored_brzine == "izgubi":
+		test_raspored_brzine = ""
+		return
+	if test_raspored_brzine.begins_with("kasni:"):
+		var n := int(test_raspored_brzine.substr(6))
+		test_raspored_brzine = ""
+		await get_tree().create_timer(n / 1000.0).timeout
 	_raspored_brzine = lista.duplicate(true)
 
 # RTT za zakazivanje: server šalje vlasniku ping, vlasnik vraća isti broj (ceo krug, sa frame-ovima obe strane).
@@ -789,7 +807,9 @@ func _rtt_ms() -> int:
 func ping_brzine(t_ms: int) -> void:
 	if not _poziv_od_servera():
 		return
-	pong_brzine.rpc_id(1, t_ms)
+	if _t_kasni_ulaz(ping_brzine.bind(t_ms)):
+		return
+	_t_posalji(func(): pong_brzine.rpc_id(1, t_ms))
 
 @rpc("any_peer", "unreliable_ordered")
 func pong_brzine(t_ms: int) -> void:
@@ -1497,6 +1517,8 @@ func _physics_process(_delta):
 		_server_korak(dt)
 		_server_proveri_cilj()
 	elif is_multiplayer_authority():
+		if not _t_izlaz.is_empty() or not _t_ulaz.is_empty():
+			_t_isporuci()
 		_klijent_korak(dt)
 
 # Jedan korak kretanja: isti kod na serveru (autoritet) i na vlasniku (predikcija i replay).
@@ -1595,6 +1617,8 @@ func _klijent_korak(dt: float) -> void:
 	for i in test_ubrzanje:
 		var u := _novi_unos()
 		brzina = _brzina_vlasnik(u[0])
+		if test_brzina_pocela_ms == -1 and brzina > BRZINA:
+			test_brzina_pocela_ms = Time.get_ticks_msec()
 		simuliraj_korak(u, dt)
 		_buffer.append(u)
 		_za_slanje.append(u)
@@ -1607,7 +1631,8 @@ func _klijent_korak(dt: float) -> void:
 	# posle test_zadrzi: zaostali unosi odjednom, svaki u paketu sa svoja 2 prethodnika (kao pravi rafal)
 	for i in _buffer.size():
 		if _buffer[i][0] > _poslato_do and _buffer[i][0] < _seq:
-			posalji_unos.rpc_id(1, _kodiraj(_buffer.slice(maxi(0, i - 2), i + 1)))
+			var rafal := _kodiraj(_buffer.slice(maxi(0, i - 2), i + 1))
+			_t_posalji(func(): posalji_unos.rpc_id(1, rafal))
 	_poslato_do = _seq
 	var paket := _za_slanje.duplicate()
 	if _debug_seq and not paket.is_empty():
@@ -1616,7 +1641,8 @@ func _klijent_korak(dt: float) -> void:
 		_dbg_poslato = paket[-1][0]
 	if test_izgubi_posle_reseta:
 		if _test_paket != null:
-			posalji_unos.rpc_id(1, _kodiraj(_test_paket))
+			var tp := _kodiraj(_test_paket)
+			_t_posalji(func(): posalji_unos.rpc_id(1, tp))
 		_test_paket = paket
 		return
 	var kodiran := _kodiraj(paket)
@@ -1626,12 +1652,14 @@ func _klijent_korak(dt: float) -> void:
 		test_izgubljeno_paketa += 1
 		return
 	if randf() >= test_gubitak:
-		posalji_unos.rpc_id(1, kodiran)
+		_t_posalji(func(): posalji_unos.rpc_id(1, kodiran))
 
 # Server -> vlasnik, svaki physics tick: stanje posle obrade unosa `seq`.
 @rpc("any_peer", "unreliable_ordered")
 func primi_stanje(seq: int, poz: Vector3, vel: Vector3, reset_id: int, buff_brzine := 0) -> void:
 	if not _poziv_od_servera() or randf() < test_gubitak:
+		return
+	if _t_kasni_ulaz(primi_stanje.bind(seq, poz, vel, reset_id, buff_brzine)):
 		return
 	if test_izgubi_reset_prijave and reset_id >= 2: # prvo stanje sa reset-om posle prijave (učitavanje)
 		test_izgubi_reset_prijave = false
@@ -1840,6 +1868,32 @@ func _validan_unos(u) -> Array:
 	if not u[1].is_finite() or not is_finite(u[3]):
 		return []
 	return [u[0], u[1].limit_length(1.0), u[2], wrapf(u[3], -PI, PI), u[4]]
+
+# test: rok isporuke za veštački RTT (pola puta + jitter), nikad pre prethodne poruke u istom smeru
+func _t_rok(red: Array) -> int:
+	var rok := Time.get_ticks_msec() + test_rtt_ms / 2 + (randi_range(-test_jitter_ms, test_jitter_ms) if test_jitter_ms > 0 else 0)
+	return maxi(rok, int(red[-1][0]) if not red.is_empty() else 0)
+
+func _t_kasni_ulaz(c: Callable) -> bool:
+	if test_rtt_ms <= 0 or _t_isporuka:
+		return false
+	_t_ulaz.append([_t_rok(_t_ulaz), c])
+	return true
+
+func _t_posalji(c: Callable) -> void:
+	if test_rtt_ms <= 0 and _t_izlaz.is_empty():
+		c.call()
+	else:
+		_t_izlaz.append([_t_rok(_t_izlaz), c])
+
+func _t_isporuci() -> void:
+	var sad := Time.get_ticks_msec()
+	while not _t_izlaz.is_empty() and int(_t_izlaz[0][0]) <= sad:
+		_t_izlaz.pop_front()[1].call()
+	_t_isporuka = true
+	while not _t_ulaz.is_empty() and int(_t_ulaz[0][0]) <= sad:
+		_t_ulaz.pop_front()[1].call()
+	_t_isporuka = false
 
 func _server_korak(dt: float) -> void:
 	var ceka := _ceka_reset()

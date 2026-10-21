@@ -25,7 +25,7 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 157 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 157 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 168 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 168 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `buff1.log`, `buff2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -294,6 +294,21 @@ BuffLik-a na (-22, -2), van putanje movera), `prodavnica_nudi_cetiri_buff_predme
 druga upotreba pre 5 s "Not ready yet" bez trošenja), `buff_hud_i_tooltip`; server:
 `luck_bacanje_isto_bez_buffa_x1_5_sa_buffom` (30000), `luck_retka_oprema_samo_trol_10`. Svih 15 pada bez implementacije
 (provereno). HUD labela se osveži u `TopBar._process`, koji ide posle `_process` drajvera: provera čeka osvežen tekst.
+
+Buff brzine (uloga `brzina`, `korak=1` BrzinaLik, `korak=2` ponovna prijava; `run.sh` ih pokreće posle buff uloga). Brzina
+ne važi po satu nego po seq-u unosa: server zakaže `[od, do)` unapred za procenjeni RTT (ping, 75. percentil, bez prve
+2 s posle učitavanja) i javi raspored vlasniku (`primi_raspored_brzine`, samo od servera); server, predikcija i replay
+simuliraju svaki unos brzinom za njegov seq. Stanje nosi buff potvrđenog unosa (samo kad nije 0) kao rezervu kad raspored
+kasni. Veštački RTT vlasnika: `test_rtt_ms` (pola na izlazu unosa i ponga, pola na ulazu stanja, rasporeda i pinga),
+`test_jitter_ms` (+-ms bez preuređivanja), `test_raspored_brzine` ("kasni:N", "izgubi"). BrzinaLik hoda (x 48..62, z -20)
+i pije `test_kratki_speed` (stub: +30% 1,5 s, cooldown 1 s; stub mu ne kasni `item/use`, pa je početak bez 0,3 s
+backend-a). Provere: `klijent_ne_postavlja_brzinu` (lažni raspored ka serveru), `brzina_ivice_rtt_250_prvi_napitak`,
+`brzina_ivice_rtt_0/80/150` (0 snap, <= 4 korekcije, greška predikcije <= 0,10 m, početak <= RTT + 200 ms), `brzina_jitter_50ms`
+(150 i 250 +-50: 0 snap, <= 0,4 m), `brzina_raspored_kasni_500ms` i `brzina_raspored_izgubljen` (0 snap, <= 4 korekcije,
+<= 0,4 m), `brzina_osvezavanje_bez_rupe` (drugi napitak stiže serveru pred kraj: isti interval produžen),
+`brzina_smrt_prekida` (6,5 -> posle respawn-a 5 m/s, raspored prazan), `brzina_odjava_prekida` (korak 2: 5 m/s, bez
+rasporeda i buffa). Server upisuje stanje BrzinaLik-a u `$OUT/brzina_server` i izvršava `$OUT/brzina_cmd` ("ubij", posle
+respawn-a vraća lik u zonu 2). Sve padaju bez implementacije (provereno: kod igre sa main-a).
 
 Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
 igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u

@@ -128,6 +128,9 @@ ITEMS = {i["id"]: i for i in [
     # samo u testu (nije u bazi): napad +20% 2 s, za istek buff-a
     _item("test_kratki_eliksir", "Test Short Elixir", "consumable", vrednost=0, cooldown_ms=5000, buff_tip="napad",
           buff_vrednost=20, buff_trajanje_ms=2000),
+    # samo u testu: brzina +30% 1,5 s, cooldown 1 s (ivice buff-a brzine pod veštačkim RTT-om, bez čekanja 20 s)
+    _item("test_kratki_speed", "Test Short Speed", "consumable", vrednost=0, cooldown_ms=1000, buff_tip="brzina",
+          buff_vrednost=30, buff_trajanje_ms=1500),
 ]}
 for _i in ("golden_sword", "dragon_scale_armor"):
     ITEMS[_i]["quest_item"] = 1
@@ -277,10 +280,15 @@ PLAYERS["BuffLik"] = dict(PLAYERS["TestLik"], ime="BuffLik", napad_damage=10, hp
                               {"slot": 5, "id": "speed_potion", "kolicina": 1}])
 PLAYERS["Buff2Lik"] = dict(PLAYERS["TestLik"], ime="Buff2Lik", napad_damage=10, hp=100, max_hp=100, pos_x=-22, pos_y=1.16,
                            pos_z=3, equipment={}, inventory=[])
+# BrzinaLik (uloga brzina): hoda na otvorenom u zoni 2 (x 48..62, z -20; pod do x 75 i z -25), van ostalih likova
+PLAYERS["BrzinaLik"] = dict(PLAYERS["TestLik"], ime="BrzinaLik", hp=100, max_hp=100, pos_x=45, pos_y=1.16, pos_z=-20,
+                            equipment={}, inventory=[{"slot": 0, "id": "test_kratki_speed", "kolicina": 10},
+                                                     {"slot": 1, "id": "speed_potion", "kolicina": 2}])
+BEZ_ITEM_KASNJENJA = {"BrzinaLik"}  # kašnjenje početka buff-a brzine se meri bez veštačkih 0,3 s backend-a
 XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik", "LovacLik", "BuffLik", "Buff2Lik"}
 TOKENI = {"napredak-token": "NapredakLik", "oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik", "quest-token": "QuestLik",
-          "posmatrac-token": "PosmatracLik", "lovac-token": "LovacLik", "buff-token": "BuffLik", "buff2-token": "Buff2Lik"}
+          "posmatrac-token": "PosmatracLik", "lovac-token": "LovacLik", "buff-token": "BuffLik", "buff2-token": "Buff2Lik", "brzina-token": "BrzinaLik"}
 LOCK = threading.Lock()
 
 
@@ -388,7 +396,8 @@ class H(BaseHTTPRequestHandler):
                 inv.append({"slot": max([e["slot"] for e in inv], default=-1) + 1, "id": d["item_id"], "kolicina": 1})
                 return self._odgovor({"status": "ok", "gold": pl["gold"], "inventory": inv})
         if m := re.fullmatch(r"/players/([\w-]+)/item/use", p):
-            time.sleep(ITEM_USE_KASNJENJE)
+            if m[1] not in BEZ_ITEM_KASNJENJA:
+                time.sleep(ITEM_USE_KASNJENJE)
             with LOCK:
                 pl = PLAYERS.get(m[1])
                 it = ITEMS.get(str(d.get("item_id", "")))

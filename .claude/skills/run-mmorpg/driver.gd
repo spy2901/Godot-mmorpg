@@ -178,6 +178,9 @@ func _process(d):
 				root.size = Vector2i(1280, 720) # tooltip i HUD kao u prozoru
 				root.get_node("GameState").token = "buff-token" if _korak == 1 else "buff2-token"
 				root.get_node("GameState").ime_igraca = "BuffLik" if _korak == 1 else "Buff2Lik"
+			elif uloga == "brzina": # korak=1 BrzinaLik (buff brzine pod veštačkim RTT-om), korak=2 ponovna prijava
+				root.get_node("GameState").token = "brzina-token"
+				root.get_node("GameState").ime_igraca = "BrzinaLik"
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
 				root.size = Vector2i(1280, 720) # headless je 64x64: traka bi virila van prozora, a okvir cilja ležao preko nje
@@ -214,6 +217,7 @@ func _process(d):
 		"napredak": return _uloga_napredak()
 		"quest": return _uloga_quest()
 		"buff": return _uloga_buff()
+		"brzina": return _uloga_brzina()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -293,6 +297,7 @@ func _server(log: bool) -> bool:
 	_server_napredak()
 	_server_quest()
 	_server_buff()
+	_server_brzina()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -357,7 +362,7 @@ func _observer(log: bool, d: float) -> bool:
 		# _process čvora, pa je izmereni korak napravljen sa delta-om PRETHODNOG frame-a.
 		if _obs_pre != null and t - _obs_od > 1.0 and _obs_d > 0:
 			var korak: float = o.global_position.distance_to(_obs_pre)
-			var v_max: float = o.BRZINA_MAX # prikaz: 2x najveća moguća brzina (posmatrač ne zna tuđi buff)
+			var v_max: float = o.get_script().get_script_constant_map().get("BRZINA_MAX", o.brzina) # prikaz: 2x najveća moguća brzina
 			if korak > o.PRAG_SNAP: _obs_snap += 1
 			else:
 				_obs_max = maxf(_obs_max, korak / (v_max * _obs_d))
@@ -2950,13 +2955,13 @@ func _buff_scenario(p) -> void:
 	# druga upotreba pre cooldown-a (5 s) se odbija i ne troši (BuffLik ima 2: stub 1 + kupljen)
 	var sp_baza := _komada(await _b_stub("BuffLik"), "speed_potion")
 	var sp_odg: Dictionary = await p.koristi_item_na_serveru("speed_potion")
-	await _cekaj(func(): return not (_b_srv().get("raspored", []) as Array).is_empty() and not (p.get("_raspored_brzine") as Array).is_empty(), 3.0)
-	var rasp: Array = _b_srv().get("raspored", [])
+	await _cekaj(func(): return not _b_rasp_int(_b_srv().get("raspored")).is_empty() and not _b_rasp_int(p.get("_raspored_brzine")).is_empty(), 3.0)
+	var rasp: Array = _b_rasp_int(_b_srv().get("raspored"))
 	var sp_posle := _komada(await _b_stub("BuffLik"), "speed_potion")
 	var sp_cd: Dictionary = await p.koristi_item_na_serveru("speed_potion")
 	var sp_posle_cd := _komada(await _b_stub("BuffLik"), "speed_potion")
 	var r0: Array = rasp[0] if rasp.size() == 1 else [0, 0, 0]
-	var v_buff: float = p.BRZINA * (100 + int(r0[2])) / 100.0
+	var v_buff: float = 5.0 * (100 + int(r0[2])) / 100.0 # BRZINA
 	_provera("speed_potion_upotreba_trosi_6_5_na_20s", sp_odg.get("ok", false) and sp_baza - sp_posle == 1 and rasp.size() == 1
 		and is_equal_approx(v_buff, 6.5) and int(r0[1]) - int(r0[0]) == 1200 and _b_rasp_int(p.get("_raspored_brzine")) == _b_rasp_int(rasp)
 		and not sp_cd.get("ok", true) and str(sp_cd.get("poruka", "")) == "Not ready yet" and sp_posle_cd == sp_posle,
@@ -2975,3 +2980,207 @@ func _buff2_scenario(_p) -> void:
 	while not FileAccess.file_exists(dir + "/buff_gotov") and t < 2 * MAX_T:
 		await create_timer(0.2).timeout
 	_b_kraj = true
+
+# ---------------------------------------------------------------- BRZINA (uloga brzina: korak 1 BrzinaLik, korak 2 ponovna prijava)
+# Buff brzine je zakazan po seq-u unosa (Player_Movement._raspored_brzine). BrzinaLik hoda (x 48..62, z -20) i pije
+# test_kratki_speed (+30% 1,5 s) pod veštačkim RTT-om (test_rtt_ms, test_jitter_ms): ivice buff-a moraju biti bez snap-a
+# i sa greškom predikcije <= 0,10 m, početak <= RTT + 200 ms (i prvi napitak). Server: stanje BrzinaLik-a u
+# dir/brzina_server (raspored, horizontalna brzina, mrtav, peer), komanda dir/brzina_cmd "ubij".
+var _br_srv_upisano := ""
+var _br_cmd := ""
+var _br_krenuo := false
+var _br_kraj := false
+var _br_hoda := false
+var _br_yaw := -PI / 2
+
+func _server_brzina() -> void:
+	if dir == "" or _world() == null: return
+	var p = _ai_lik("BrzinaLik")
+	if p == null: return
+	var cmd := FileAccess.get_file_as_string(dir + "/brzina_cmd")
+	if cmd != "" and cmd != _br_cmd:
+		_br_cmd = cmd
+		_br_ubij(p)
+	var v: Vector3 = p.velocity
+	var st := JSON.stringify({"raspored": p.get("_raspored_brzine"), "v": snappedf(Vector2(v.x, v.z).length(), 0.01), "mrtav": p.mrtav,
+		"peer": str(p.name)})
+	if st != _br_srv_upisano:
+		_br_srv_upisano = st
+		_pisi("brzina_server", st)
+
+func _br_ubij(p) -> void: # posle respawn-a nazad u zonu 2 (spawn je na putanji movera)
+	p.server_primi_damage(1000000)
+	await _cekaj(func(): return not p.mrtav, 8.0)
+	p.server_postavi_poziciju(Vector3(45, 1.16, -20), true)
+
+func _br_srv() -> Dictionary:
+	var d = JSON.parse_string(FileAccess.get_file_as_string(dir + "/brzina_server"))
+	return d if d is Dictionary else {}
+
+# horizontalna brzina po serveru (medijana uzoraka iz dir/brzina_server tokom sek)
+func _br_v_srv(sek: float) -> float:
+	var u := []
+	var kraj := Time.get_ticks_msec() + int(sek * 1000)
+	while Time.get_ticks_msec() < kraj:
+		u.append(float(_br_srv().get("v", -1.0)))
+		await process_frame
+	u.sort()
+	return u[u.size() / 2] if not u.is_empty() else -1.0
+
+func _uloga_brzina() -> bool:
+	var p = _moj()
+	if p == null or not p.get_node("ui/Control")._ucitano:
+		return (_br_krenuo and p == null) or t > 2 * MAX_T
+	if not _br_krenuo:
+		_br_krenuo = true
+		if _korak == 1: _brzina_scenario(p)
+		else: _brzina_relog(p)
+	if _br_hoda: # okret na granicama (server_poz), smer svaki frame
+		if p.server_poz.x < 48.0: _br_yaw = -PI / 2 # ka +x
+		elif p.server_poz.x > 62.0: _br_yaw = PI / 2
+		p.rotation.y = _br_yaw
+	return _br_kraj or t > 2 * MAX_T
+
+func _br_hod(da: bool) -> void:
+	_br_hoda = da
+	if da: Input.action_press("ui_up")
+	else: Input.action_release("ui_up")
+
+# jedan test_kratki_speed: korekcije, snap, najveća greška predikcije i kašnjenje početka (klik -> prvi brži korak)
+func _br_ivica(p, rtt: int, kuka: String) -> Dictionary:
+	var k0: int = p.korekcije_glatke
+	var s0: int = p.korekcije_snap
+	p.greska_max = 0.0
+	p.set("test_raspored_brzine", kuka)
+	p.set("test_brzina_pocela_ms", -1)
+	var klik := Time.get_ticks_msec()
+	if rtt > 0: await create_timer(rtt / 2000.0).timeout # zahtev putuje pola RTT-a (odgovor se ne meri)
+	var odg: Dictionary = await p.koristi_item_na_serveru("test_kratki_speed")
+	var pocela: bool = await _cekaj(func(): return _br_pocela(p) > 0, 3.0)
+	var kasni: int = _br_pocela(p) - klik if pocela else -1
+	await create_timer(1.5 + rtt / 1000.0 + 0.8).timeout # kraj buff-a i poslednja stanja
+	return {"ok": bool(odg.get("ok", false)) and pocela, "glatke": p.korekcije_glatke - k0, "snap": p.korekcije_snap - s0,
+		"max": snappedf(p.greska_max, 0.001), "kasni": kasni, "odg": odg.get("poruka", "")}
+
+func _br_pocela(p) -> int: # test_brzina_pocela_ms (0 ako ga kod igre nema)
+	var v = p.get("test_brzina_pocela_ms")
+	return int(v) if v != null else 0
+
+func _br_opis(x: Dictionary) -> String:
+	return "glatke %d, snap %d, max greška %.3f m, početak %d ms%s" % [x.glatke, x.snap, x.max, x.kasni,
+		"" if x.ok else " (napitak: %s)" % x.odg]
+
+func _brzina_scenario(p) -> void:
+	p.set("test_rtt_ms", 250) # prvi napitak: procena RTT-a od prijave (bez zastoja pri učitavanju)
+	await _cekaj(func(): return p.is_on_floor(), 5.0)
+	_br_hod(true)
+	# klijent ne može da postavi brzinu: lažni raspored ka serveru (guard: samo server šalje raspored)
+	var ima: bool = p.has_method("primi_raspored_brzine")
+	if ima: p.primi_raspored_brzine.rpc_id(1, [[0, 100000000, 30]])
+	await create_timer(1.0).timeout
+	var v_laz := await _br_v_srv(1.0)
+	var r_laz = _br_srv().get("raspored", [])
+	_provera("klijent_ne_postavlja_brzinu", ima and r_laz is Array and r_laz.is_empty() and absf(v_laz - 5.0) < 0.3,
+		"lažni raspored [[0, 1e8, 30]] od klijenta: server raspored %s, brzina po serveru %.2f m/s (bazna 5)" % [r_laz, v_laz])
+	await create_timer(1.0).timeout
+	var uslovi := [["rtt_250_prvi", 250, 0, ""], ["rtt_0", 0, 0, ""], ["rtt_80", 80, 0, ""], ["rtt_150", 150, 0, ""],
+		["jitter_150", 150, 50, ""], ["jitter_250", 250, 50, ""], ["kasni", 150, 0, "kasni:500"], ["izgubi", 150, 0, "izgubi"]]
+	var rez := {}
+	for u in uslovi:
+		if u[0] != "rtt_250_prvi":
+			p.set("test_rtt_ms", u[1])
+			p.set("test_jitter_ms", u[2])
+			await create_timer(3.5).timeout # procena RTT-a (12 pingova po 250 ms) se ustali
+		rez[u[0]] = await _br_ivica(p, u[1], u[3])
+		print("[BRZINA] %s (rtt %d +-%d): %s" % [u[0], u[1], u[2], _br_opis(rez[u[0]])])
+	for u in [["rtt_250_prvi", 250, "brzina_ivice_rtt_250_prvi_napitak"], ["rtt_0", 0, "brzina_ivice_rtt_0"], ["rtt_80", 80, "brzina_ivice_rtt_80"],
+			["rtt_150", 150, "brzina_ivice_rtt_150"]]:
+		var x: Dictionary = rez[u[0]]
+		# najviše 4 korekcije po napitku (kao za raspored koji kasni): brzina po satu umesto po seq-u daje 10-17 malih
+		_provera(u[2], x.ok and x.snap == 0 and x.glatke <= 4 and x.max <= 0.10 and x.kasni >= 0 and x.kasni <= u[1] + 200,
+			"RTT %d ms: %s (uslov: 0 snap, <= 4 korekcije, <= 0,10 m, početak <= %d ms)" % [u[1], _br_opis(x), u[1] + 200])
+	var j1: Dictionary = rez["jitter_150"]
+	var j2: Dictionary = rez["jitter_250"]
+	_provera("brzina_jitter_50ms", j1.ok and j2.ok and j1.snap + j2.snap == 0 and j1.max <= 0.4 and j2.max <= 0.4,
+		"150 +-50: %s; 250 +-50: %s (uslov: 0 snap, <= 0,4 m)" % [_br_opis(j1), _br_opis(j2)])
+	for u in [["kasni", "brzina_raspored_kasni_500ms"], ["izgubi", "brzina_raspored_izgubljen"]]:
+		var x: Dictionary = rez[u[0]]
+		_provera(u[1], x.ok and x.snap == 0 and x.glatke <= 4 and x.max <= 0.4,
+			"RTT 150: %s (uslov: 0 snap, najviše 4 korekcije, <= 0,4 m)" % _br_opis(x))
+	await _br_osvezavanje(p)
+	await _br_smrt(p)
+	await _br_odjava(p)
+
+# osvežavanje: drugi napitak stiže serveru pred kraj aktivnog intervala -> isti interval produžen, bez rupe sporog hoda
+func _br_osvezavanje(p) -> void:
+	p.set("test_rtt_ms", 150)
+	p.set("test_jitter_ms", 0)
+	await create_timer(3.5).timeout
+	var k0: int = p.korekcije_glatke
+	var s0: int = p.korekcije_snap
+	p.greska_max = 0.0
+	var r0 := str(p.get("_raspored_brzine")) # raspored prethodnog napitka: čeka se novi (stiže pola RTT-a posle odgovora)
+	var odg1: Dictionary = await p.koristi_item_na_serveru("test_kratki_speed")
+	await _cekaj(func(): return p.get("_raspored_brzine") is Array and not p.get("_raspored_brzine").is_empty() \
+		and str(p.get("_raspored_brzine")) != r0, 3.0)
+	var r1: Array = (p.get("_raspored_brzine") as Array).duplicate(true) if p.get("_raspored_brzine") is Array else []
+	var kraj1: int = int(r1[-1][1]) if not r1.is_empty() else 0
+	await _cekaj(func(): return p._seq >= kraj1 - 12, 3.0) # zahtev stiže serveru ~8 unosa pre kraja (aktivan interval)
+	await create_timer(0.075).timeout
+	var odg2: Dictionary = await p.koristi_item_na_serveru("test_kratki_speed")
+	await create_timer(1.5 + 0.15 + 0.8).timeout
+	var r2: Array = (p.get("_raspored_brzine") as Array) if p.get("_raspored_brzine") is Array else []
+	var srv = _br_srv().get("raspored", [])
+	_provera("brzina_osvezavanje_bez_rupe", odg1.get("ok", false) and odg2.get("ok", false) and r1.size() == 1 and r2.size() == 1
+		and int(r2[0][0]) == int(r1[0][0]) and int(r2[0][1]) > kraj1 + 60 and _b_rasp_int(srv) == _b_rasp_int(r2)
+		and p.korekcije_snap - s0 == 0 and p.greska_max <= 0.4,
+		"pre osvežavanja %s, posle %s (server %s), drugi napitak %s; glatke %d, snap %d, max %.3f m" % [r1, r2, srv, odg2, p.korekcije_glatke - k0,
+		p.korekcije_snap - s0, p.greska_max])
+
+# smrt usred speed_potion-a: brzina po serveru 6,5 -> posle respawn-a 5, raspored prazan na serveru i kod vlasnika
+func _br_smrt(p) -> void:
+	p.set("test_rtt_ms", 0)
+	var odg: Dictionary = await p.koristi_item_na_serveru("speed_potion")
+	_pisi("brzina_prvi_speed", str(Time.get_ticks_msec()))
+	await create_timer(1.0).timeout
+	var v_pre := await _br_v_srv(0.5)
+	_pisi("brzina_cmd", "ubij")
+	await _cekaj(func(): return bool(p.get("mrtav")), 3.0)
+	var bio_mrtav: bool = p.get("mrtav")
+	await _cekaj(func(): return not bool(p.get("mrtav")), 8.0)
+	await create_timer(1.5).timeout # server vrati lik u zonu 2 (reset)
+	var v_posle := await _br_v_srv(1.0)
+	var srv = _br_srv().get("raspored", [1])
+	var kl = p.get("_raspored_brzine")
+	_provera("brzina_smrt_prekida", odg.get("ok", false) and bio_mrtav and absf(v_pre - 6.5) < 0.3 and absf(v_posle - 5.0) < 0.3
+		and srv is Array and srv.is_empty() and kl is Array and kl.is_empty(),
+		"speed_potion %s; brzina po serveru pre smrti %.2f, posle respawn-a %.2f m/s; raspored server %s, klijent %s" % [
+		odg.get("ok", odg.get("poruka")), v_pre, v_posle, srv, kl])
+
+# odjava usred speed_potion-a (korak 2 = ponovna prijava proverava da buff nije preživeo)
+func _br_odjava(p) -> void:
+	var od := int(FileAccess.get_file_as_string(dir + "/brzina_prvi_speed"))
+	await create_timer(maxf(0.0, (od + 5300 - Time.get_ticks_msec()) / 1000.0)).timeout # cooldown 5 s
+	var odg: Dictionary = await p.koristi_item_na_serveru("speed_potion")
+	await create_timer(1.0).timeout
+	var v := await _br_v_srv(0.5)
+	_pisi("brzina_odjava", JSON.stringify({"ok": odg.get("ok", false), "v": v, "raspored": _br_srv().get("raspored", [])}))
+	_br_hod(false)
+	_br_kraj = true
+
+func _brzina_relog(p) -> void:
+	var pre = JSON.parse_string(FileAccess.get_file_as_string(dir + "/brzina_odjava"))
+	if not pre is Dictionary: pre = {}
+	await _cekaj(func(): return p.is_on_floor() and str(_br_srv().get("peer", "")) == str(p.name), 5.0)
+	_br_hod(true)
+	await create_timer(1.0).timeout
+	var v := await _br_v_srv(1.0)
+	_br_hod(false)
+	var srv = _br_srv().get("raspored", [1])
+	var kl = p.get("_raspored_brzine")
+	var bf = p.get("buffovi")
+	_provera("brzina_odjava_prekida", bool(pre.get("ok", false)) and absf(float(pre.get("v", 0)) - 6.5) < 0.3
+		and not (pre.get("raspored", []) as Array).is_empty() and absf(v - 5.0) < 0.3 and srv is Array and srv.is_empty()
+		and kl is Array and kl.is_empty() and bf is Dictionary and bf.is_empty(),
+		"pre odjave %s; posle prijave brzina po serveru %.2f m/s, raspored server %s klijent %s, buffovi %s" % [pre, v, srv, kl, bf])
+	_br_kraj = true
