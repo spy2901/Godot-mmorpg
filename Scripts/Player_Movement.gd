@@ -548,7 +548,7 @@ func server_isplati_xp(xp: int, razlog: String) -> void:
 	var vlasnik := get_multiplayer_authority()
 	if vlasnik == multiplayer.get_unique_id():
 		primi_stats(r)
-	else:
+	elif vlasnik in multiplayer.get_peers(): # vlasnik je možda otišao (odgovor backenda stigne dok server snima odjavu)
 		primi_stats.rpc_id(vlasnik, r)
 
 # Server poziva ovo kad sam dodeli predmet (loot), pre slanja RPC-a klijentu
