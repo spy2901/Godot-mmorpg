@@ -3630,12 +3630,14 @@ func _efekti_scenario(p1, p2) -> void:
 	s.set("otrov_sansa", 100) # set: bez greške i kad svojstvo ne postoji (provera bez implementacije)
 	p1.server_postavi_poziciju(EF_PAUK + Vector3(-1, -0.84, 0), true)
 	await create_timer(0.3).timeout
+	# tick regeneracije namerno u frame-u ujeda (_regen_akum skoro 1): tu otrov ne sme da otkuca (samo regeneracija +2),
+	# pa tačno 6 tick-ova (3 mimo oklopa - regen 2 = -1) i posle njih samo regeneracija (+2). Ranije: 7 tick-ova.
+	await process_frame # emituje se neposredno pre _process čvorova: ujed i akumulator važe za ovaj frame (posle tajmera bi kasnili)
+	p1.set("_regen_akum", 0.999)
 	var u1 := await _ef_ujed(s, p1)
-	# tick 1/s zajedno sa regeneracijom (+2): 3 mimo oklopa -> -1 po tick-u, 6 tick-ova, pa samo regeneracija (+2)
 	var promene := []
 	var hp_pre: int = p1.hp
-	var otrov_od := Time.get_unix_time_from_system()
-	var do_ := Time.get_ticks_msec() + 7500
+	var do_ := Time.get_ticks_msec() + 8500
 	while Time.get_ticks_msec() < do_:
 		await process_frame
 		if p1.hp != hp_pre:
@@ -3644,20 +3646,10 @@ func _efekti_scenario(p1, p2) -> void:
 		if promene.size() == 3 and not hud.has("otrov"):
 			hud["otrov"] = str(_ef_kl("EfektiLik").get("debuff", ""))
 			hud["otrov_boja"] = str(_ef_kl("EfektiLik").get("debuff_boja", ""))
-	# tick ide po akumulatoru delta-e servera (najviše jedan po frame-u), a otrov ističe po satu: zastoj servera menja broj
-	# tick-ova (pod opterećenjem [-1, -1, -1, 2]). Vrednosti su stroge (svaki tick -1, pa regeneracija +2); samo pogrešan
-	# BROJ tick-ova je WARN uz zastoj servera u prozoru, inače FAIL.
-	var udarac_ok: bool = u1[0] == 13 and u1[1] is Array and u1[1][0] == 3 and u1[1][1] > 5500
-	var tikovi_ok: bool = promene.slice(0, 7) == [-1, -1, -1, -1, -1, -1, 2]
-	var n_tik := promene.find(2)
-	var vrednosti_ok := n_tik > 0 and promene.slice(0, n_tik).all(func(x): return x == -1)
-	udarac_ok = udarac_ok and vrednosti_ok # pogrešna vrednost tick-a se ne opravdava zastojem
-	var z_otrov := _zastoj_izmedju(otrov_od, Time.get_unix_time_from_system())
-	var opis_otrov := "oklop %d: udarac -%d (13), otrov %s; promene HP-a (tick 3 - regen 2) %s" % [p1.armor, u1[0], u1[1], promene]
-	if udarac_ok and not tikovi_ok and z_otrov != "":
-		print("WARN otrov_mimo_oklopa_6_tikova  neodlučno (zastoj %s): %s" % [z_otrov, opis_otrov])
-	else:
-		_provera("otrov_mimo_oklopa_6_tikova", udarac_ok and tikovi_ok, opis_otrov)
+	_provera("otrov_mimo_oklopa_6_tikova", u1[0] == 13 and u1[1] is Array and u1[1][0] == 3 and u1[1][1] > 5500
+		and promene.slice(0, 8) == [2, -1, -1, -1, -1, -1, -1, 2],
+		"oklop %d: udarac -%d (13), otrov %s; promene HP-a (regen u frame-u ujeda +2, pa 6 x tick 3 - regen 2, pa +2) %s" % [
+		p1.armor, u1[0], u1[1], promene])
 
 	# osvežavanje: drugi ujed usred otrova vraća trajanje na 6 s, šteta ostaje 3. Preostalo se poredi sa stvarno proteklim
 	# vremenom (tajmer od 3 s pod opterećenjem kasni: preostalo 1806 ms posle ~4,2 s), ista tolerancija -1000/+500 ms.
