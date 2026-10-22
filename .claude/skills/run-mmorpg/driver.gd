@@ -3127,6 +3127,7 @@ func _buff2_scenario(_p) -> void:
 # i sa greškom predikcije <= 0,10 m, početak <= RTT + 200 ms (i prvi napitak). Server: stanje BrzinaLik-a u
 # dir/brzina_server (raspored, horizontalna brzina, mrtav, peer), komanda dir/brzina_cmd "ubij".
 var _br_srv_upisano := ""
+var _br_uz_pre := ""
 var _br_cmd := ""
 var _br_krenuo := false
 var _br_kraj := false
@@ -3143,6 +3144,11 @@ func _server_brzina() -> void:
 		_br_ubij(p)
 	var v: Vector3 = p.velocity
 	var uz = p.get("_rtt_uzorci")
+	# dijagnostika procene RTT-a: svaki novi uzorak (vreme, ms od učitavanja, ukupno kašnjenje frame-ova servera do tada)
+	if uz is Array and uz.size() > 0 and str(uz) != _br_uz_pre:
+		_br_uz_pre = str(uz)
+		print("[RTT-UZ] t=%.3f uzorak %d ms (od učitavanja %d ms, uzoraka %d, procena %d, kašnjenje servera %.0f ms)" % [
+			Time.get_unix_time_from_system(), int(uz[-1]), Time.get_ticks_msec() - int(p.get("_ucitan_ms")), uz.size(), p._rtt_ms(), _kasn_zbir * 1000])
 	var st := JSON.stringify({"raspored": p.get("_raspored_brzine"), "v": snappedf(Vector2(v.x, v.z).length(), 0.01), "mrtav": p.mrtav,
 		"peer": str(p.name), "rtt_uzoraka": uz.size() if uz is Array else -1, "rtt_procena": p._rtt_ms() if p.has_method("_rtt_ms") else -1})
 	if st != _br_srv_upisano:
@@ -3258,6 +3264,14 @@ func _brzina_scenario(p) -> void:
 	await create_timer(1.0).timeout
 	# bar BR_RTT_UZORAKA pingova posle zagrevanja (bez opterećenja ih je ovde ~4): inače server koristi ENet RTT bez veštačkog
 	await _cekaj(func(): return int(_br_srv().get("rtt_uzoraka", 0)) >= BR_RTT_UZORAKA, BR_ROK)
+	# dijagnostika: frame-ovi ovog procesa sa kašnjenjem > 30 ms u poslednjih 6 s (uz [RTT-UZ] u server.log)
+	var sad_u := Time.get_unix_time_from_system()
+	var pre_k := 0.0
+	var spori := []
+	for e in _kasn_log:
+		if e[0] > sad_u - 6.0 and e[1] - pre_k > 0.03: spori.append("%.3f +%d ms" % [e[0], int((e[1] - pre_k) * 1000)])
+		pre_k = e[1]
+	print("[BR-FRAME] pre prvog napitka (t=%.3f), spori frame-ovi: %s" % [sad_u, spori])
 	var uslovi := [["rtt_250_prvi", 250, 0, ""], ["rtt_0", 0, 0, ""], ["rtt_80", 80, 0, ""], ["rtt_150", 150, 0, ""],
 		["jitter_150", 150, 50, ""], ["jitter_250", 250, 50, ""], ["kasni", 150, 0, "kasni:500"], ["izgubi", 150, 0, "izgubi"]]
 	var rez := {}
