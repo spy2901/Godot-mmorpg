@@ -1067,7 +1067,7 @@ func _javi_predmet(item_id: String) -> void:
 	var vlasnik := get_multiplayer_authority()
 	if vlasnik == multiplayer.get_unique_id():
 		primi_predmet(item_id, n, cd)
-	else:
+	elif vlasnik in multiplayer.get_peers(): # vlasnik je možda otišao (odgovor backenda stigne dok server snima odjavu)
 		primi_predmet.rpc_id(vlasnik, item_id, n, cd)
 
 @rpc("any_peer", "reliable")
