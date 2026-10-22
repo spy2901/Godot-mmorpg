@@ -303,7 +303,7 @@ _EF = dict(PLAYERS["TestLik"], level=15, xp=0, max_xp=_s15["max_xp"], max_hp=_s1
 PLAYERS["EfektiLik"] = dict(_EF, ime="EfektiLik", pos_x=35, equipment=dict(_OKLOP_68, shield="knight_shield"), inventory=[
     {"slot": 0, "id": "invisibility_potion", "kolicina": 1}, {"slot": 1, "id": "test_kratka_nevidljivost", "kolicina": 4},
     {"slot": 2, "id": "antidote", "kolicina": 1}, {"slot": 3, "id": "resurrection_potion", "kolicina": 2},
-    {"slot": 4, "id": "elixir_of_defense", "kolicina": 3}])
+    {"slot": 4, "id": "elixir_of_defense", "kolicina": 5}])
 PLAYERS["Efekti2Lik"] = dict(_EF, ime="Efekti2Lik", pos_x=38, equipment={}, inventory=[])
 SPORI_SAVE["Efekti2Lik"] = 2.5
 BEZ_ITEM_KASNJENJA = {"BrzinaLik"}  # kašnjenje početka buff-a brzine se meri bez veštačkih 0,3 s backend-a

@@ -3541,6 +3541,21 @@ func _efekti_scenario(p1, p2) -> void:
 	await _cekaj(func(): return _ef_bf(p1).has("vaskrsenje") and _ef_bf(p1).has("oklop"), 2.0)
 	await _cekaj(func(): return "Resurrection" in str(_ef_kl("EfektiLik").get("buff", "")), 1.0)
 	hud["vaskrsenje"] = str(_ef_kl("EfektiLik").get("buff", ""))
+	# drugi napitak vaskrsenja dok je aktivno: odbijen, ne troši se, trajanje ostaje; elixir_of_defense i dalje osvežava
+	await create_timer(5.2).timeout # cooldown oba napitka
+	var v_pre: Array = _ef_bf(p1).get("vaskrsenje", [0, 0])
+	var o_pre: Array = _ef_bf(p1).get("oklop", [0, 0])
+	var kom_pre := _komada(await _b_stub("EfektiLik"), "resurrection_potion")
+	var odbijen := await _ef_posalji("EfektiLik", "pij resurrection_potion")
+	var kom_posle := _komada(await _b_stub("EfektiLik"), "resurrection_potion")
+	var v_posle: Array = _ef_bf(p1).get("vaskrsenje", [0, 0])
+	await _ef_posalji("EfektiLik", "pij elixir_of_defense")
+	await _cekaj(func(): return int(_ef_bf(p1).get("oklop", [0, 0])[1]) > 59000, 2.0)
+	var o_posle: Array = _ef_bf(p1).get("oklop", [0, 0])
+	_provera("vaskrsenje_aktivno_odbija", odbijen == "Already active" and kom_pre > 0 and kom_posle == kom_pre
+		and v_pre[1] > 0 and v_posle[1] <= v_pre[1] and o_pre[1] < 56000 and o_posle[1] > 59000,
+		"poruka '%s', u bazi %d -> %d, vaskrsenje preostalo %d -> %d ms, oklop osvežen %d -> %d ms" % [odbijen, kom_pre,
+		kom_posle, v_pre[1], v_posle[1], o_pre[1], o_posle[1]])
 	var bf_v := _ef_bf(p1)
 	var poz: Vector3 = p1.global_position
 	p1.server_primi_damage(1000000)

@@ -1370,6 +1370,9 @@ func _iskoristi_item(item_id: String) -> Dictionary:
 		return {"ok": false, "poruka": "This item can't be used"}
 	if mrtav:
 		return {"ok": false, "poruka": "You are dead"}
+	# vaskrsenje važi do prve smrti: drugi napitak dok je aktivno se odbija pre trošenja (ostali buffovi osvežavaju trajanje)
+	if buff_tip == "vaskrsenje" and buff("vaskrsenje") > 0:
+		return {"ok": false, "poruka": "Already active"}
 	if not je_buff and not ((hp_e > 0 and hp < max_hp) or (mana_e > 0 and mana < max_mana)):
 		return {"ok": false, "poruka": "Already at full health" if hp_e > 0 else "Already at full mana"}
 	var ime := ime_lika
