@@ -21,9 +21,11 @@ poslednja = {ka_serveru: 0.0, ka_klijentu: 0.0}
 broj = {"klijent->server": 0, "server->klijent": 0}
 rtt_ms, rtt_do, citano = 0, 0, 0.0
 sekunda, po_sek = time.monotonic(), {"klijent->server": 0, "server->klijent": 0}
+bajtova = {"klijent->server": 0, "server->klijent": 0}
+po_sek_b = {"klijent->server": 0, "server->klijent": 0}
 
 def kraj(*_):
-    print("[PROKSI] paketa: %s" % broj, flush=True)
+    print("[PROKSI] paketa: %s, bajtova: %s" % (broj, bajtova), flush=True)
     sys.exit(0)
 signal.signal(signal.SIGTERM, kraj)
 
@@ -49,14 +51,17 @@ while True:
             odr, smer = ka_klijentu, "server->klijent"
         broj[smer] += 1
         po_sek[smer] += 1
+        bajtova[smer] += len(podaci)
+        po_sek_b[smer] += len(podaci)
         if rtt_ms < 0:
             continue
         poslednja[odr] = max(poslednja[odr], time.monotonic() + random.uniform(rtt_ms, rtt_do) / 2000.0)
         redovi[odr].append((poslednja[odr], podaci))
     sad = time.monotonic()
     if sad - sekunda >= 1.0:  # paketa po sekundi (ENet koji odbacuje nepouzdane pakete se vidi kao pad klijent->server)
-        print("[PROKSI] t=%.3f za 1 s: %s (RTT +%d ms)" % (time.time(), po_sek, rtt_ms), flush=True)
+        print("[PROKSI] t=%.3f za 1 s: %s, bajtova %s (RTT +%d ms)" % (time.time(), po_sek, po_sek_b, rtt_ms), flush=True)
         sekunda, po_sek = sad, {"klijent->server": 0, "server->klijent": 0}
+        po_sek_b = {"klijent->server": 0, "server->klijent": 0}
     for odr, red in redovi.items():
         while red and red[0][0] <= sad:
             podaci = red.popleft()[1]

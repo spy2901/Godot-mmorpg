@@ -3851,6 +3851,8 @@ var _th_srv_pauza := 0
 var _th_srv_upisan := false
 var _th_akt_t := 0.0
 var _th_srv_od := 0
+var _th_srv_thr_min := 99
+var _th_srv_cfg := []
 
 func _th_peer(): # klijent: ENet peer servera
 	var mp = get_multiplayer().multiplayer_peer
@@ -3914,8 +3916,8 @@ func _throttle_scenario(p) -> void:
 	if not srv is Dictionary: srv = {}
 	Input.action_release("ui_up")
 	_th_hoda = false
-	var opis := "od učitavanja, pa RTT +%s ms na %.0f s (throttle interval/ubrzanje/usporenje %s): throttle najmanji pre skoka %d, pri skoku %d (ENet RTT %d ms), najmanji %d, ispod %d ukupno %d ms; server: rupe %s, najveća pauza paketa unosa %s ms, odbijeno (pun red) %s, paketa unosa koje je ENet odbacio %s (od %s unosa)" % [
-		_th_skok, TH_SKOK, cfg, min_pre, thr_pre, rtt_pre, _th_min, ENetPacketPeer.PACKET_THROTTLE_SCALE, _th_ispod_ms, srv.get("rupe"), srv.get("pauza_ms"), srv.get("odbijeno"), srv.get("enet_odbacio"), srv.get("unosa")]
+	var opis := "od učitavanja, pa RTT +%s ms na %.0f s (throttle interval/ubrzanje/usporenje %s): throttle najmanji pre skoka %d, pri skoku %d (ENet RTT %d ms), najmanji %d, ispod %d ukupno %d ms; server: rupe %s, najveća pauza paketa unosa %s ms, odbijeno (pun red) %s, paketa unosa koje je ENet odbacio %s (od %s unosa); serverski throttle ka klijentu najmanji %s, podešen %s" % [
+		_th_skok, TH_SKOK, cfg, min_pre, thr_pre, rtt_pre, _th_min, ENetPacketPeer.PACKET_THROTTLE_SCALE, _th_ispod_ms, srv.get("rupe"), srv.get("pauza_ms"), srv.get("odbijeno"), srv.get("enet_odbacio"), srv.get("unosa"), srv.get("srv_throttle_min"), srv.get("srv_throttle_cfg")]
 	print("[THROTTLE] ", opis)
 	# niz rupa = unosi koji nisu stigli ni u jednom paketu (prozor redundanse UNOSA_NEPOTVRDJENIH_MAX premašen): mora 0.
 	# ENet throttle 0 propušta 1 od 32 paketa (brojač +7 po 32) = baš prozor redundanse: bez opterećenja rupa nema, ali
@@ -3932,6 +3934,13 @@ func _server_throttle() -> void:
 	if p.get("_stanje_ucitano") and not p._reset_ceka and p._poslednji_seq > 0 and _th_srv0 == null:
 		_th_srv0 = [p.rupe_seq, p.odbijeno_red_pun, _th_primljen_seq(p), p.paket_b_br]
 		_th_srv_od = Time.get_ticks_msec()
+	if _th_srv0 != null: # serverski throttle ka ovom klijentu (stanja): najmanji tokom scenarija i podešeno usporenje
+		var mp = get_multiplayer().multiplayer_peer
+		var pp = (mp as ENetMultiplayerPeer).get_peer(p.get_multiplayer_authority()) if mp is ENetMultiplayerPeer else null
+		if pp != null:
+			_th_srv_thr_min = mini(_th_srv_thr_min, int(pp.get_statistic(ENetPacketPeer.PEER_PACKET_THROTTLE)))
+			_th_srv_cfg = [int(pp.get_statistic(ENetPacketPeer.PEER_PACKET_THROTTLE_INTERVAL)),
+				int(pp.get_statistic(ENetPacketPeer.PEER_PACKET_THROTTLE_ACCELERATION)), int(pp.get_statistic(ENetPacketPeer.PEER_PACKET_THROTTLE_DECELERATION))]
 	if _th_srv0 != null and int(p._dbg_paket_ms) > _th_srv_od: # pauza između paketa unosa, od prvog posle učitavanja
 		_th_srv_pauza = maxi(_th_srv_pauza, Time.get_ticks_msec() - int(p._dbg_paket_ms))
 	if faza == "kraj" and _th_srv0 != null:
@@ -3939,7 +3948,8 @@ func _server_throttle() -> void:
 		# klijent šalje tačno jedan paket unosa po tick-u (seq): seq-ovi bez svog paketa = paketi koje je ENet odbacio
 		_pisi("throttle_server", JSON.stringify({"rupe": p.rupe_seq - _th_srv0[0], "odbijeno": p.odbijeno_red_pun - _th_srv0[1],
 			"pauza_ms": _th_srv_pauza, "unosa": _th_primljen_seq(p) - _th_srv0[2], "paketa": p.paket_b_br - _th_srv0[3],
-			"enet_odbacio": (_th_primljen_seq(p) - _th_srv0[2]) - (p.paket_b_br - _th_srv0[3])}))
+			"enet_odbacio": (_th_primljen_seq(p) - _th_srv0[2]) - (p.paket_b_br - _th_srv0[3]),
+			"srv_throttle_min": _th_srv_thr_min, "srv_throttle_cfg": _th_srv_cfg}))
 
 func _th_primljen_seq(p) -> int: # najveći primljen seq (i oni što još čekaju u redu servera)
 	return int(p._red[-1][0]) if not p._red.is_empty() else int(p._poslednji_seq)
