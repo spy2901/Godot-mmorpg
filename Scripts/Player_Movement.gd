@@ -601,15 +601,21 @@ func _process(delta: float) -> void:
 	if _regen_akum < 1.0:
 		return
 	_regen_akum -= 1.0
-	# otrov (debuff): tick u istom ritmu kao regeneracija, pre nje, mimo oklopa
-	var otrov := buff("otrov")
+	# otrov (debuff): tick u istom ritmu kao regeneracija, pre nje, mimo oklopa. Ne u frame-u ujeda (tada bi otkucao odmah
+	# i još jednom pred istek: 7 umesto 6); ističe posle _otrov_tikova tick-ova, ne po satu.
+	var otrov := buff("otrov") if Engine.get_process_frames() != _otrov_frame else 0
 	if otrov > 0:
 		hp = maxi(hp - otrov, 0)
-		print("[OTROV] ", ime_lika, " -", otrov, " -> hp ", hp)
+		_otrov_tikova -= 1
+		print("[OTROV] ", ime_lika, " -", otrov, " -> hp ", hp, " (još ", _otrov_tikova, ")")
 		if hp == 0:
 			_server_umri()
 			_posalji_hp()
 			return
+		if _otrov_tikova <= 0:
+			_buffovi.erase("otrov")
+			print("[BUFF] ", ime_lika, " otrov istekao")
+			_buffovi_promenjeni()
 	if otrov > 0 or hp < max_hp or mana < max_mana:
 		hp = mini(hp + HP_REGEN, max_hp)
 		mana = mini(mana + MANA_REGEN, max_mana)
@@ -733,15 +739,19 @@ const BUFF_TIPOVI := ["napad", "oklop", "xp", "loot", "brzina", "protivotrov", "
 const DEBUFF_TIPOVI := ["otrov"]
 signal buffovi_promenjeni # klijent: stiglo novo stanje buffova od servera
 var _buffovi := {} # server: tip -> [vrednost, ms kad ističe]
+var _otrov_tikova := 0 # server: preostalo tick-ova otrova
+var _otrov_frame := -1 # server: process frame ujeda (tada otrov ne kuca)
 var buffovi := {}  # klijent: tip -> [vrednost, lokalni ms kad ističe]
 
 # Server: nevidljiv za neprijatelje (Enemy._dodaj_aggro, _ocisti_pretnju)
 func nevidljiv() -> bool:
 	return buff("nevidljivost") > 0
 
-# Server: trenutna vrednost buff-a (0 ako ga nema ili je istekao)
+# Server: trenutna vrednost buff-a (0 ako ga nema ili je istekao). Otrov traje dok ima tick-ova (_otrov_tikova).
 func buff(tip: String) -> int:
 	var b = _buffovi.get(tip)
+	if tip == "otrov":
+		return int(b[0]) if b != null and _otrov_tikova > 0 else 0
 	return int(b[0]) if b != null and Time.get_ticks_msec() < int(b[1]) else 0
 
 func _dodaj_buff(tip: String, vrednost: int, trajanje_ms: int) -> void:
@@ -759,8 +769,10 @@ func server_otruj(steta: int, trajanje_ms: int) -> void:
 		return
 	if Time.get_ticks_msec() < _neosjetljiv_do_ms or buff("protivotrov") > 0:
 		return
-	_buffovi["otrov"] = [steta, Time.get_ticks_msec() + trajanje_ms]
-	print("[OTROV] ", ime_lika, " otrovan ", steta, "/s ", trajanje_ms, " ms")
+	_buffovi["otrov"] = [steta, Time.get_ticks_msec() + trajanje_ms] # kraj samo za prikaz; ističe po broju tick-ova
+	_otrov_tikova = maxi(1, roundi(trajanje_ms / 1000.0)) # jedan tick u sekundi (ritam regeneracije)
+	_otrov_frame = Engine.get_process_frames()
+	print("[OTROV] ", ime_lika, " otrovan ", steta, "/s ", trajanje_ms, " ms (", _otrov_tikova, " tick-ova)")
 	_buffovi_promenjeni()
 
 func _ocisti_buffove() -> void:
@@ -877,7 +889,7 @@ func pong_brzine(t_ms: int) -> void:
 
 func _proveri_istek_buffova() -> void:
 	var sada := Time.get_ticks_msec()
-	var istekli := _buffovi.keys().filter(func(tip): return sada >= int(_buffovi[tip][1]))
+	var istekli := _buffovi.keys().filter(func(tip): return tip != "otrov" and sada >= int(_buffovi[tip][1])) # otrov: po tick-ovima
 	if istekli.is_empty():
 		return
 	for tip in istekli:
