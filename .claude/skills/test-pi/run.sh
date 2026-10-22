@@ -1,10 +1,12 @@
 #!/bin/bash
-# /test-pi: lokalne provere (run-mmorpg) -> deploy na Pi -> dva prava klijenta (agent_test nalozi) protiv Pi-ja.
-# Upotreba (iz korena repoa): .claude/skills/test-pi/run.sh [--bez-prozora] [--registruj]
+# /test-pi: dva prava klijenta (agent_test nalozi) protiv Pi-ja; uz --deploy pre toga lokalne provere (run-mmorpg) i deploy.
+# Upotreba (iz korena repoa): .claude/skills/test-pi/run.sh [--deploy] [--bez-prozora] [--registruj]
+#   bez --deploy:  Pi se ne menja (nema lokalnog kruga, export-a, scp-a ni restarta); journal se gleda od
+#                  poslednjeg starta mmorpg-game
+#   --deploy:      lokalne provere, export .pck, scp na Pi i restart mmorpg-game, pa klijenti (samo uz odobrenje korisnika)
 #   --bez-prozora: igrac1 headless, bez screenshot-a
 #   --registruj:   ako agent_test nalog ne postoji, registruj ga preko /auth/register
-#   --bez-deploya: preskače lokalne provere i deploy (deploy je već urađen, npr. migracionom pi skriptom); journal se
-#                  gleda od poslednjeg starta mmorpg-game, Pi se ne restartuje
+#   --bez-deploya: stara opcija, sada podrazumevana; ne radi ništa (samo upozorenje)
 # Tajne (.env.test) idu samo kroz env procesa; nikad echo, argumenti ni log.
 set -u
 cd "$(dirname "$0")/../../.." || exit 1
@@ -13,9 +15,14 @@ D=res://.claude/skills/test-pi/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/test-pi}"
 PI="${PI:-spy2901@100.79.170.67}"
 PI_DIR="mmorpg-server"
-PROZOR=1; REG=0; DEPLOY=1
+PROZOR=1; REG=0; DEPLOY=0
+UPOTREBA="upotreba: .claude/skills/test-pi/run.sh [--deploy] [--bez-prozora] [--registruj]"
 for a in "$@"; do
-  case "$a" in --bez-prozora) PROZOR=0;; --registruj) REG=1;; --bez-deploya) DEPLOY=0;; esac
+  case "$a" in
+    --deploy) DEPLOY=1;; --bez-prozora) PROZOR=0;; --registruj) REG=1;;
+    --bez-deploya) echo "UPOZORENJE: --bez-deploya je suvišna (bez --deploy se ionako ne deployuje)" >&2;;
+    *) echo "nepoznata opcija: $a" >&2; echo "$UPOTREBA" >&2; exit 2;;
+  esac
 done
 mkdir -p "$OUT"; rm -rf "$OUT"/*.log "$OUT"/*.png "$OUT"/igrac* "$OUT"/lokalno
 pad() { echo "FAIL $*"; echo "REZULTAT: prekinuto ($*)"; exit 1; }
@@ -31,7 +38,7 @@ for u in "$TEST_USER_1" "$TEST_USER_2"; do
 done
 
 if [ $DEPLOY = 0 ]; then
-  echo "== 1-2/4 preskočeno (--bez-deploya): Pi se ne menja"
+  echo "== 1-2/4 preskočeno (bez --deploy): Pi se ne menja"
   SINCE=$(ssh "$PI" "date -d \"\$(systemctl show -p ActiveEnterTimestamp --value mmorpg-game)\" '+%Y-%m-%d %H:%M:%S'") || pad "ssh"
   echo "   mmorpg-game radi od $SINCE"
 else

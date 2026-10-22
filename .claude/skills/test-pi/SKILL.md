@@ -1,6 +1,6 @@
 ---
 name: test-pi
-description: Deploy the mmorpg Godot server to the Raspberry Pi and test it end to end with two real clients (agent_test accounts from .env.test, real /auth and real database) — character load, server-authoritative movement, HP/mana, other player's nameplate, screenshot. Use when asked to test on the Pi, deploy and verify, or run /test-pi.
+description: Test the mmorpg Godot server on the Raspberry Pi end to end with two real clients (deploy only with --deploy and the user's approval) — agent_test accounts from .env.test, real /auth and real database: character load, server-authoritative movement, HP/mana, other player's nameplate, screenshot. Use when asked to test on the Pi, deploy and verify, or run /test-pi.
 ---
 
 # test-pi
@@ -8,23 +8,28 @@ description: Deploy the mmorpg Godot server to the Raspberry Pi and test it end 
 Ceo tok je u `run.sh` (bash) i `driver.gd` (SceneTree skripta, kao kod `run-mmorpg`):
 
 ```bash
-.claude/skills/test-pi/run.sh                 # lokalno -> deploy -> 2 klijenta (igrac1 u prozoru + screenshot)
+.claude/skills/test-pi/run.sh                 # samo 2 klijenta protiv Pi-ja (igrac1 u prozoru + screenshot), bez koraka 1-2:
+                                              # Pi se ne menja, journal od poslednjeg starta mmorpg-game
 .claude/skills/test-pi/run.sh --bez-prozora   # isto, bez screenshot-a
 .claude/skills/test-pi/run.sh --registruj     # agent_test nalog koji ne postoji registruje preko /auth/register
-.claude/skills/test-pi/run.sh --bez-deploya   # deploy je već urađen (npr. pi_010.sh): bez koraka 1-2, Pi se ne restartuje,
-                                              # journal od poslednjeg starta mmorpg-game
+.claude/skills/test-pi/run.sh --deploy        # lokalno -> deploy .pck i restart mmorpg-game -> 2 klijenta
 ```
+
+**`--deploy` sme da se pokrene samo uz izričito odobrenje korisnika** (menja server na Pi-ju i restartuje
+`mmorpg-game`). Bez `--deploy` Pi se ne menja, ali `reset_stanje.py` i sam test i dalje menjaju stanje agent_test
+likova u pravoj bazi (vidi Pravila). `--bez-deploya` je stara opcija, sada ne radi ništa osim upozorenja.
+Nepoznata opcija prekida skriptu pre bilo kakvog dejstva (exit 2 i poruka o upotrebi).
 
 Postavi `OUT=<scratchpad>/pi1` da bi Read alat mogao da otvori `$OUT/pi_igrac1.png`.
 Izlaz: `PASS`/`FAIL` linije i `REZULTAT: ...`. Exit 0 = sve prošlo. Na prvi pad koraka 1–3 skripta staje.
 
 ## Koraci (`run.sh`)
 
-1. **Lokalno**: `run-mmorpg/run.sh` (log `$OUT/lokalno.log`). Pad = stop, ništa se ne deployuje.
-2. **Deploy**: `--export-pack "Linux (server)" export/mmorpg-server.pck`, prethodni `.pck` sa Pi-ja
+1. **Lokalno** (samo uz `--deploy`): `run-mmorpg/run.sh` (log `$OUT/lokalno.log`). Pad = stop, ništa se ne deployuje.
+2. **Deploy** (samo uz `--deploy`): `--export-pack "Linux (server)" export/mmorpg-server.pck`, prethodni `.pck` sa Pi-ja
    se čuva u `$OUT/pi-prethodni.pck` (rollback), scp, **jedan** `sudo systemctl restart mmorpg-game`,
    `is-active`. Pad = stop, testovi se ne pokreću.
-3. **Čekanje**: API (`$TEST_API_URL/items` = 200) i game server (journal od restarta sadrži
+3. **Čekanje**: API (`$TEST_API_URL/items` = 200) i game server (journal od restarta, odnosno poslednjeg starta, sadrži
    "Sluša na portu"; ENet je UDP pa `nc` ne pomaže).
 4. **Klijenti** `igrac1` (prozor) i `igrac2` (headless), uloge se usklađuju preko fajlova u `$OUT`.
    Provere po klijentu (`igracN:ime`):
