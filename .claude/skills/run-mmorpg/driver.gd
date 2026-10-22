@@ -18,6 +18,7 @@ var _teleportovano := false
 var _visi_sklonjen := false
 const VISI_PARKING := Vector3(14, 1.16, -14) # van putanje movera (x -9..6, z -12..16), daleko od ostalih likova
 var _poslednja_faza := ""
+var _faza_vreme := {}   # server: faza -> [od, do] (unix s), za zastoj u toku faze
 # test rafala: mover zadrži ~24 unosa (0.4 s) pa ih pošalje odjednom; red mora da ih primi i isprazni.
 # Višak od ~14 preko kofe se prazni brzinom 1.2*60 - 60 = 12/s -> ~1.2 s; granica sa rezervom:
 const RAFAL_PRAZNJENJE_MAX_MS := 2500
@@ -245,6 +246,9 @@ func _server(log: bool) -> bool:
 	var f := FileAccess.get_file_as_string(dir + "/faza").split(" ") if dir != "" else PackedStringArray()
 	var faza := f[0] if f.size() == 2 else "normal"
 	if faza != _poslednja_faza: # za analizu rafala (vreme u ms kao [SEQ] linije)
+		var sad := Time.get_unix_time_from_system()
+		if _faza_vreme.has(_poslednja_faza): _faza_vreme[_poslednja_faza][1] = sad
+		_faza_vreme[faza] = [sad, INF]
 		_poslednja_faza = faza
 		print("[S-FAZA] t=%d %s" % [Time.get_ticks_msec(), faza])
 	# rupe po igraču (lik koji se odjavio ne sme da "vrati" svoje rupe iz zbira)
@@ -318,15 +322,16 @@ func _server(log: bool) -> bool:
 		var bez: int = _faza_rupe.get("normal", 0) + _faza_rupe.get("teleport", 0)
 		_proveri_rupe()
 		_provera("nameplate_nema_na_serveru", not _nameplate_na_serveru, "")
-		_provera("rafal_bez_rupa", _faza_rupe.get("rafal", 0) == 0 and _rafal_vrh > 10 and _rafal_ms >= 0 and _rafal_ms <= RAFAL_PRAZNJENJE_MAX_MS,
-			"rupe=%d, vrh reda %d, ispražnjen za %d ms (dozvoljeno %d)" % [_faza_rupe.get("rafal", 0), _rafal_vrh, _rafal_ms, RAFAL_PRAZNJENJE_MAX_MS])
+		_provera_rupa_faze("rafal_bez_rupa", "rafal", _rafal_vrh > 10 and _rafal_ms >= 0,
+			"rupe=%d, vrh reda %d, ispražnjen za %d ms (dozvoljeno %d)" % [_faza_rupe.get("rafal", 0), _rafal_vrh, _rafal_ms, RAFAL_PRAZNJENJE_MAX_MS],
+			_rafal_ms <= RAFAL_PRAZNJENJE_MAX_MS)
 		for n in [8, 20]:
 			var izg := ""
 			for fajl in DirAccess.get_files_at(dir):
 				if fajl.begins_with("izgubljeno_%d_" % n): izg = fajl.get_slice("_", 2)
-			_provera("gubitak_%d_paketa_bez_rupa" % n, izg == str(n) and _faza_rupe.get("gubitak%d" % n, 0) == 0,
+			_provera_rupa_faze("gubitak_%d_paketa_bez_rupa" % n, "gubitak%d" % n, izg == str(n),
 				"izgubljeno uzastopno %s paketa, rupe u fazi %d" % [izg if izg != "" else "-", _faza_rupe.get("gubitak%d" % n, 0)])
-		_provera("reset_bez_rupa", _resetovan and _faza_rupe.get("reset", 0) == 0, "reset izveden=%s, rupe u fazi reset=%d" % [_resetovan, _faza_rupe.get("reset", 0)])
+		_provera_rupa_faze("reset_bez_rupa", "reset", _resetovan, "reset izveden=%s, rupe u fazi reset=%d" % [_resetovan, _faza_rupe.get("reset", 0)])
 		_provera("red_pun_odbacuje", _mover_odbijeno > 0 and _mover_red_max <= _red_max_dozvoljen,
 			"odbačeno (pun red) %d, najduži red %d / %d" % [_mover_odbijeno, _mover_red_max, _red_max_dozvoljen])
 		print("[S] gasim server (okidač)")
@@ -842,25 +847,72 @@ func _meri_zastoj(d: float) -> void:
 	if f[0] != _faza_merenja:
 		_faza_merenja = f[0]
 		_faza_od = sad
-	if (f[0] != "normal" and f[0] != "teleport") or sad - _faza_od < ZASTOJ_WARMUP:
-		return
-	var promena := d > _max_delta or d > ZASTOJ_PRAG
-	_max_delta = maxf(_max_delta, d)
+	# seq (normal, teleport): bez prve sekunde faze. Ostale faze (rafal, reset, gubitak8/20): svaki zastoj, treća kolona 0
+	var seq_faza := (f[0] == "normal" or f[0] == "teleport") and sad - _faza_od >= ZASTOJ_WARMUP
+	var promena := (seq_faza and d > _max_delta) or d > ZASTOJ_PRAG
+	if seq_faza: _max_delta = maxf(_max_delta, d)
 	if d > ZASTOJ_PRAG:
-		_zastoji.append("%f %f" % [sad, d])
+		_zastoji.append("%f %f %d" % [sad, d, int(seq_faza)])
 	if promena: # fajl po peer-u: uloga, najduži frame, pa zastoji
 		_pisi("zastoj_" + _id(), "%s\n%f\n%s" % [uloga, _max_delta, "\n".join(_zastoji)])
 
-# [uloga, najduži frame, [[t_kraj, delta], ...]] za peer; [] ako proces nije merio
-func _zastoj_peer(peer: String) -> Array:
+# [uloga, najduži frame, [[t_kraj, delta], ...]] za peer; [] ako proces nije merio. sve=false: samo zastoji seq faza
+func _zastoj_peer(peer: String, sve := false) -> Array:
 	var s := FileAccess.get_file_as_string(dir + "/zastoj_" + peer)
 	if s == "": return []
 	var l := s.split("\n", false)
 	var z := []
 	for k in range(2, l.size()):
 		var v := l[k].split(" ")
-		z.append([float(v[0]), float(v[1])])
+		if sve or v[2] == "1": z.append([float(v[0]), float(v[1])])
 	return [l[0], float(l[1]), z]
+
+# Rupe likova u fazama `faze`: opravdane zastojem procesa koji šalje unose za taj lik ili servera (zastoj seče
+# [t - ZASTOJ_PROZOR, t + ZASTOJ_PROZOR]). sve_faze: i zastoji van seq faza (rafal, reset, gubitak).
+func _opravdaj_rupe(faze: Array, sve_faze: bool) -> Dictionary:
+	var r := {"opravdane": 0, "od_servera": 0, "neopravdane": []}
+	for e in _rupe_dogadjaji:
+		if not e[3] in faze: continue
+		var z := _zastoj_peer(e[1], sve_faze)
+		var ok := false
+		for st in (z[2] if z.size() == 3 else []) + _server_zastoji: # zastoj [t_kraj - d, t_kraj] seče [t - P, t + P]
+			var sece: bool = st[0] - st[1] <= e[0] + ZASTOJ_PROZOR and st[0] >= e[0] - ZASTOJ_PROZOR
+			ok = ok or sece
+			if sece and st in _server_zastoji: r.od_servera += e[2]
+		if ok: r.opravdane += e[2]
+		else: r.neopravdane.append("%d (%s)" % [e[2], z[0] if z.size() == 3 else "peer " + e[1]])
+	return r
+
+# Provera rupa u fazi testa reda (rafal, reset, gubitak8/20): rupa bez zastoja = FAIL; ako su sve rupe opravdane
+# zastojem i ostali uslovi važe, WARN (neodlučno), kao seq_bez_rupa_bez_gubitka. vreme_ok (merenje vremena, npr. pražnjenje
+# reda) sme da ne važi samo uz zastoj movera ili servera u toku faze (WARN); bez zastoja FAIL.
+func _provera_rupa_faze(ime: String, faza: String, ostalo_ok: bool, detalj: String, vreme_ok := true) -> void:
+	var rupe: int = _faza_rupe.get(faza, 0)
+	var r := _opravdaj_rupe([faza], true)
+	var zastoj_faze := _zastoj_u_fazi(faza)
+	var opis := "%s; opravdane zastojem %d (servera %d), bez zastoja %s; zastoj u fazi: %s" % [detalj, r.opravdane, r.od_servera,
+		r.neopravdane, zastoj_faze if zastoj_faze != "" else "-"]
+	if not ostalo_ok or not r.neopravdane.is_empty() or (not vreme_ok and zastoj_faze == ""):
+		_provera(ime, false, opis)
+	elif rupe == 0 and vreme_ok:
+		_provera(ime, true, detalj)
+	else:
+		print("WARN %s  neodlučno (zastoj klijenta ili servera): %s" % [ime, opis])
+
+# najduži zastoj movera (svi zastoji, i van seq faza) ili servera u toku faze; "" ako ga nije bilo
+func _zastoj_u_fazi(faza: String) -> String:
+	var v: Array = _faza_vreme.get(faza, [])
+	if v.is_empty(): return ""
+	var f := FileAccess.get_file_as_string(dir + "/faza").split(" ")
+	var z := _zastoj_peer(f[1], true) if f.size() == 2 else []
+	var naj := ""
+	var naj_d := 0.0
+	for x in [["mover", z[2] if z.size() == 3 else []], ["server", _server_zastoji]]:
+		for st in x[1]:
+			if st[0] - st[1] <= v[1] and st[0] >= v[0] and st[1] > naj_d:
+				naj_d = st[1]
+				naj = "%s %d ms" % [x[0], int(st[1] * 1000)]
+	return naj
 
 func _proveri_rupe() -> void:
 	var naj := [0.0, "-"]
@@ -868,19 +920,10 @@ func _proveri_rupe() -> void:
 		if f.begins_with("zastoj_") and not f.ends_with(".tmp"):
 			var z := _zastoj_peer(f.substr(7))
 			if z.size() == 3 and z[1] > naj[0]: naj = [z[1], z[0]]
-	var opravdane := 0
-	var od_servera := 0
-	var neopravdane := []
-	for e in _rupe_dogadjaji:
-		if e[3] != "normal" and e[3] != "teleport": continue
-		var z := _zastoj_peer(e[1])
-		var ok := false
-		for st in (z[2] if z.size() == 3 else []) + _server_zastoji: # zastoj [t_kraj - d, t_kraj] seče [t - P, t + P]
-			var sece: bool = st[0] - st[1] <= e[0] + ZASTOJ_PROZOR and st[0] >= e[0] - ZASTOJ_PROZOR
-			ok = ok or sece
-			if sece and st in _server_zastoji: od_servera += e[2]
-		if ok: opravdane += e[2]
-		else: neopravdane.append("%d (%s)" % [e[2], z[0] if z.size() == 3 else "peer " + e[1]])
+	var r := _opravdaj_rupe(["normal", "teleport"], false)
+	var opravdane: int = r.opravdane
+	var od_servera: int = r.od_servera
+	var neopravdane: Array = r.neopravdane
 	var opis := "rupe po fazi %s, opravdane zastojem %d (u prozoru zastoja servera %d), bez zastoja %s; najduži frame %.0f ms (%s), zastoja servera %d" % [
 		_faza_rupe, opravdane, od_servera, neopravdane, naj[0] * 1000, naj[1], _server_zastoji.size()]
 	if not neopravdane.is_empty() or opravdane == 0:
