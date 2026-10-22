@@ -1773,6 +1773,10 @@ func _opr_srv() -> Dictionary:
 	var d = JSON.parse_string(FileAccess.get_file_as_string(dir + "/oprema_server"))
 	return d if d is Dictionary else {}
 
+func _opr_srv_oprema() -> Dictionary:
+	var o = _opr_srv().get("oprema")
+	return o if o is Dictionary else {}
+
 func _opr_srv_ok(attack: int, armor: int, max_hp: int) -> bool:
 	var d := _opr_srv()
 	return int(d.get("attack", -1)) == attack and int(d.get("armor", -1) if d.get("armor") != null else -1) == armor \
@@ -1814,6 +1818,7 @@ func _opremljeno(inv) -> Dictionary:
 func _klijent_stat(p) -> String:
 	return "%s/%s/%s" % [p.get("stat_attack"), p.get("stat_armor"), p.get("stat_max_hp")]
 
+const OPREMA_ROK := 10.0 # s: opremanje/skidanje kroz UI (zahtev serveru, odgovor, raspored inventara)
 func _oprema_scenario(p, inv) -> void:
 	var odg := []
 	if p.has_signal("oprema_odgovor"): p.oprema_odgovor.connect(func(d): odg.append(d))
@@ -1822,10 +1827,14 @@ func _oprema_scenario(p, inv) -> void:
 		if p.has_method("zatrazi_opremanje"): p.zatrazi_opremanje.rpc_id(1, slot, id)
 		await _cekaj(func(): return odg.size() > n, 3.0)
 		return odg[n] if odg.size() > n else {}
-	var klik := func(id: String) -> void: # klik na predmet u inventaru (UI), čeka da se stanje servera smiri
+	# klik na predmet u inventaru (UI). Čeka se uslov: predmet opremljen na serveru i u UI-ju (rok OPREMA_ROK). Sledeći klik
+	# pre toga bi pogodio stari raspored inventara ili zahtev u toku (pod opterećenjem: čizme nisu opremljene, oklop 62).
+	# opremi=false (rukavice): fiksni prozor posmatranja, proverava se da zahtev NIJE poslat.
+	var klik := func(id: String, opremi := true) -> void:
 		var i := _inv_index(inv, id)
 		if i >= 0: inv._on_slot_klik(i)
-		await create_timer(0.6).timeout
+		if opremi: await _cekaj(func(): return _opr_srv_oprema().values().has(id) and _opremljeno(inv).values().has(id), OPREMA_ROK)
+		else: await create_timer(0.6).timeout
 	var lbl = inv.get("stat_label")
 
 	# neopremljen: osnovne vrednosti na serveru, kod klijenta i u sažetku inventara
@@ -1896,7 +1905,7 @@ func _oprema_scenario(p, inv) -> void:
 		"iron_helmet već opremljen, ponovo u head: %s; %s" % [r3, _opr_srv_opis()])
 	var n_odg := odg.size()
 	var gi := _inv_index(inv, "iron_gloves")
-	await klik.call("iron_gloves")
+	await klik.call("iron_gloves", false)
 	if gi >= 0: inv._on_slot_hover(gi)
 	var tooltip: String = inv.tooltip_label.text
 	var r4: Dictionary = await zahtev.call("head", "iron_gloves")
@@ -1907,7 +1916,7 @@ func _oprema_scenario(p, inv) -> void:
 	# skidanje vraća osnovne vrednosti i sve predmete u inventar
 	for slot in ["weapon", "head", "legs", "boots", "shield"]:
 		inv._skini_opremu(slot)
-		await create_timer(0.4).timeout
+		await _cekaj(func(): return not _opr_srv_oprema().has(slot) and not _opremljeno(inv).has(slot), OPREMA_ROK)
 	await _cekaj(func(): return _opr_srv_ok(25, 0, 100) and _klijent_stat(p) == "25/0/100", 3.0)
 	var svi := ["iron_sword", "iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots", "steel_shield", "dragon_scale_armor", "iron_gloves"]
 	var u_inv := svi.filter(func(x): return _inv_index(inv, x) >= 0).size()
