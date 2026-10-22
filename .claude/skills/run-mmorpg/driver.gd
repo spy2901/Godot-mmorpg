@@ -3623,9 +3623,13 @@ func _efekti_scenario(p1, p2) -> void:
 			hud["otrov"] = str(_ef_kl("EfektiLik").get("debuff", ""))
 			hud["otrov_boja"] = str(_ef_kl("EfektiLik").get("debuff_boja", ""))
 	# tick ide po akumulatoru delta-e servera (najviše jedan po frame-u), a otrov ističe po satu: zastoj servera menja broj
-	# tick-ova (pod opterećenjem [-1, -1, -1, 2]). Pogrešan niz je WARN samo uz zastoj servera u prozoru, inače FAIL.
+	# tick-ova (pod opterećenjem [-1, -1, -1, 2]). Vrednosti su stroge (svaki tick -1, pa regeneracija +2); samo pogrešan
+	# BROJ tick-ova je WARN uz zastoj servera u prozoru, inače FAIL.
 	var udarac_ok: bool = u1[0] == 13 and u1[1] is Array and u1[1][0] == 3 and u1[1][1] > 5500
 	var tikovi_ok: bool = promene.slice(0, 7) == [-1, -1, -1, -1, -1, -1, 2]
+	var n_tik := promene.find(2)
+	var vrednosti_ok := n_tik > 0 and promene.slice(0, n_tik).all(func(x): return x == -1)
+	udarac_ok = udarac_ok and vrednosti_ok # pogrešna vrednost tick-a se ne opravdava zastojem
 	var z_otrov := _zastoj_izmedju(otrov_od, Time.get_unix_time_from_system())
 	var opis_otrov := "oklop %d: udarac -%d (13), otrov %s; promene HP-a (tick 3 - regen 2) %s" % [p1.armor, u1[0], u1[1], promene]
 	if udarac_ok and not tikovi_ok and z_otrov != "":
