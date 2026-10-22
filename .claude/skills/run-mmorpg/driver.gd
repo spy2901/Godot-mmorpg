@@ -3066,8 +3066,9 @@ func _server_brzina() -> void:
 		_br_cmd = cmd
 		_br_ubij(p)
 	var v: Vector3 = p.velocity
+	var uz = p.get("_rtt_uzorci")
 	var st := JSON.stringify({"raspored": p.get("_raspored_brzine"), "v": snappedf(Vector2(v.x, v.z).length(), 0.01), "mrtav": p.mrtav,
-		"peer": str(p.name)})
+		"peer": str(p.name), "rtt_uzoraka": uz.size() if uz is Array else -1})
 	if st != _br_srv_upisano:
 		_br_srv_upisano = st
 		_pisi("brzina_server", st)
@@ -3093,6 +3094,9 @@ func _br_v_srv(sek: float) -> float:
 
 func _uloga_brzina() -> bool:
 	var p = _moj()
+	# veštački RTT od prvog frame-a lika, ne tek kad UI javi učitavanje: klijent pod opterećenjem kasni za serverom > 2 s
+	# (PING_ZAGREVANJE_MS), pa bi server skupio pongove bez kašnjenja (~15 ms) i prvi napitak zakazao prerano
+	if p != null and _korak == 1 and not _br_krenuo: p.set("test_rtt_ms", 250)
 	if p == null or not p.get_node("ui/Control")._ucitano:
 		return (_br_krenuo and p == null) or t > 2 * MAX_T
 	if not _br_krenuo:
@@ -3104,6 +3108,9 @@ func _uloga_brzina() -> bool:
 		elif p.server_poz.x > 62.0: _br_yaw = PI / 2
 		p.rotation.y = _br_yaw
 	return _br_kraj or t > 2 * MAX_T
+
+const BR_RTT_UZORAKA := 4
+const BR_ROK := 10.0
 
 func _br_hod(da: bool) -> void:
 	_br_hoda = da
@@ -3135,7 +3142,7 @@ func _br_opis(x: Dictionary) -> String:
 		"" if x.ok else " (napitak: %s)" % x.odg]
 
 func _brzina_scenario(p) -> void:
-	p.set("test_rtt_ms", 250) # prvi napitak: procena RTT-a od prijave (bez zastoja pri učitavanju)
+	# prvi napitak: procena RTT-a od prijave (bez zastoja pri učitavanju); test_rtt_ms 250 je postavljen od prvog frame-a
 	await _cekaj(func(): return p.is_on_floor(), 5.0)
 	_br_hod(true)
 	# klijent ne može da postavi brzinu: lažni raspored ka serveru (guard: samo server šalje raspored)
@@ -3147,6 +3154,8 @@ func _brzina_scenario(p) -> void:
 	_provera("klijent_ne_postavlja_brzinu", ima and r_laz is Array and r_laz.is_empty() and absf(v_laz - 5.0) < 0.3,
 		"lažni raspored [[0, 1e8, 30]] od klijenta: server raspored %s, brzina po serveru %.2f m/s (bazna 5)" % [r_laz, v_laz])
 	await create_timer(1.0).timeout
+	# bar BR_RTT_UZORAKA pingova posle zagrevanja (bez opterećenja ih je ovde ~4): inače server koristi ENet RTT bez veštačkog
+	await _cekaj(func(): return int(_br_srv().get("rtt_uzoraka", 0)) >= BR_RTT_UZORAKA, BR_ROK)
 	var uslovi := [["rtt_250_prvi", 250, 0, ""], ["rtt_0", 0, 0, ""], ["rtt_80", 80, 0, ""], ["rtt_150", 150, 0, ""],
 		["jitter_150", 150, 50, ""], ["jitter_250", 250, 50, ""], ["kasni", 150, 0, "kasni:500"], ["izgubi", 150, 0, "izgubi"]]
 	var rez := {}
