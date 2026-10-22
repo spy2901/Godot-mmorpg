@@ -3570,6 +3570,7 @@ func _efekti_scenario(p1, p2) -> void:
 	# tick 1/s zajedno sa regeneracijom (+2): 3 mimo oklopa -> -1 po tick-u, 6 tick-ova, pa samo regeneracija (+2)
 	var promene := []
 	var hp_pre: int = p1.hp
+	var otrov_od := Time.get_unix_time_from_system()
 	var do_ := Time.get_ticks_msec() + 7500
 	while Time.get_ticks_msec() < do_:
 		await process_frame
