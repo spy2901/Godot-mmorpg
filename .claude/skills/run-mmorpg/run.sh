@@ -11,7 +11,7 @@ G="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 D=res://.claude/skills/run-mmorpg/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/run-mmorpg}"
 echo "load average: $(sysctl -n vm.loadavg 2>/dev/null || cut -d' ' -f1-3 /proc/loadavg)"
-mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/srv_zastoji "$OUT"/srv_kasnjenje "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt "$OUT"/visi_id "$OUT"/izgubljeno_* "$OUT"/cilj_* "$OUT"/drugi_* "$OUT"/ai_* "$OUT"/oprema_* "$OUT"/napredak_* "$OUT"/quest_* "$OUT"/lovac_* "$OUT"/buff_* "$OUT"/buff2_* "$OUT"/brzina_* "$OUT"/efekti_*
+mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/srv_zastoji "$OUT"/srv_kasnjenje "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt "$OUT"/visi_id "$OUT"/izgubljeno_* "$OUT"/cilj_* "$OUT"/drugi_* "$OUT"/ai_* "$OUT"/oprema_* "$OUT"/napredak_* "$OUT"/quest_* "$OUT"/lovac_* "$OUT"/buff_* "$OUT"/buff2_* "$OUT"/brzina_* "$OUT"/efekti_* "$OUT"/throttle_*
 PORT="${STUB_PORT:-18765}"
 API="--server-url=http://127.0.0.1:$PORT"
 
@@ -130,6 +130,14 @@ Q3=$PID
   pokreni brzina2 "$OUT/brzina2.log" "$G" --headless --path . --script $D -- brzina korak=2 "dir=$OUT" "$API"
   wait $B1 $B2 $E1 $E2 $PID ) &
 BF=$!
+# throttle: ThrottleLik preko udp_proksi.py (port 7790), skok RTT-a +400 ms na 2 s: ENet ne sme da odbaci unose. Kreće kad
+# quest uloge izađu (3 mesta), da ne zauzme mesto buff/efekti/brzina lancu (najduži; MAX_PLAYERS 8)
+( while kill -0 $Q1 2>/dev/null || kill -0 $Q2 2>/dev/null || kill -0 $Q3 2>/dev/null; do sleep 0.5; done
+  python3 "$(dirname "$0")/udp_proksi.py" 7790 7777 "$OUT/throttle_rtt" > "$OUT/proksi.log" 2>&1 &
+  X=$!
+  pokreni throttle "$OUT/throttle.log" "$G" --headless --path . --script $D -- throttle "dir=$OUT" "$API" port=7790
+  wait $PID; kill $X 2>/dev/null ) &
+TH=$!
 
 # kad mover završi provere kretanja, ugasi server dok su klijenti još živi
 for _ in $(seq 240); do
@@ -141,15 +149,15 @@ done
 # (driver.gd): uloga koja čeka partnera (PARTNER_ROK) živi toliko; uspeh je čim sve završe. Mover čeka gašenje 250 s.
 CEKANJE_OD=$SECONDS
 for _ in $(seq 480); do
-  { kill -0 $R || kill -0 $C || kill -0 $DR || kill -0 $A1 || kill -0 $A2 || kill -0 $OP || kill -0 $O3 || kill -0 $NP || kill -0 $Q1 || kill -0 $Q2 || kill -0 $Q3 || kill -0 $BF || [ ! -f "$OUT/ai_gotov" ]; } 2>/dev/null || break
+  { kill -0 $R || kill -0 $C || kill -0 $DR || kill -0 $A1 || kill -0 $A2 || kill -0 $OP || kill -0 $O3 || kill -0 $NP || kill -0 $Q1 || kill -0 $Q2 || kill -0 $Q3 || kill -0 $BF || kill -0 $TH || [ ! -f "$OUT/ai_gotov" ]; } 2>/dev/null || break
   sleep 0.5
 done
 echo "uloge završile $((SECONDS - CEKANJE_OD)) s posle movera"
 touch "$OUT/ugasi_server"
-wait $M $O $S $P $V $R $C $DR $A1 $A2 $OP $O3 $NP $Q1 $Q2 $Q3 $BF
+wait $M $O $S $P $V $R $C $DR $A1 $A2 $OP $O3 $NP $Q1 $Q2 $Q3 $BF $TH
 
 echo "logovi: $OUT"
-grep -h '^PASS\|^FAIL\|^WARN \|screenshot\|korekcije' "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log "$OUT"/visi.log "$OUT"/raspored1.log "$OUT"/raspored2.log "$OUT"/cilj.log "$OUT"/drugi.log "$OUT"/ai1.log "$OUT"/ai2.log "$OUT"/oprema1.log "$OUT"/oprema2.log "$OUT"/oprema3.log "$OUT"/napredak1.log "$OUT"/napredak2.log "$OUT"/quest1.log "$OUT"/quest2.log "$OUT"/quest3.log "$OUT"/buff1.log "$OUT"/buff2.log "$OUT"/brzina1.log "$OUT"/brzina2.log "$OUT"/efekti1.log "$OUT"/efekti2.log "$OUT"/server.log
+grep -h '^PASS\|^FAIL\|^WARN \|screenshot\|korekcije' "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log "$OUT"/visi.log "$OUT"/raspored1.log "$OUT"/raspored2.log "$OUT"/cilj.log "$OUT"/drugi.log "$OUT"/ai1.log "$OUT"/ai2.log "$OUT"/oprema1.log "$OUT"/oprema2.log "$OUT"/oprema3.log "$OUT"/napredak1.log "$OUT"/napredak2.log "$OUT"/quest1.log "$OUT"/quest2.log "$OUT"/quest3.log "$OUT"/buff1.log "$OUT"/buff2.log "$OUT"/brzina1.log "$OUT"/brzina2.log "$OUT"/efekti1.log "$OUT"/efekti2.log "$OUT"/throttle.log "$OUT"/server.log
 if grep -q "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log; then
   echo "FAIL nema_greske_neaktivnog_peera  $(grep -ch "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log | paste -sd+ - | bc) linija"
 else
@@ -184,5 +192,5 @@ if [ -z "${RUN_PONOVLJEN:-}" ] && grep -qh '^FAIL seq_bez_rupa_bez_gubitka' "$OU
   kill $STUB 2>/dev/null; wait $STUB 2>/dev/null # port mora biti slobodan za novi stub
   RUN_PONOVLJEN=1 exec "$SKRIPTA" "$@"
 fi
-# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 189
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 189 ]
+# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 190
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 190 ]

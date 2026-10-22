@@ -306,12 +306,14 @@ PLAYERS["EfektiLik"] = dict(_EF, ime="EfektiLik", pos_x=35, equipment=dict(_OKLO
     {"slot": 4, "id": "elixir_of_defense", "kolicina": 5}])
 PLAYERS["Efekti2Lik"] = dict(_EF, ime="Efekti2Lik", pos_x=38, equipment={}, inventory=[])
 SPORI_SAVE["Efekti2Lik"] = 2.5
+# ThrottleLik (uloga throttle): ide preko udp_proksi.py (skok RTT-a), hoda u zoni 2 (x 50..62, z -5), van ostalih likova
+PLAYERS["ThrottleLik"] = dict(PLAYERS["TestLik"], ime="ThrottleLik", pos_x=50, pos_y=1.16, pos_z=-5, equipment={}, inventory=[])
 BEZ_ITEM_KASNJENJA = {"BrzinaLik"}  # kašnjenje početka buff-a brzine se meri bez veštačkih 0,3 s backend-a
 XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik", "LovacLik", "BuffLik", "Buff2Lik", "EfektiLik", "Efekti2Lik"}
 TOKENI = {"napredak-token": "NapredakLik", "oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik", "quest-token": "QuestLik",
           "posmatrac-token": "PosmatracLik", "lovac-token": "LovacLik", "buff-token": "BuffLik", "buff2-token": "Buff2Lik", "brzina-token": "BrzinaLik",
-          "efekti-token": "EfektiLik", "efekti2-token": "Efekti2Lik"}
+          "efekti-token": "EfektiLik", "efekti2-token": "Efekti2Lik", "throttle-token": "ThrottleLik"}
 LOCK = threading.Lock()
 
 

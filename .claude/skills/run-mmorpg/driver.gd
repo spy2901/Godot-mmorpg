@@ -88,6 +88,7 @@ var _max_t := 3 * MAX_T # server: duže od uloga (2 * MAX_T od svog starta); rep
 var _aktivnost := false # prijava: reliable zahtevi za predmet dok traje sesija
 var _izgubi_reset := false # prijava: klijent odbaci reset posle prijave (test hook)
 var _korak := 0           # raspored: 1 = menja raspored i odjavi se, 2 = ponovna prijava (novi proces)
+var _port := 7777         # klijent: port servera (throttle ide preko udp_proksi.py)
 
 func _initialize():
 	var args := OS.get_cmdline_user_args()
@@ -107,6 +108,10 @@ func _initialize():
 			_izgubi_reset = true
 		if a.begins_with("korak="):
 			_korak = int(a.substr(6))
+		if a.begins_with("port="):
+			_port = int(a.substr(5))
+		if a.begins_with("skok="):
+			_th_skok = a.substr(5)
 
 func _nm(): return root.get_node("NetworkManager")
 
@@ -122,7 +127,7 @@ func _ponovi_povezivanje() -> void:
 	print("[T] konekcija neuspešna (server pun?), pokušaj %d za 1 s" % (_pokusaji_veze + 1))
 	_nm().prekini()
 	await create_timer(1.0).timeout
-	_nm().pridruzi_se("127.0.0.1")
+	_nm().pridruzi_se("127.0.0.1", _port)
 func _world(): return current_scene.get_node_or_null("World") if current_scene else null
 func _id() -> String:
 	return str(get_multiplayer().get_unique_id()) if get_multiplayer().has_multiplayer_peer() else ""
@@ -186,6 +191,9 @@ func _process(d):
 				root.size = Vector2i(1280, 720) # tooltip i HUD kao u prozoru
 				root.get_node("GameState").token = "efekti-token" if _korak == 1 else "efekti2-token"
 				root.get_node("GameState").ime_igraca = "EfektiLik" if _korak == 1 else "Efekti2Lik"
+			elif uloga == "throttle": # ThrottleLik preko udp_proksi.py: skok RTT-a koji ENet vidi
+				root.get_node("GameState").token = "throttle-token"
+				root.get_node("GameState").ime_igraca = "ThrottleLik"
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
 				root.size = Vector2i(1280, 720) # headless je 64x64: traka bi virila van prozora, a okvir cilja ležao preko nje
@@ -202,7 +210,7 @@ func _process(d):
 		if uloga == "server": _nm().hostuj()
 		else:
 			_nm().connection_failed.connect(_ponovi_povezivanje)
-			_nm().pridruzi_se("127.0.0.1")
+			_nm().pridruzi_se("127.0.0.1", _port)
 	_log_t += d
 	_meri_zastoj(d)
 	var log := _log_t >= 0.5
@@ -224,6 +232,7 @@ func _process(d):
 		"buff": return _uloga_buff()
 		"brzina": return _uloga_brzina()
 		"efekti": return _uloga_efekti()
+		"throttle": return _uloga_throttle()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -308,6 +317,7 @@ func _server(log: bool) -> bool:
 	_server_buff()
 	_server_brzina()
 	_server_efekti()
+	_server_throttle()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -3795,3 +3805,119 @@ func _efekti_scenario(p1, p2) -> void:
 	_provera("antidote_tooltip_jedan_red", tt[2].count("Click:") == 1 and "Click: +20 HP  Poison immunity for 30 s  |  cooldown 5 s" in tt[2],
 		"tooltip antidota '%s'" % tt[2])
 	_pisi("efekti_gotov", "1")
+
+# ---------------------------------------------------------------- THROTTLE (uloga throttle: ThrottleLik preko udp_proksi.py)
+# Klijent ide preko UDP proxy-ja koji drži paket dir/throttle_rtt ms (pola u svakom smeru, bez gubitka i preuređivanja):
+# ENet vidi pravi skok RTT-a. Posle TH_STABILNO s hoda RTT skoči za skok= ms (podrazumevano 400; "A-B" nasumično po paketu;
+# "rampaN" raste 0 -> N ms) na TH_SKOK s, pa se vrati na 0. Klijent sve vreme šalje pouzdan zahtev na 50 ms. Server
+# drajver meri za ThrottleLik od učitavanja do kraja: rupe, najveću pauzu između paketa unosa, odbačene zbog punog reda.
+# repro_throttle.sh --crna-rupa=MS: proxy pre ulaska odbacuje sve pakete MS ms (kao server koji je pun i ne odgovara).
+const TH_STABILNO := 4.0
+const TH_SKOK := 2.0
+const TH_POSLE := 6.0
+var _th_skok := "400" # dodatni RTT ms ("A-B" = nasumično iz opsega po paketu, udp_proksi.py)
+var _th_krenuo := false
+var _th_kraj := false
+var _th_yaw := -PI / 2
+var _th_hoda := false
+var _th_meri := false
+var _th_min := 99
+var _th_ispod_ms := 0
+var _th_pre_ms := 0
+var _th_srv0 = null      # server: [rupe_seq, odbijeno_red_pun] na početku skoka
+var _th_srv_pauza := 0
+var _th_srv_upisan := false
+var _th_akt_t := 0.0
+var _th_srv_od := 0
+
+func _th_peer(): # klijent: ENet peer servera
+	var mp = get_multiplayer().multiplayer_peer
+	return (mp as ENetMultiplayerPeer).get_peer(1) if mp is ENetMultiplayerPeer else null
+
+func _th_stat(st: int) -> int:
+	var pp = _th_peer()
+	return int(pp.get_statistic(st)) if pp != null else -1
+
+func _uloga_throttle() -> bool:
+	var p = _moj()
+	if p == null or not p.get_node("ui/Control")._ucitano:
+		return (_th_krenuo and p == null) or t > 2 * MAX_T
+	if not _th_krenuo:
+		_th_krenuo = true
+		_th_pre_ms = Time.get_ticks_msec()
+		_th_meri = true # od učitavanja: posle čekanja na handshake throttle ume da padne odmah
+		_throttle_scenario(p)
+	if _th_hoda:
+		if p.server_poz.x < 50.0: _th_yaw = -PI / 2 # ka +x
+		elif p.server_poz.x > 62.0: _th_yaw = PI / 2
+		p.rotation.y = _th_yaw
+	if _th_meri and t - _th_akt_t >= 0.05: # pouzdan saobraćaj (zahtevi, 20/s): ENet throttle se menja na potvrdama pouzdanih paketa
+		_th_akt_t = t
+		p.zatrazi_koriscenje_itema.rpc_id(1, "mana_potion") # odbijen ("nema predmet"), stanje se ne menja
+	if _th_meri:
+		var thr := _th_stat(ENetPacketPeer.PEER_PACKET_THROTTLE)
+		var sad := Time.get_ticks_msec()
+		if thr < ENetPacketPeer.PACKET_THROTTLE_SCALE: _th_ispod_ms += sad - _th_pre_ms
+		_th_pre_ms = sad
+		_th_min = mini(_th_min, thr)
+	return _th_kraj or t > 2 * MAX_T
+
+func _throttle_scenario(p) -> void:
+	await _cekaj(func(): return p.is_on_floor(), 5.0)
+	_th_hoda = true
+	Input.action_press("ui_up")
+	await create_timer(TH_STABILNO).timeout
+	var thr_pre := _th_stat(ENetPacketPeer.PEER_PACKET_THROTTLE)
+	var rtt_pre := _th_stat(ENetPacketPeer.PEER_ROUND_TRIP_TIME)
+	var cfg := [_th_stat(ENetPacketPeer.PEER_PACKET_THROTTLE_INTERVAL), _th_stat(ENetPacketPeer.PEER_PACKET_THROTTLE_ACCELERATION),
+		_th_stat(ENetPacketPeer.PEER_PACKET_THROTTLE_DECELERATION)]
+	var min_pre := _th_min
+	if _th_skok.begins_with("rampa"): # "rampaN": RTT raste ravnomerno 0 -> N ms tokom TH_SKOK (red koji raste na putu)
+		var n := int(_th_skok.substr(5))
+		for k in 20:
+			_pisi("throttle_rtt", str(n * (k + 1) / 20))
+			await create_timer(TH_SKOK / 20).timeout
+	else:
+		_pisi("throttle_rtt", _th_skok)
+		await create_timer(TH_SKOK).timeout
+	_pisi("throttle_rtt", "0")
+	await create_timer(TH_POSLE).timeout
+	_th_meri = false
+	_pisi("throttle_rtt", "0")
+	Input.action_release("ui_up") # stoji: red na serveru se isprazni pre brojanja
+	await create_timer(1.0).timeout
+	_pisi("throttle_faza", "kraj")
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/throttle_server"), 5.0)
+	var srv = JSON.parse_string(FileAccess.get_file_as_string(dir + "/throttle_server"))
+	if not srv is Dictionary: srv = {}
+	Input.action_release("ui_up")
+	_th_hoda = false
+	var opis := "od učitavanja, pa RTT +%s ms na %.0f s (throttle interval/ubrzanje/usporenje %s): throttle najmanji pre skoka %d, pri skoku %d (ENet RTT %d ms), najmanji %d, ispod %d ukupno %d ms; server: rupe %s, najveća pauza paketa unosa %s ms, odbijeno (pun red) %s, paketa unosa koje je ENet odbacio %s (od %s unosa)" % [
+		_th_skok, TH_SKOK, cfg, min_pre, thr_pre, rtt_pre, _th_min, ENetPacketPeer.PACKET_THROTTLE_SCALE, _th_ispod_ms, srv.get("rupe"), srv.get("pauza_ms"), srv.get("odbijeno"), srv.get("enet_odbacio"), srv.get("unosa")]
+	print("[THROTTLE] ", opis)
+	# niz rupa = unosi koji nisu stigli ni u jednom paketu (prozor redundanse UNOSA_NEPOTVRDJENIH_MAX premašen): mora 0.
+	# ENet throttle 0 propušta 1 od 32 paketa (brojač +7 po 32) = baš prozor redundanse: bez opterećenja rupa nema, ali
+	# svaki dodatni nepouzdan paket ili nadoknada tick-ova pod opterećenjem ga pomeri preko prozora. Zato i 0 odbačenih.
+	_provera("rtt_skok_bez_rupa", int(srv.get("rupe", -1)) == 0 and int(srv.get("enet_odbacio", -1)) == 0 and int(srv.get("unosa", 0)) > 600, opis)
+	_th_kraj = true
+
+func _server_throttle() -> void:
+	if dir == "" or _th_srv_upisan or _world() == null: return
+	var p = _ai_lik("ThrottleLik")
+	if p == null: return
+	var faza := FileAccess.get_file_as_string(dir + "/throttle_faza")
+	# od prvog obrađenog unosa posle reset-a prijave: [rupe, odbijeno, obrađen seq, primljenih paketa unosa]
+	if p.get("_stanje_ucitano") and not p._reset_ceka and p._poslednji_seq > 0 and _th_srv0 == null:
+		_th_srv0 = [p.rupe_seq, p.odbijeno_red_pun, _th_primljen_seq(p), p.paket_b_br]
+		_th_srv_od = Time.get_ticks_msec()
+	if _th_srv0 != null and int(p._dbg_paket_ms) > _th_srv_od: # pauza između paketa unosa, od prvog posle učitavanja
+		_th_srv_pauza = maxi(_th_srv_pauza, Time.get_ticks_msec() - int(p._dbg_paket_ms))
+	if faza == "kraj" and _th_srv0 != null:
+		_th_srv_upisan = true
+		# klijent šalje tačno jedan paket unosa po tick-u (seq): seq-ovi bez svog paketa = paketi koje je ENet odbacio
+		_pisi("throttle_server", JSON.stringify({"rupe": p.rupe_seq - _th_srv0[0], "odbijeno": p.odbijeno_red_pun - _th_srv0[1],
+			"pauza_ms": _th_srv_pauza, "unosa": _th_primljen_seq(p) - _th_srv0[2], "paketa": p.paket_b_br - _th_srv0[3],
+			"enet_odbacio": (_th_primljen_seq(p) - _th_srv0[2]) - (p.paket_b_br - _th_srv0[3])}))
+
+func _th_primljen_seq(p) -> int: # najveći primljen seq (i oni što još čekaju u redu servera)
+	return int(p._red[-1][0]) if not p._red.is_empty() else int(p._poslednji_seq)
