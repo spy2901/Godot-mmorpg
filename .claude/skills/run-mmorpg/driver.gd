@@ -869,8 +869,20 @@ func _kasnjenje_izmedju(od: float, do_: float) -> int:
 		if l.get_slice_count(" ") == 2: srv.append([float(l.get_slice(" ", 0)), float(l.get_slice(" ", 1))])
 	return int(1000 * (_kasn_u(_kasn_log, do_) - _kasn_u(_kasn_log, od) + _kasn_u(srv, do_) - _kasn_u(srv, od)))
 
+# MMORPG_DEBUG_SEQ=1: klijent ispisuje promene ENet throttle-a ka serveru ([THR]). Pod opterećenjem throttle padne na 0 posle
+# ulaska (klijent čekao mesto u handshake-u) i ENet odbacuje nepouzdane pakete unosa: pauze 0,4-1,5 s na serveru i niz rupa
+# dužih od prozora redundanse, bez ikakvog zastoja procesa (uzrok u mrežnom sloju igre, ne u testu).
+var _thr_pre := -1
+var _thr_debug := OS.get_environment("MMORPG_DEBUG_SEQ") == "1"
 func _meri_zastoj(d: float) -> void:
 	_meri_kasnjenje(d)
+	if _thr_debug and uloga != "server" and get_multiplayer().multiplayer_peer is ENetMultiplayerPeer:
+		var pp = (get_multiplayer().multiplayer_peer as ENetMultiplayerPeer).get_peer(1)
+		if pp != null:
+			var thr := int(pp.get_statistic(ENetPacketPeer.PEER_PACKET_THROTTLE))
+			if thr != _thr_pre:
+				print("[THR] t=%d throttle %d rtt %d" % [Time.get_ticks_msec(), thr, int(pp.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME))])
+				_thr_pre = thr
 	if d > ZASTOJ_PRAG:
 		_svi_zastoji.append([Time.get_unix_time_from_system(), d])
 	if uloga == "server" and d > ZASTOJ_PRAG:
