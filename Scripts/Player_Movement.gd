@@ -1243,7 +1243,7 @@ func _odgovori(odgovor: Callable, d: Dictionary) -> void:
 	var vlasnik := get_multiplayer_authority()
 	if vlasnik == multiplayer.get_unique_id():
 		odgovor.call(d)
-	else:
+	elif vlasnik in multiplayer.get_peers(): # vlasnik je možda otišao (odgovor backenda stigne dok server snima odjavu)
 		odgovor.rpc_id(vlasnik, d)
 
 # Zajedničke provere za zahteve; vraća poruku greške ili "" ako sme da se izvrši.
