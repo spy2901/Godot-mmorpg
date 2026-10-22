@@ -3128,6 +3128,8 @@ func _buff2_scenario(_p) -> void:
 # dir/brzina_server (raspored, horizontalna brzina, mrtav, peer), komanda dir/brzina_cmd "ubij".
 var _br_srv_upisano := ""
 var _br_uz_pre := ""
+var _br_rasp_pre := ""
+var _br_rtt_zakazano := -1
 var _br_cmd := ""
 var _br_krenuo := false
 var _br_kraj := false
@@ -3149,8 +3151,16 @@ func _server_brzina() -> void:
 		_br_uz_pre = str(uz)
 		print("[RTT-UZ] t=%.3f uzorak %d ms (od učitavanja %d ms, uzoraka %d, procena %d, kašnjenje servera %.0f ms)" % [
 			Time.get_unix_time_from_system(), int(uz[-1]), Time.get_ticks_msec() - int(p.get("_ucitan_ms")), uz.size(), p._rtt_ms(), _kasn_zbir * 1000])
+	# procena RTT-a pri zakazivanju: čita se u prvom frame-u drajvera posle novog rasporeda (raspored se menja u RPC-u
+	# napitka, pre ovog frame-a), ne kad test pročita fajl (do 0,75 s kasnije, procena se u međuvremenu menja)
+	var rasp := str(p.get("_raspored_brzine"))
+	if rasp != _br_rasp_pre:
+		_br_rasp_pre = rasp
+		if p.get("_raspored_brzine") is Array and not p.get("_raspored_brzine").is_empty() and p.has_method("_rtt_ms"):
+			_br_rtt_zakazano = p._rtt_ms()
 	var st := JSON.stringify({"raspored": p.get("_raspored_brzine"), "v": snappedf(Vector2(v.x, v.z).length(), 0.01), "mrtav": p.mrtav,
-		"peer": str(p.name), "rtt_uzoraka": uz.size() if uz is Array else -1, "rtt_procena": p._rtt_ms() if p.has_method("_rtt_ms") else -1})
+		"peer": str(p.name), "rtt_uzoraka": uz.size() if uz is Array else -1, "rtt_procena": p._rtt_ms() if p.has_method("_rtt_ms") else -1,
+		"rtt_zakazano": _br_rtt_zakazano})
 	if st != _br_srv_upisano:
 		_br_srv_upisano = st
 		_pisi("brzina_server", st)
@@ -3191,7 +3201,7 @@ func _uloga_brzina() -> bool:
 		p.rotation.y = _br_yaw
 	return _br_kraj or t > 2 * MAX_T
 
-const BR_RTT_UZORAKA := 4
+const BR_RTT_UZORAKA := 8 # Player_Movement.PING_UZORAKA_MIN: pre toga server koristi ENet RTT (bez veštačkog kašnjenja)
 const BR_ROK := 10.0
 
 func _br_hod(da: bool) -> void:
@@ -3213,8 +3223,8 @@ func _br_ivica(p, rtt: int, kuka: String) -> Dictionary:
 	var pocela: bool = await _cekaj(func(): return _br_pocela(p) > 0, 3.0)
 	var kasni: int = _br_pocela(p) - klik if pocela else -1
 	# dozvola za početak: ukupno kašnjenje frame-ova (ovaj proces + server) od klika do početka i koliko je procena RTT-a
-	# servera (75. percentil pingova, sa frame-ovima obe strane) iznad veštačkog RTT-a (pod opterećenjem 277-301 uz 250)
-	var dozvola := _kasnjenje_izmedju(od, Time.get_unix_time_from_system()) + maxi(0, int(_br_srv().get("rtt_procena", rtt)) - rtt)
+	# kojom je server zakazao ovaj napitak (rtt_zakazano) iznad veštačkog RTT-a (pod opterećenjem 277-301 uz 250)
+	var dozvola := _kasnjenje_izmedju(od, Time.get_unix_time_from_system()) + maxi(0, int(_br_srv().get("rtt_zakazano", rtt)) - rtt)
 	await create_timer(1.5 + rtt / 1000.0 + 0.8).timeout # kraj buff-a i poslednja stanja
 	return {"ok": bool(odg.get("ok", false)) and pocela, "glatke": p.korekcije_glatke - k0, "snap": p.korekcije_snap - s0,
 		"max": snappedf(p.greska_max, 0.001), "kasni": kasni, "odg": odg.get("poruka", ""),
@@ -3262,7 +3272,7 @@ func _brzina_scenario(p) -> void:
 	_provera("klijent_ne_postavlja_brzinu", ima and r_laz is Array and r_laz.is_empty() and absf(v_laz - 5.0) < 0.3,
 		"lažni raspored [[0, 1e8, 30]] od klijenta: server raspored %s, brzina po serveru %.2f m/s (bazna 5)" % [r_laz, v_laz])
 	await create_timer(1.0).timeout
-	# bar BR_RTT_UZORAKA pingova posle zagrevanja (bez opterećenja ih je ovde ~4): inače server koristi ENet RTT bez veštačkog
+	# bar BR_RTT_UZORAKA pingova posle zagrevanja: inače server koristi ENet RTT, koji veštačko kašnjenje ne vidi
 	await _cekaj(func(): return int(_br_srv().get("rtt_uzoraka", 0)) >= BR_RTT_UZORAKA, BR_ROK)
 	# dijagnostika: frame-ovi ovog procesa sa kašnjenjem > 30 ms u poslednjih 6 s (uz [RTT-UZ] u server.log)
 	var sad_u := Time.get_unix_time_from_system()
