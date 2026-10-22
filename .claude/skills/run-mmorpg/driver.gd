@@ -3131,6 +3131,7 @@ func _uloga_brzina() -> bool:
 
 const BR_RTT_UZORAKA := 4
 const BR_ROK := 10.0
+const BR_RTT_PROZOR := 3.0 # s: Player_Movement.PING_UZORAKA (12) * PING_RAZMAK_MS (250)
 
 func _br_hod(da: bool) -> void:
 	_br_hoda = da
@@ -3150,7 +3151,9 @@ func _br_ivica(p, rtt: int, kuka: String) -> Dictionary:
 	var odg: Dictionary = await p.koristi_item_na_serveru("test_kratki_speed")
 	var pocela: bool = await _cekaj(func(): return _br_pocela(p) > 0, 3.0)
 	var kasni: int = _br_pocela(p) - klik if pocela else -1
-	var z_poc := _zastoj_izmedju(od, Time.get_unix_time_from_system())
+	# početak zavisi i od procene RTT-a (75. percentil pingova iz poslednjih BR_RTT_PROZOR s): spori frame-ovi tada je
+	# podignu (301 ms uz RTT 250, početak 454 ms), pa prozor zastoja za početak počinje toliko pre klika
+	var z_poc := _zastoj_izmedju(od - BR_RTT_PROZOR, Time.get_unix_time_from_system())
 	await create_timer(1.5 + rtt / 1000.0 + 0.8).timeout # kraj buff-a i poslednja stanja
 	return {"ok": bool(odg.get("ok", false)) and pocela, "glatke": p.korekcije_glatke - k0, "snap": p.korekcije_snap - s0,
 		"max": snappedf(p.greska_max, 0.001), "kasni": kasni, "odg": odg.get("poruka", ""),
