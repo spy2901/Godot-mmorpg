@@ -3610,6 +3610,8 @@ func _efekti_scenario(p1, p2) -> void:
 		and hud.get("otrov_boja", "") == boja and hud.get("imunitet", "").begins_with("Poison immunity  0:")
 		and (hud.get("vaskrsenje", "").ends_with("Resurrection 50% HP  10:00") or hud.get("vaskrsenje", "").ends_with("Resurrection 50% HP  9:59"))
 		and "Click: Invisible for 20 s  |  cooldown 60 s" in tt[0] and "Click: Resurrection 50% HP for 600 s  |  cooldown 5 s" in tt[1]
-		and "Click: +20 HP" in tt[2] and "Click: Poison immunity for 30 s  |  cooldown 5 s" in tt[2],
+		,
 		"HUD %s (debuff boja %s), tooltip %s" % [hud, boja, tt])
+	_provera("antidote_tooltip_jedan_red", tt[2].count("Click:") == 1 and "Click: +20 HP  Poison immunity for 30 s  |  cooldown 5 s" in tt[2],
+		"tooltip antidota '%s'" % tt[2])
 	_pisi("efekti_gotov", "1")

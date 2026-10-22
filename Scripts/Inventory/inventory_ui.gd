@@ -509,16 +509,17 @@ func _on_slot_hover(index: int):
 		tooltip_label.text += "\n" + tr("Can't be equipped")
 	var hp_e := int(hovered_item.get("hp_efekat", 0))
 	var mana_e := int(hovered_item.get("mana_efekat", 0))
-	if hovered_item.get("tip", "") == "consumable" and hp_e + mana_e > 0:
-		tooltip_label.text += tr("\nClick: %s%s  |  cooldown %.0f s") % [
-			tr("+%d HP") % hp_e + " " if hp_e > 0 else "", tr("+%d Mana") % mana_e if mana_e > 0 else "",
-			int(hovered_item.get("cooldown_ms", 0)) / 1000.0]
 	var buff_tip = hovered_item.get("buff_tip")
 	var opis: String = get_parent().get_parent().opis_buffa(str(buff_tip), int(hovered_item.get("buff_vrednost", 0))) \
 		if hovered_item.get("tip", "") == "consumable" and buff_tip is String else ""
-	if opis != "":
-		tooltip_label.text += tr("\nClick: %s for %d s  |  cooldown %.0f s") % [opis,
-			int(hovered_item.get("buff_trajanje_ms", 0)) / 1000, int(hovered_item.get("cooldown_ms", 0)) / 1000.0]
+	# jedan red za sve efekte (kao poruka posle upotrebe): "Click: +20 HP  Poison immunity for 30 s  |  cooldown 5 s"
+	var efekti: PackedStringArray = []
+	if hovered_item.get("tip", "") == "consumable":
+		if hp_e > 0: efekti.append(tr("+%d HP") % hp_e)
+		if mana_e > 0: efekti.append(tr("+%d Mana") % mana_e)
+	if opis != "": efekti.append(tr("%s for %d s") % [opis, int(hovered_item.get("buff_trajanje_ms", 0)) / 1000])
+	if not efekti.is_empty():
+		tooltip_label.text += tr("\nClick: %s  |  cooldown %.0f s") % ["  ".join(efekti), int(hovered_item.get("cooldown_ms", 0)) / 1000.0]
 	tooltip_label.add_theme_color_override("font_color", tip_boja)
 	tooltip_panel.visible = true
 
