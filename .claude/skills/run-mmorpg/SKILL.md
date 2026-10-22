@@ -25,7 +25,7 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
 ```
 
-Izlaz: putanja do logova, 191 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 191 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 196 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 196 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `buff1.log`, `buff2.log`, `efekti1.log`, `efekti2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -120,24 +120,36 @@ Promenjeno (grana popravke-3; opterećenje 24 `yes` petlje, load 50-130, 5 krugo
   `brzina_osvezavanje_bez_rupe` (drugi napitak 75 ms posle seq-a: pri load-u 260 stigao posle kraja intervala), server buff
   `ubij*` (2 s pre odgovora: samo produžava krug).
 - Uzroci u igri, popravljeni na istoj grani (commit-ovi `igra:`, svaki sa testom koji bez popravke pada):
-  - ENet throttle (`network_manager.gd` `_bez_throttle`: `throttle_configure(5000, PACKET_THROTTLE_SCALE, 0)` na klijentu za
-    server i na serveru za svakog klijenta). ENet poredi RTT svake potvrde pouzdanog paketa sa najmanjim RTT-om prethodnog
-    intervala + 2 * varijansa i za svaku sporiju skida 2 sa throttle-a; na 0 propušta 1 od 32 nepouzdana paketa (brojač
-    +7 mod 32), baš prozor redundanse. Test `rtt_skok_bez_rupa` (uloga `throttle`, `ThrottleLik` preko `udp_proksi.py` na
-    portu 7790: FIFO kašnjenje koje ENet vidi, `$OUT/throttle_rtt`; posle 4 s hoda RTT +400 ms na 2 s, pouzdan zahtev na 50 ms):
-    0 rupa i 0 paketa unosa koje ENet odbaci (seq bez svog paketa: klijent šalje jedan po tick-u). Uloga kreće kad quest uloge
-    izađu (ne zauzima mesto najdužem lancu). Merenje bez ostalih klijenata: `repro_throttle.sh [--crna-rupa=MS] [SKOK...]`
-    (SKOK: ms, "A-B" nasumično po paketu, "rampaN"). Pre: throttle 0-6, ENet odbacio 10-223 paketa, pauza 214-765 ms (9/9 FAIL);
-    posle: throttle stalno 32, 0 odbačenih, pauza = dodato kašnjenje. Dijagnostika `[THR]` uz `MMORPG_DEBUG_SEQ=1`.
+  - ENet throttle (`network_manager.gd` `_bez_throttle`: `throttle_configure(5000, PACKET_THROTTLE_SCALE, 0)` samo na
+    klijentu za server; ENet šalje THROTTLE_CONFIGURE drugoj strani, pa serverski peer te veze dobije isto (izmereno [5000, 32, 0],
+    throttle ka klijentu stalno 32; serverski poziv bio suvišan, podešavanje je po vezi). ENet poredi RTT svake potvrde
+    pouzdanog paketa sa najmanjim RTT-om prethodnog intervala + 2 * varijansa i za svaku sporiju skida 2 sa throttle-a; na 0
+    propušta 1 od 32 nepouzdana paketa (brojač +7 mod 32), baš prozor redundanse. Test `rtt_skok_bez_rupa` (uloga `throttle`,
+    `ThrottleLik` preko `udp_proksi.py` na portu 7790: FIFO kašnjenje koje ENet vidi, `$OUT/throttle_rtt`; posle 4 s hoda RTT
+    +400 ms na 2 s, pouzdan zahtev na 50 ms): 0 rupa i 0 paketa unosa koje ENet odbaci (seq bez svog paketa). Merenje bez ostalih
+    klijenata: `repro_throttle.sh [--crna-rupa=MS] [SKOK...]` (SKOK: ms, "A-B", "rampaN"); proxy ispisuje pakete i bajtove po
+    sekundi. Saobraćaj (RTT +400): ka klijentu ~6,7 KiB/s, od klijenta 1,2 KiB/s, isto sa i bez podešavanja; podrazumevano:
+    klijentski throttle 0-4, serverski 0-8, 10-16 odbačenih unosa. Dijagnostika `[THR]` uz `MMORPG_DEBUG_SEQ=1`.
   - Otrov tačno 6 tick-ova (`_otrov_tikova`, ističe po broju tick-ova, ne po satu; ne kuca u frame-u ujeda `_otrov_frame`).
     Test `otrov_mimo_oklopa_6_tikova` posle `process_frame` postavi `_regen_akum` 0,999 (regeneracija u frame-u ujeda):
     strogo `[+2, -1 x6, +2]`; bez popravke `[-1 x7, +2]`.
-  - `_javi_predmet` proverava `get_peers()`. Test `server_ne_salje_predmet_odjavljenom` (run.sh, server.log): server drajver
-    pozove `_javi_predmet` za Oprema2Lik posle odjave dok server snima (spori save); bez greške "unknown peer ID" iz njega.
-- RPC-ovi od servera ka vlasniku bez provere `get_peers()` (nisu menjani): `Enemy.primi_kill`, `registracija_odbijena`
-  (`_odbij`), `primi_lik`, `primi_loot`, `primi_stats`, `primi_action_bar` (`_javi_action_bar`), `_odgovori` (svi `odgovor_*`),
-  `primi_cilj`, `primi_stanje` i `ping_brzine` (`_physics_process`). Sa proverom: `primi_hp`, `primi_raspored_brzine`,
-  `primi_buffove`, `primi_predmet`.
+  - Procena RTT-a za brzinu tek od `PING_UZORAKA_MIN` (8) uzoraka, do tada ENet RTT; 75. percentil (sa 4 uzorka bio je najveći
+    uzorak: jedan spor pong +400 ms -> početak 758 ms). Test `brzina_prvi_napitak_spor_pong` (uloga `prvi`, `PrviLik` preko
+    `udp_proksi.py` na 7791 sa stalnim RTT +250 ms, da i ENet RTT vidi kašnjenje; server prvom uzorku doda +400 ms, napitak
+    posle 4 uzorka): početak <= RTT + 200 ms (+ kašnjenje frame-ova), 0 snap, <= 4 korekcije, <= 0,10 m. BrzinaLik čeka 8
+    uzoraka; dozvola početka u `brzina_ivice_*` računa višak procene kojom je server zakazao napitak (`rtt_zakazano`, prvi
+    frame drajvera posle novog rasporeda), ne procene pročitane kasnije. Dijagnostika `[RTT-UZ]` (server.log) i `[BR-FRAME]`.
+    Spor uzorak pre napitka (10 krugova bez opterećenja: jedan, 344 ms) poklapa se sa kašnjenjem frame-ova servera i klijenta.
+  - RPC vlasniku posle await-a backenda proverava `get_peers()`: `_javi_predmet`, `server_isplati_xp` (`primi_stats`),
+    `server_isplati_loot` (`primi_loot`), `_javi_action_bar`, `_odgovori`. Testovi: `server_ne_salje_predmet_odjavljenom`
+    (server drajver pozove `_javi_predmet` za Oprema2Lik dok snima odjavu) i uloga `odjava` (`OdjavaLik`: stub xp/change,
+    inventory/change, item/use kasne 2,5 s, save 5 s; odjava odmah posle isplate XP-a, loot-a i napitka) ->
+    `odjavljenom_primi_stats`, `odjavljenom_primi_loot`, `odjavljenom_primi_action_bar`, `odjavljenom_odgovor` (odgovor
+    obrađen posle "Peer diskonektovan", bez greške unknown peer iz te funkcije).
+- RPC-ovi ka vlasniku bez provere `get_peers()` koji ne mogu da stignu odjavljenom (nisu menjani): `Enemy.primi_kill` (igrač
+  po grupi `player`, sinhrono), `registracija_odbijena` i `primi_lik` (neučitan lik se pri odjavi odmah briše, korutina ne
+  nastavlja; dupla prijava traži po grupi), `primi_cilj` (iz `_physics_process` ili zahteva klijenta), `primi_stanje` i
+  `ping_brzine` (`_physics_process` se gasi pri odjavi, `world_spawner._on_peer_disconnected`).
 - Load ~270 (van dokaza): `ZAHTEV_TIMEOUT_MS` 8 s ("Server not responding").
 
 Napitci (`potion` klijent, provere preko stanja: HUD hp, `prebroj_item`, količina u stub "bazi"):
