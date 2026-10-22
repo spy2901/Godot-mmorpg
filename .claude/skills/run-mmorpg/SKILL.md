@@ -92,6 +92,39 @@ Promenjeno (grana popravke-2; pre toga 0/5 padova pod load-om 29-50, ali determi
   (`xp_ubistva` sa razlikom 0) → `xp_po_razlici_nivoa_po_napadacu`. Kašnjenje partnera se proverava kopijom `run.sh`
   koja ga pokreće kasnije (npr. PosmatracLik 90 s posle QuestLik-ove predaje: 157, `uloge završile 92 s posle movera`).
 
+Promenjeno (grana popravke-3; opterećenje 24 `yes` petlje, load 50-130, 5 krugova pre: brzina_ivice u 3/5, seq 1/5):
+- Oprema: `klik` i skidanje čekaju uslov (predmet opremljen/skinut na serveru i u UI-ju, `OPREMA_ROK` 10 s) umesto 0,6 / 0,4 s.
+  Ranije je sledeći klik išao pre primene prethodnog (zahtev u toku, stari raspored inventara): čizme neopremljene, oklop 62,
+  pa svih 12 provera opreme. Rukavice (`klik(id, false)`) zadržavaju prozor posmatranja (zahtev ne sme da se pošalje).
+- Mover: jednokratni okidači (`_cp`) umesto prozora 12.5-12.7 s (neispravni paketi), 38.6-38.7 s (reset hook; sada u
+  frame-u u kom se upiše faza reset) i 34.0-34.4 s (zadržavanje rafala, 0.4 s od prvog frame-a): frame > 100 ms preskoči prozor.
+- `rafal_bez_rupa`, `reset_bez_rupa`, `gubitak_8/20_paketa_bez_rupa` (`_provera_rupa_faze`): rupe opravdane zastojem procesa
+  tog lika ili servera (kao seq, ±`ZASTOJ_PROZOR`) i vreme pražnjenja rafala uz zastoj movera/servera u fazi su WARN; rupa bez
+  zastoja FAIL. Zastoji se beleže i van seq faza (treća kolona u `zastoj_<peer>`; seq i dalje koristi samo svoje).
+- Brzina: veštački RTT 250 ms od prvog frame-a lika (ranije tek posle učitavanja UI-ja: server je skupio pongove bez kašnjenja,
+  RTT 15 ms) i čekanje 4 uzorka RTT-a na serveru (`rtt_uzoraka` u `brzina_server`). Početak preko `RTT + 200 ms` je WARN samo
+  do izmerenog kašnjenja: zbir `delta - 1/60` frame-ova BrzinaLik-a i servera od klika do početka (`_kasnjenje_izmedju`, server
+  dopisuje `$OUT/srv_kasnjenje`) plus višak procene RTT-a servera (`rtt_procena`) nad veštačkim; bez opterećenja dozvola 9-31 ms.
+  Korekcije i greška predikcije van granice su WARN samo uz frame > `ZASTOJ_PRAG` BrzinaLik-a ili servera (`$OUT/srv_zastoji`).
+  Napitak i 0 snap-ova uvek; granice (0,10 m, 4 korekcije) iste.
+- Efekti: `otrov_osvezava_bez_sabiranja` poredi preostalo sa stvarno proteklim vremenom od ujeda (tajmer od 3 s pod
+  opterećenjem traje ~4,2 s); `otrov_mimo_oklopa_6_tikova`: zastoj servera opravdava samo broj tick-ova (tick po akumulatoru
+  delta-e, istek po satu), vrednosti (-1, pa +2) stroge; nevidljivost (`prekida_jurenje`, `druga_meta`): rok od trenutka kad
+  server upali nevidljivost (`EF_ROK` 8 s), ne od odgovora klijenta (test napitak traje 2 s).
+- Mutacije pod opterećenjem i dalje obaraju: `OKLOP_K` 110, duplikat reseta prihvaćen, `BRZINA_MARGINA_TIKOVA` 33, otrov bez
+  osvežavanja, tick otrova -2, nevidljiv ostaje u tabeli pretnje, server odbacuje svaki 97. unos (sve faze rupa).
+- Preostalo (fiksno čekanje, nije palo): `drugi_igrac_ne_oprema_tudji_predmet` i `klijent_ne_postavlja_buff`/`_nevidljivost`
+  (prozor posmatranja 1 s: kasni RPC daje lažni PASS, ne FAIL), `buff_hud_i_tooltip` i `efekti_hud_i_tooltip` (HUD "1:00/0:59",
+  "10:00/9:59": HUD pročitan > 2 s posle napitka pada), `napad_prekida_nevidljivost` (0,3 s pa stanje goblina),
+  `odjava_prekida_otrov` (1,5 s za spori save pa čitanje stub-a), `brzina_smrt_prekida` (1,5 s za povratak u zonu 2),
+  `brzina_osvezavanje_bez_rupe` (drugi napitak 75 ms posle seq-a: pri load-u 260 stigao posle kraja intervala), server buff
+  `ubij*` (2 s pre odgovora: samo produžava krug).
+- Uzrok u igri (nije popravljeno): pod opterećenjem ENet throttle klijenta koji je čekao mesto padne na 0 posle ulaska i
+  odbacuje nepouzdane pakete unosa (dijagnostika `[THR]` uz `MMORPG_DEBUG_SEQ=1`): pauze 0,4-1,5 s, niz rupa 7-59 bez zastoja
+  (seq, rafal kod drugog lika, `brzina_odjava_prekida` 0 m/s). Bez opterećenja (load ~2): otrov ume da otkuca 7 puta (prvi tick
+  u frame-u ujeda, sedmi pre isteka po satu). Load ~270: `ZAHTEV_TIMEOUT_MS` 8 s ("Server not responding") i
+  `_javi_predmet` šalje RPC odjavljenom peer-u (bez provere `get_peers()`, za razliku od `_javi_raspored_brzine`).
+
 Napitci (`potion` klijent, provere preko stanja: HUD hp, `prebroj_item`, količina u stub "bazi"):
 `potion_lik_ucitan`, `napitak_leci` (+30, količina -1 u bazi i UI-ju, poruka "+30 HP"),
 `napitak_clamp_max` (+150 na 80/100 → 100), `pun_hp_odbija` ("Already at full health", ne troši),
