@@ -3579,17 +3579,28 @@ func _efekti_scenario(p1, p2) -> void:
 		if promene.size() == 3 and not hud.has("otrov"):
 			hud["otrov"] = str(_ef_kl("EfektiLik").get("debuff", ""))
 			hud["otrov_boja"] = str(_ef_kl("EfektiLik").get("debuff_boja", ""))
-	_provera("otrov_mimo_oklopa_6_tikova", u1[0] == 13 and u1[1] is Array and u1[1][0] == 3 and u1[1][1] > 5500
-		and promene.slice(0, 7) == [-1, -1, -1, -1, -1, -1, 2],
-		"oklop %d: udarac -%d (13), otrov %s; promene HP-a (tick 3 - regen 2) %s" % [p1.armor, u1[0], u1[1], promene])
+	# tick ide po akumulatoru delta-e servera (najviše jedan po frame-u), a otrov ističe po satu: zastoj servera menja broj
+	# tick-ova (pod opterećenjem [-1, -1, -1, 2]). Pogrešan niz je WARN samo uz zastoj servera u prozoru, inače FAIL.
+	var udarac_ok: bool = u1[0] == 13 and u1[1] is Array and u1[1][0] == 3 and u1[1][1] > 5500
+	var tikovi_ok: bool = promene.slice(0, 7) == [-1, -1, -1, -1, -1, -1, 2]
+	var z_otrov := _zastoj_izmedju(otrov_od, Time.get_unix_time_from_system())
+	var opis_otrov := "oklop %d: udarac -%d (13), otrov %s; promene HP-a (tick 3 - regen 2) %s" % [p1.armor, u1[0], u1[1], promene]
+	if udarac_ok and not tikovi_ok and z_otrov != "":
+		print("WARN otrov_mimo_oklopa_6_tikova  neodlučno (zastoj %s): %s" % [z_otrov, opis_otrov])
+	else:
+		_provera("otrov_mimo_oklopa_6_tikova", udarac_ok and tikovi_ok, opis_otrov)
 
-	# osvežavanje: drugi ujed usred otrova vraća trajanje na 6 s, šteta ostaje 3
+	# osvežavanje: drugi ujed usred otrova vraća trajanje na 6 s, šteta ostaje 3. Preostalo se poredi sa stvarno proteklim
+	# vremenom (tajmer od 3 s pod opterećenjem kasni: preostalo 1806 ms posle ~4,2 s), ista tolerancija -1000/+500 ms.
 	await _ef_ujed(s, p1)
+	var t_ujed := Time.get_ticks_msec()
 	await create_timer(3.0).timeout
 	var pre_osv: Array = _ef_bf(p1).get("otrov", [0, 0])
+	var ocek: int = 6000 - (Time.get_ticks_msec() - t_ujed)
 	var u3 := await _ef_ujed(s, p1)
-	_provera("otrov_osvezava_bez_sabiranja", pre_osv[1] > 2000 and pre_osv[1] < 3500 and u3[1] is Array and u3[1][0] == 3 and u3[1][1] > 5500,
-		"posle 3 s preostalo %s, posle novog ujeda %s (3 HP/s, ~6000 ms)" % [pre_osv, u3[1]])
+	_provera("otrov_osvezava_bez_sabiranja", pre_osv[1] > 0 and pre_osv[1] > ocek - 1000 and pre_osv[1] < ocek + 500 and u3[1] is Array
+		and u3[1][0] == 3 and u3[1][1] > 5500,
+		"posle %d ms preostalo %s (očekivano ~%d), posle novog ujeda %s (3 HP/s, ~6000 ms)" % [6000 - ocek, pre_osv, ocek, u3[1]])
 
 	# otrov ubija: smrt skida sve (otrov i elixir_of_defense), respawn bez otrova sa punim HP-om
 	await _ef_posalji("EfektiLik", "pij elixir_of_defense")
