@@ -851,17 +851,21 @@ func primi_raspored_brzine(lista: Array) -> void:
 	_raspored_brzine = lista.duplicate(true)
 
 # RTT za zakazivanje: server šalje vlasniku ping, vlasnik vraća isti broj (ceo krug, sa frame-ovima obe strane).
-# Procena je 75. percentil poslednjih PING_UZORAKA, bez uzoraka iz prvih PING_ZAGREVANJE_MS posle učitavanja lika: klijent
+# Procena je 75. percentil poslednjih PING_UZORAKA (najmanje PING_UZORAKA_MIN), bez uzoraka iz prvih PING_ZAGREVANJE_MS posle učitavanja lika: klijent
 # tada učitava scenu i odgovara sa zakašnjenjem (izmereno 333-532 ms pri RTT 150-250), pa je prvi napitak kasnio
-# 250-300 ms više od narednih. Dok nema uzoraka: ENet RTT (pravo mrežno kašnjenje, bez frame-ova).
+# 250-300 ms više od narednih. Dok nema PING_UZORAKA_MIN uzoraka: ENet RTT (pravo mrežno kašnjenje, bez frame-ova).
 const PING_RAZMAK_MS := 250
 const PING_UZORAKA := 12
+# Procena se koristi tek od PING_UZORAKA_MIN uzoraka: 75. percentil od 8 je 7. po veličini, pa jedan spor pong (zastoj
+# klijenta ili servera) ne može sam da postane procena (sa 4 uzorka 75. percentil je bio najveći uzorak: +400 ms
+# pomerilo je početak prvog napitka na 758 ms). Do tada ENet RTT, kao i ranije bez uzoraka.
+const PING_UZORAKA_MIN := 8
 const PING_ZAGREVANJE_MS := 2000
 var _ping_ms := 0
 var _rtt_uzorci: Array = []
 
 func _rtt_ms() -> int:
-	if _rtt_uzorci.is_empty():
+	if _rtt_uzorci.size() < PING_UZORAKA_MIN:
 		var mp := multiplayer.multiplayer_peer
 		var p = mp.get_peer(get_multiplayer_authority()) if mp is ENetMultiplayerPeer else null
 		return int(p.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME)) if p != null else 0
