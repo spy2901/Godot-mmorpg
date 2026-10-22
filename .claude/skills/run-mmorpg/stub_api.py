@@ -312,12 +312,18 @@ PLAYERS["PrviLik"] = dict(PLAYERS["TestLik"], ime="PrviLik", hp=100, max_hp=100,
                           inventory=[{"slot": 0, "id": "test_kratki_speed", "kolicina": 2}])
 # ThrottleLik (uloga throttle): ide preko udp_proksi.py (skok RTT-a), hoda u zoni 2 (x 50..62, z -5), van ostalih likova
 PLAYERS["ThrottleLik"] = dict(PLAYERS["TestLik"], ime="ThrottleLik", pos_x=50, pos_y=1.16, pos_z=-5, equipment={}, inventory=[])
+# OdjavaLik (uloga odjava): odgovori backenda (xp, loot, upotreba predmeta) kasne KASNI_ODGOVOR s, pa stižu posle odjave,
+# dok server snima (SPORI_SAVE): server ne sme da šalje RPC vlasniku koji je otišao
+PLAYERS["OdjavaLik"] = dict(PLAYERS["TestLik"], ime="OdjavaLik", hp=50, max_hp=100, pos_x=-26, pos_y=1.16, pos_z=10, equipment={},
+                            inventory=[{"slot": 0, "id": "small_health_potion", "kolicina": 2}])
+SPORI_SAVE["OdjavaLik"] = 5.0
+KASNI_ODGOVOR = {"OdjavaLik": 2.5}
 BEZ_ITEM_KASNJENJA = {"BrzinaLik", "PrviLik"}  # kašnjenje početka buff-a brzine se meri bez veštačkih 0,3 s backend-a
-XP_LIKOVI = {"NapredakLik", "QuestLik", "PosmatracLik", "LovacLik", "BuffLik", "Buff2Lik", "EfektiLik", "Efekti2Lik"}
+XP_LIKOVI = {"OdjavaLik", "NapredakLik", "QuestLik", "PosmatracLik", "LovacLik", "BuffLik", "Buff2Lik", "EfektiLik", "Efekti2Lik"}
 TOKENI = {"napredak-token": "NapredakLik", "oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik", "quest-token": "QuestLik",
           "posmatrac-token": "PosmatracLik", "lovac-token": "LovacLik", "buff-token": "BuffLik", "buff2-token": "Buff2Lik", "brzina-token": "BrzinaLik",
-          "efekti-token": "EfektiLik", "efekti2-token": "Efekti2Lik", "throttle-token": "ThrottleLik", "prvi-token": "PrviLik"}
+          "efekti-token": "EfektiLik", "efekti2-token": "Efekti2Lik", "throttle-token": "ThrottleLik", "prvi-token": "PrviLik", "odjava-token": "OdjavaLik"}
 LOCK = threading.Lock()
 
 
@@ -360,6 +366,9 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         p, d = self.path, self._telo()
+        if (m := re.fullmatch(r"/players/([\w-]+)/(xp/change|inventory/change|item/use)", p)) and m[1] in KASNI_ODGOVOR:
+            print(f"[STUB] kasni odgovor {m[1]} {m[2]} ({KASNI_ODGOVOR[m[1]]} s)", file=sys.stderr, flush=True)
+            time.sleep(KASNI_ODGOVOR[m[1]])
         if p == "/auth/verify":
             if d.get("token") == "visi-token":  # verify koji visi (duže od ApiManager 3x8 s): server mora sam da izbaci peer-a
                 time.sleep(40)

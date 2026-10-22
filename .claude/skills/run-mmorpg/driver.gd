@@ -191,6 +191,9 @@ func _process(d):
 				root.size = Vector2i(1280, 720) # tooltip i HUD kao u prozoru
 				root.get_node("GameState").token = "efekti-token" if _korak == 1 else "efekti2-token"
 				root.get_node("GameState").ime_igraca = "EfektiLik" if _korak == 1 else "Efekti2Lik"
+			elif uloga == "odjava": # OdjavaLik: odgovori backenda stižu posle odjave
+				root.get_node("GameState").token = "odjava-token"
+				root.get_node("GameState").ime_igraca = "OdjavaLik"
 			elif uloga == "prvi": # PrviLik preko udp_proksi.py (RTT +250 ms koji ENet vidi)
 				root.get_node("GameState").token = "prvi-token"
 				root.get_node("GameState").ime_igraca = "PrviLik"
@@ -237,6 +240,7 @@ func _process(d):
 		"efekti": return _uloga_efekti()
 		"throttle": return _uloga_throttle()
 		"prvi": return _uloga_prvi()
+		"odjava": return _uloga_odjava()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -323,6 +327,7 @@ func _server(log: bool) -> bool:
 	_server_efekti()
 	_server_throttle()
 	_server_prvi()
+	_server_odjava()
 	_server_predmet_odjavljenom()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
@@ -4056,3 +4061,39 @@ func _server_prvi() -> void:
 
 var _br_rasp_pre_prvi := ""
 var _pr_rtt_zakazano := -1
+
+# ---------------------------------------------------------------- ODGOVORI BACKENDA POSLE ODJAVE (uloga odjava: OdjavaLik)
+# Stub OdjavaLik-u odgovara na xp/change, inventory/change i item/use posle KASNI_ODGOVOR (2,5 s) i drži /save 5 s. Klijent
+# javi odjava_kreni; server drajver tada pokrene isplatu XP-a i loot-a (apple: ide i u action bar), klijent pošalje upotrebu
+# napitka i odmah se odjavi. Odgovori stižu dok server snima odjavu: posle await-a server ne sme da zove RPC vlasniku koji je
+# otišao (run.sh: odjavljenom_primi_stats, odjavljenom_primi_loot, odjavljenom_primi_action_bar, odjavljenom_odgovor).
+var _od_krenuo := false
+var _od_kraj := false
+var _od_srv := false
+
+func _uloga_odjava() -> bool:
+	var p = _moj()
+	if p == null or not p.get_node("ui/Control")._ucitano:
+		return (_od_krenuo and p == null) or t > 2 * MAX_T
+	if not _od_krenuo:
+		_od_krenuo = true
+		_odjava_scenario(p)
+	return _od_kraj or t > 2 * MAX_T
+
+func _odjava_scenario(p) -> void:
+	await create_timer(1.0).timeout # početni raspored action bara (server ga upiše posle učitavanja)
+	_pisi("odjava_kreni", "1")
+	p.zatrazi_koriscenje_itema.rpc_id(1, "small_health_potion") # odgovor kasni 2,5 s (stub)
+	await _cekaj(func(): return FileAccess.file_exists(dir + "/odjava_poslato"), 5.0)
+	print("[ODJAVA] zahtevi poslati, odjava")
+	_od_kraj = true
+
+func _server_odjava() -> void:
+	if _od_srv or dir == "" or not FileAccess.file_exists(dir + "/odjava_kreni"): return
+	var p = _ai_lik("OdjavaLik")
+	if p == null: return
+	_od_srv = true
+	print("[S] OdjavaLik: isplata XP-a i loot-a pre odjave (odgovori backenda kasne)")
+	p.server_isplati_xp(5, "test_odjava")
+	p.server_isplati_loot(["apple"])
+	_pisi("odjava_poslato", "1")
