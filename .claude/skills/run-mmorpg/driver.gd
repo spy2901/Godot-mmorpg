@@ -837,7 +837,40 @@ var _server_zastoji := [] # server: [t_kraj, delta] (unix s)
 
 var _svi_zastoji := [] # svaka uloga: [t_kraj, delta] (unix s) svakog frame-a > ZASTOJ_PRAG, za provere koje mere vreme
 
+# Ukupno kašnjenje frame-ova: zbir (delta - 1/60) svih frame-ova (proces pod opterećenjem dobija CPU kasnije i bez ijednog
+# frame-a > ZASTOJ_PRAG). Svaka uloga ga drži kao [t_kraj, zbir] po frame-u sa kašnjenjem; server ga dopisuje u
+# dir/srv_kasnjenje. Merenja vremena (početak brzine) smeju da pređu granicu najviše za izmereno kašnjenje (WARN).
+var _kasn_zbir := 0.0
+var _kasn_log := []
+var _kasn_f: FileAccess = null
+
+func _meri_kasnjenje(d: float) -> void:
+	var visak := d - 1.0 / Engine.physics_ticks_per_second
+	if visak <= 0.001: return
+	_kasn_zbir += visak
+	var sad := Time.get_unix_time_from_system()
+	_kasn_log.append([sad, _kasn_zbir])
+	if uloga == "server" and dir != "":
+		if _kasn_f == null: _kasn_f = FileAccess.open(dir + "/srv_kasnjenje", FileAccess.WRITE)
+		_kasn_f.store_line("%f %f" % [sad, _kasn_zbir])
+		_kasn_f.flush()
+
+func _kasn_u(log: Array, t_: float) -> float: # zbir kašnjenja do trenutka t_
+	var z := 0.0
+	for e in log:
+		if e[0] > t_: break
+		z = e[1]
+	return z
+
+# ukupno kašnjenje frame-ova ovog procesa + servera u [od, do_] (ms)
+func _kasnjenje_izmedju(od: float, do_: float) -> int:
+	var srv := []
+	for l in FileAccess.get_file_as_string(dir + "/srv_kasnjenje").split("\n", false):
+		if l.get_slice_count(" ") == 2: srv.append([float(l.get_slice(" ", 0)), float(l.get_slice(" ", 1))])
+	return int(1000 * (_kasn_u(_kasn_log, do_) - _kasn_u(_kasn_log, od) + _kasn_u(srv, do_) - _kasn_u(srv, od)))
+
 func _meri_zastoj(d: float) -> void:
+	_meri_kasnjenje(d)
 	if d > ZASTOJ_PRAG:
 		_svi_zastoji.append([Time.get_unix_time_from_system(), d])
 	if uloga == "server" and d > ZASTOJ_PRAG:
@@ -3088,7 +3121,7 @@ func _server_brzina() -> void:
 	var v: Vector3 = p.velocity
 	var uz = p.get("_rtt_uzorci")
 	var st := JSON.stringify({"raspored": p.get("_raspored_brzine"), "v": snappedf(Vector2(v.x, v.z).length(), 0.01), "mrtav": p.mrtav,
-		"peer": str(p.name), "rtt_uzoraka": uz.size() if uz is Array else -1})
+		"peer": str(p.name), "rtt_uzoraka": uz.size() if uz is Array else -1, "rtt_procena": p._rtt_ms() if p.has_method("_rtt_ms") else -1})
 	if st != _br_srv_upisano:
 		_br_srv_upisano = st
 		_pisi("brzina_server", st)
@@ -3131,7 +3164,6 @@ func _uloga_brzina() -> bool:
 
 const BR_RTT_UZORAKA := 4
 const BR_ROK := 10.0
-const BR_RTT_PROZOR := 3.0 # s: Player_Movement.PING_UZORAKA (12) * PING_RAZMAK_MS (250)
 
 func _br_hod(da: bool) -> void:
 	_br_hoda = da
@@ -3151,17 +3183,18 @@ func _br_ivica(p, rtt: int, kuka: String) -> Dictionary:
 	var odg: Dictionary = await p.koristi_item_na_serveru("test_kratki_speed")
 	var pocela: bool = await _cekaj(func(): return _br_pocela(p) > 0, 3.0)
 	var kasni: int = _br_pocela(p) - klik if pocela else -1
-	# početak zavisi i od procene RTT-a (75. percentil pingova iz poslednjih BR_RTT_PROZOR s): spori frame-ovi tada je
-	# podignu (301 ms uz RTT 250, početak 454 ms), pa prozor zastoja za početak počinje toliko pre klika
-	var z_poc := _zastoj_izmedju(od - BR_RTT_PROZOR, Time.get_unix_time_from_system())
+	# dozvola za početak: ukupno kašnjenje frame-ova (ovaj proces + server) od klika do početka i koliko je procena RTT-a
+	# servera (75. percentil pingova, sa frame-ovima obe strane) iznad veštačkog RTT-a (pod opterećenjem 277-301 uz 250)
+	var dozvola := _kasnjenje_izmedju(od, Time.get_unix_time_from_system()) + maxi(0, int(_br_srv().get("rtt_procena", rtt)) - rtt)
 	await create_timer(1.5 + rtt / 1000.0 + 0.8).timeout # kraj buff-a i poslednja stanja
 	return {"ok": bool(odg.get("ok", false)) and pocela, "glatke": p.korekcije_glatke - k0, "snap": p.korekcije_snap - s0,
 		"max": snappedf(p.greska_max, 0.001), "kasni": kasni, "odg": odg.get("poruka", ""),
-		"z_poc": z_poc, "z": _zastoj_izmedju(od, Time.get_unix_time_from_system())}
+		"dozvola": dozvola, "z": _zastoj_izmedju(od, Time.get_unix_time_from_system())}
 
-# Provera ivica brzine: napitak uspeo i 0 snap-ova uvek; merenja u vremenu (kašnjenje početka, broj korekcija, greška
-# predikcije) koja ne prođu su WARN samo ako je u tom prozoru zastao ovaj proces ili server (frame > ZASTOJ_PRAG), kao seq.
-# delovi: [[x, kasni_ok, kor_ok], ...]
+# Provera ivica brzine: napitak uspeo i 0 snap-ova uvek. Merenja u vremenu su WARN (neodlučno) samo uz izmereni zastoj:
+# početak preko granice najviše za x.dozvola (kašnjenje frame-ova, _kasnjenje_izmedju), broj korekcija i greška
+# predikcije samo uz zastoj ovog procesa ili servera (frame > ZASTOJ_PRAG), kao seq. Inače FAIL.
+# delovi: [[x, granica_pocetka_ms (-1 = ne meri se), kor_ok], ...]
 func _br_provera(ime: String, delovi: Array, detalj: String) -> void:
 	var ok := true
 	var warn := []
@@ -3170,9 +3203,9 @@ func _br_provera(ime: String, delovi: Array, detalj: String) -> void:
 		if not x.ok or x.snap != 0:
 			ok = false
 			continue
-		if not d[1]:
-			if x.z_poc == "": ok = false
-			else: warn.append("početak uz zastoj %s" % x.z_poc)
+		if d[1] >= 0 and (x.kasni < 0 or x.kasni > d[1]):
+			if x.kasni < 0 or x.kasni > d[1] + x.dozvola: ok = false
+			else: warn.append("početak %d ms preko granice, kašnjenje frame-ova i procene RTT-a %d ms" % [x.kasni - d[1], x.dozvola])
 		if not d[2]:
 			if x.z == "": ok = false
 			else: warn.append("korekcije uz zastoj %s" % x.z)
@@ -3184,7 +3217,7 @@ func _br_pocela(p) -> int: # test_brzina_pocela_ms (0 ako ga kod igre nema)
 	return int(v) if v != null else 0
 
 func _br_opis(x: Dictionary) -> String:
-	return "glatke %d, snap %d, max greška %.3f m, početak %d ms%s%s" % [x.glatke, x.snap, x.max, x.kasni,
+	return "glatke %d, snap %d, max greška %.3f m, početak %d ms (kašnjenje frame-ova/RTT %d ms)%s%s" % [x.glatke, x.snap, x.max, x.kasni, x.dozvola,
 		"" if x.ok else " (napitak: %s)" % x.odg, " (zastoj %s)" % x.z if x.z != "" else ""]
 
 func _brzina_scenario(p) -> void:
@@ -3216,15 +3249,15 @@ func _brzina_scenario(p) -> void:
 			["rtt_150", 150, "brzina_ivice_rtt_150"]]:
 		var x: Dictionary = rez[u[0]]
 		# najviše 4 korekcije po napitku (kao za raspored koji kasni): brzina po satu umesto po seq-u daje 10-17 malih
-		_br_provera(u[2], [[x, x.kasni >= 0 and x.kasni <= u[1] + 200, x.glatke <= 4 and x.max <= 0.10]],
+		_br_provera(u[2], [[x, u[1] + 200, x.glatke <= 4 and x.max <= 0.10]],
 			"RTT %d ms: %s (uslov: 0 snap, <= 4 korekcije, <= 0,10 m, početak <= %d ms)" % [u[1], _br_opis(x), u[1] + 200])
 	var j1: Dictionary = rez["jitter_150"]
 	var j2: Dictionary = rez["jitter_250"]
-	_br_provera("brzina_jitter_50ms", [[j1, true, j1.max <= 0.4], [j2, true, j2.max <= 0.4]],
+	_br_provera("brzina_jitter_50ms", [[j1, -1, j1.max <= 0.4], [j2, -1, j2.max <= 0.4]],
 		"150 +-50: %s; 250 +-50: %s (uslov: 0 snap, <= 0,4 m)" % [_br_opis(j1), _br_opis(j2)])
 	for u in [["kasni", "brzina_raspored_kasni_500ms"], ["izgubi", "brzina_raspored_izgubljen"]]:
 		var x: Dictionary = rez[u[0]]
-		_br_provera(u[1], [[x, true, x.glatke <= 4 and x.max <= 0.4]],
+		_br_provera(u[1], [[x, -1, x.glatke <= 4 and x.max <= 0.4]],
 			"RTT 150: %s (uslov: 0 snap, najviše 4 korekcije, <= 0,4 m)" % _br_opis(x))
 	await _br_osvezavanje(p)
 	await _br_smrt(p)
