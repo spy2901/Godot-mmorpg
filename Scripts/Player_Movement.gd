@@ -1132,7 +1132,7 @@ func _javi_action_bar() -> void:
 	var vlasnik := get_multiplayer_authority()
 	if vlasnik == multiplayer.get_unique_id():
 		primi_action_bar(action_bar)
-	else:
+	elif vlasnik in multiplayer.get_peers(): # vlasnik je možda otišao (odgovor backenda stigne dok server snima odjavu)
 		primi_action_bar.rpc_id(vlasnik, action_bar)
 
 @rpc("any_peer", "reliable")
