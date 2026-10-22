@@ -529,7 +529,7 @@ func server_isplati_loot(item_ids: Array) -> void:
 		var vlasnik := get_multiplayer_authority()
 		if vlasnik == multiplayer.get_unique_id():
 			primi_loot(str(item_id), 1)
-		else:
+		elif vlasnik in multiplayer.get_peers(): # vlasnik je možda otišao (odgovor backenda stigne dok server snima odjavu)
 			primi_loot.rpc_id(vlasnik, str(item_id), 1)
 
 # XP upisuje backend (/xp/change); server osvežava damage, klijent dobija nove statistike
