@@ -51,6 +51,8 @@ func _povezi_signale() -> void:
 # paket po tick-u, desetine bajtova), a gubitak već pokriva redundansa (UNOSA_NEPOTVRDJENIH_MAX); throttle ne rasterećuje
 # mrežu, samo pravi rupe. Usporenje 0: throttle ostaje na PACKET_THROTTLE_SCALE (sve se šalje), ubrzanje SCALE: ako je
 # pre podešavanja pao, odmah se vrati. Pouzdan saobraćaj ima svoj prozor i na njega ovo ne utiče.
+# Samo klijent (unosi ka serveru): ENet šalje THROTTLE_CONFIGURE drugoj strani, pa server za tu vezu dobije isto podešavanje
+# (izmereno: serverski peer [5000, 32, 0], throttle ka klijentu stalno 32). Serverski poziv je bio suvišan.
 func _bez_throttle(pp: ENetPacketPeer) -> void:
 	if pp != null:
 		pp.throttle_configure(5000, ENetPacketPeer.PACKET_THROTTLE_SCALE, 0)
@@ -92,8 +94,6 @@ func _on_server_disconnected() -> void:
 
 func _on_peer_connected(id: int) -> void:
 	print("[NET] Peer povezan: ", id)
-	if multiplayer.is_server():
-		_bez_throttle(_enet_peer(id))
 	emit_signal("peer_connected", id)
 
 func _on_peer_disconnected(id: int) -> void:
