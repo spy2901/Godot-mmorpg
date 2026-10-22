@@ -424,7 +424,9 @@ func _mover(log: bool) -> bool:
 	if t > 18.5 and t < 20.5: p.rotation.y = -PI / 2 # ka +x, nazad
 	if t > 24.0 and t < 27.0: p.rotation.y = 0.0 # ka -z
 	if t > 28.0 and t < 30.0: p.rotation.y = PI
-	if t > 12.5 and t < 12.7: # neispravni paketi: prekratak, pogrešna dužina za broj unosa, stari format (Array sa NaN)
+	# Jednokratni okidači (_cp), ne prozor [od, do): frame duži od prozora (pod opterećenjem > 100 ms) bi ga preskočio
+	if t > 12.5 and not _cp.has("los_paket"): # neispravni paketi: prekratak, pogrešna dužina za broj unosa, stari format (Array sa NaN)
+		_cp["los_paket"] = true
 		var los: PackedByteArray = p._kodiraj([[p._seq + 1000, Vector2(1, 0), false, 0.0, p._reset_id_prim]])
 		p.posalji_unos.rpc_id(1, los.slice(0, 10))
 		los.encode_u8(12, 32)
@@ -433,8 +435,12 @@ func _mover(log: bool) -> bool:
 	p.set_physics_process(not (t > 15.0 and t < 18.0)) # 15-18 s: prestaje da šalje unos dok "drži" W
 	p.test_ubrzanje = 3 if t > 24.0 and t < 27.0 else 1 # speed-hack: 3 unosa po tick-u
 	p.test_gubitak = 0.3 if t > 27.5 and t < 33.0 else 0.0
-	p.test_zadrzi = t > 34.0 and t < 34.4 # ~24 unosa pa rafal: red mora da ih primi bez rupa
-	if t > 38.6 and t < 38.7 and not _cp.has("reset_hook"): # paket na putu u trenutku reset-a se izgubi
+	if t > 34.0 and not _cp.has("zadrzi_od"): _cp["zadrzi_od"] = t
+	p.test_zadrzi = _cp.has("zadrzi_od") and t < _cp["zadrzi_od"] + 0.4 # ~24 unosa pa rafal: red mora da ih primi bez rupa
+	# paket na putu u trenutku reset-a se izgubi. Hook se pali u frame-u u kom se upiše faza reset (ispod), a server
+	# resetuje tek 0.3 s pošto vidi fazu: ranije prozor 38.6-38.7 s, preskočen frame-om > 100 ms (reset_paket_izgubljen i
+	# zakasneli_reset_ignorisan "ubačen=false")
+	if t > 38.5 and not _cp.has("reset_hook"):
 		_cp["reset_hook"] = true
 		p.test_izgubi_posle_reseta = true
 		p.test_zakasni_reset = true # i sačuvaj kopiju reset stanja: ubacuje se ponovo pošto lik prohoda
