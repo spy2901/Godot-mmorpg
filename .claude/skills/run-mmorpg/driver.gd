@@ -3440,6 +3440,8 @@ func _ef_umri_respawn(p) -> void: # posle smrti: respawn, nazad kući, pa kraj n
 	p.server_postavi_poziciju(EF_DOM1, true)
 	await create_timer(2.2).timeout
 
+const EF_ROK := 8.0 # s: komanda klijentu preko fajla i njegov zahtev serveru (kao _ef_posalji)
+
 func _efekti_scenario(p1, p2) -> void:
 	var id1: int = p1.get_multiplayer_authority()
 	var id2: int = p2.get_multiplayer_authority()
@@ -3506,8 +3508,11 @@ func _efekti_scenario(p1, p2) -> void:
 		"za vreme: vlasnik %s, drugi %s; posle prekida: vlasnik %s, drugi %s" % [k_vid[0], k_vid[1], _ef_kl("EfektiLik"), _ef_kl("Efekti2Lik")])
 
 	# jedina meta postane nevidljiva (test napitak 2 s): goblin odustaje (POVRATAK, pa MIROVANJE na početku)
-	await _ef_posalji("EfektiLik", "pij test_kratka_nevidljivost")
-	var odustao: bool = await _cekaj(func(): return _st(g) != "JURENJE" and _tab(g).is_empty(), 1.5)
+	# test napitak traje 2 s: rok od trenutka kad je server upalio nevidljivost, ne od odgovora klijenta (komanda ide preko
+	# fajla i klijentovog zahteva serveru; pod opterećenjem odgovor stigne posle isteka). Odgovor se ne čeka.
+	_ef_posalji("EfektiLik", "pij test_kratka_nevidljivost")
+	await _cekaj(func(): return _ef_nevidljiv(p1), EF_ROK)
+	var odustao: bool = await _cekaj(func(): return _st(g) != "JURENJE" and _tab(g).is_empty() and _ef_nevidljiv(p1), 1.5)
 	var st_odustao := _st(g)
 	_provera("nevidljivost_prekida_jurenje", odustao and _ef_nevidljiv(p1),
 		"nevidljiv=%s, goblin %s, pretnja %s" % [_ef_nevidljiv(p1), st_odustao, _tab(g)])
@@ -3520,7 +3525,8 @@ func _efekti_scenario(p1, p2) -> void:
 	p2.server_postavi_poziciju(EF_GOBLIN + Vector3(2, -0.84, 0), true)
 	await _cekaj(func(): return _pr(g, p2) > 0, 2.0)
 	await create_timer(0.6).timeout # cooldown test napitka 0,5 s
-	await _ef_posalji("EfektiLik", "pij test_kratka_nevidljivost")
+	_ef_posalji("EfektiLik", "pij test_kratka_nevidljivost") # kao gore: rok od paljenja na serveru
+	await _cekaj(func(): return _ef_nevidljiv(p1), EF_ROK)
 	var prelaz: bool = await _cekaj(func(): return _ef_nevidljiv(p1) and _meta(g) == id2 and _st(g) == "JURENJE", 1.5)
 	_provera("nevidljivost_druga_meta", prelaz and _pr(g, p1) < 0,
 		"nevidljiv=%s, goblin %s meta %d (Efekti2Lik %d), pretnja %s" % [_ef_nevidljiv(p1), _st(g), _meta(g), id2, _tab(g)])
