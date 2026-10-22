@@ -11,7 +11,7 @@ G="${GODOT:-/Applications/Godot.app/Contents/MacOS/Godot}"
 D=res://.claude/skills/run-mmorpg/driver.gd
 OUT="${OUT:-${TMPDIR:-/tmp}/run-mmorpg}"
 echo "load average: $(sysctl -n vm.loadavg 2>/dev/null || cut -d' ' -f1-3 /proc/loadavg)"
-mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/srv_zastoji "$OUT"/srv_kasnjenje "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt "$OUT"/visi_id "$OUT"/izgubljeno_* "$OUT"/cilj_* "$OUT"/drugi_* "$OUT"/ai_* "$OUT"/oprema_* "$OUT"/napredak_* "$OUT"/quest_* "$OUT"/lovac_* "$OUT"/buff_* "$OUT"/buff2_* "$OUT"/brzina_* "$OUT"/efekti_* "$OUT"/throttle_*
+mkdir -p "$OUT"; rm -f "$OUT"/zastoj_* "$OUT"/srv_zastoji "$OUT"/srv_kasnjenje "$OUT"/*.log "$OUT"/mover.png "$OUT"/ugasi_server "$OUT"/faza "$OUT"/potion_cmd "$OUT"/server_hp "$OUT"/snimi "$OUT"/snimljeno_* "$OUT"/observer_respawn "$OUT"/nameplate_*.png "$OUT"/restart.txt "$OUT"/visi_id "$OUT"/izgubljeno_* "$OUT"/cilj_* "$OUT"/drugi_* "$OUT"/ai_* "$OUT"/oprema_* "$OUT"/napredak_* "$OUT"/quest_* "$OUT"/lovac_* "$OUT"/buff_* "$OUT"/buff2_* "$OUT"/brzina_* "$OUT"/efekti_* "$OUT"/throttle_* "$OUT"/prvi_*
 PORT="${STUB_PORT:-18765}"
 API="--server-url=http://127.0.0.1:$PORT"
 
@@ -136,7 +136,14 @@ BF=$!
   python3 "$(dirname "$0")/udp_proksi.py" 7790 7777 "$OUT/throttle_rtt" > "$OUT/proksi.log" 2>&1 &
   X=$!
   pokreni throttle "$OUT/throttle.log" "$G" --headless --path . --script $D -- throttle "dir=$OUT" "$API" port=7790
-  wait $PID; kill $X 2>/dev/null ) &
+  TP=$PID
+  sleep 0.3
+  # prvi: PrviLik preko udp_proksi.py (port 7791, stalno RTT +250 ms): prvi napitak brzine posle jednog sporog uzorka RTT-a
+  echo 250 > "$OUT/prvi_rtt"
+  python3 "$(dirname "$0")/udp_proksi.py" 7791 7777 "$OUT/prvi_rtt" > "$OUT/proksi_prvi.log" 2>&1 &
+  X2=$!
+  pokreni prvi "$OUT/prvi.log" "$G" --headless --path . --script $D -- prvi "dir=$OUT" "$API" port=7791
+  wait $TP $PID; kill $X $X2 2>/dev/null ) &
 TH=$!
 
 # kad mover završi provere kretanja, ugasi server dok su klijenti još živi
@@ -157,7 +164,7 @@ touch "$OUT/ugasi_server"
 wait $M $O $S $P $V $R $C $DR $A1 $A2 $OP $O3 $NP $Q1 $Q2 $Q3 $BF $TH
 
 echo "logovi: $OUT"
-grep -h '^PASS\|^FAIL\|^WARN \|screenshot\|korekcije' "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log "$OUT"/visi.log "$OUT"/raspored1.log "$OUT"/raspored2.log "$OUT"/cilj.log "$OUT"/drugi.log "$OUT"/ai1.log "$OUT"/ai2.log "$OUT"/oprema1.log "$OUT"/oprema2.log "$OUT"/oprema3.log "$OUT"/napredak1.log "$OUT"/napredak2.log "$OUT"/quest1.log "$OUT"/quest2.log "$OUT"/quest3.log "$OUT"/buff1.log "$OUT"/buff2.log "$OUT"/brzina1.log "$OUT"/brzina2.log "$OUT"/efekti1.log "$OUT"/efekti2.log "$OUT"/throttle.log "$OUT"/server.log
+grep -h '^PASS\|^FAIL\|^WARN \|screenshot\|korekcije' "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log "$OUT"/visi.log "$OUT"/raspored1.log "$OUT"/raspored2.log "$OUT"/cilj.log "$OUT"/drugi.log "$OUT"/ai1.log "$OUT"/ai2.log "$OUT"/oprema1.log "$OUT"/oprema2.log "$OUT"/oprema3.log "$OUT"/napredak1.log "$OUT"/napredak2.log "$OUT"/quest1.log "$OUT"/quest2.log "$OUT"/quest3.log "$OUT"/buff1.log "$OUT"/buff2.log "$OUT"/brzina1.log "$OUT"/brzina2.log "$OUT"/efekti1.log "$OUT"/efekti2.log "$OUT"/throttle.log "$OUT"/prvi.log "$OUT"/server.log
 if grep -q "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log; then
   echo "FAIL nema_greske_neaktivnog_peera  $(grep -ch "isn't currently active\|No multiplayer peer is assigned" "$OUT"/mover.log "$OUT"/observer.log "$OUT"/potion.log | paste -sd+ - | bc) linija"
 else
@@ -200,5 +207,5 @@ if [ -z "${RUN_PONOVLJEN:-}" ] && grep -qh '^FAIL seq_bez_rupa_bez_gubitka' "$OU
   kill $STUB 2>/dev/null; wait $STUB 2>/dev/null # port mora biti slobodan za novi stub
   RUN_PONOVLJEN=1 exec "$SKRIPTA" "$@"
 fi
-# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 191
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 191 ]
+# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 192
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 192 ]

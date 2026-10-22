@@ -191,6 +191,9 @@ func _process(d):
 				root.size = Vector2i(1280, 720) # tooltip i HUD kao u prozoru
 				root.get_node("GameState").token = "efekti-token" if _korak == 1 else "efekti2-token"
 				root.get_node("GameState").ime_igraca = "EfektiLik" if _korak == 1 else "Efekti2Lik"
+			elif uloga == "prvi": # PrviLik preko udp_proksi.py (RTT +250 ms koji ENet vidi)
+				root.get_node("GameState").token = "prvi-token"
+				root.get_node("GameState").ime_igraca = "PrviLik"
 			elif uloga == "throttle": # ThrottleLik preko udp_proksi.py: skok RTT-a koji ENet vidi
 				root.get_node("GameState").token = "throttle-token"
 				root.get_node("GameState").ime_igraca = "ThrottleLik"
@@ -233,6 +236,7 @@ func _process(d):
 		"brzina": return _uloga_brzina()
 		"efekti": return _uloga_efekti()
 		"throttle": return _uloga_throttle()
+		"prvi": return _uloga_prvi()
 	push_error("uloga mora biti server|observer|mover")
 	return true
 
@@ -318,6 +322,7 @@ func _server(log: bool) -> bool:
 	_server_brzina()
 	_server_efekti()
 	_server_throttle()
+	_server_prvi()
 	_server_predmet_odjavljenom()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
@@ -3958,3 +3963,86 @@ func _server_predmet_odjavljenom() -> void:
 		_o2_javljeno = true
 		print("[S] _javi_predmet posle odjave Oprema2Lik (vlasnik %d nije među peer-ovima)" % _o2_lik.get_multiplayer_authority())
 		_o2_lik._javi_predmet("small_health_potion")
+
+# ---------------------------------------------------------------- PRVI NAPITAK POSLE SPOROG PONG-A (uloga prvi: PrviLik)
+# PrviLik ide preko udp_proksi.py sa stalnim RTT +250 ms (dir/prvi_rtt), pa i ENet RTT (rezerva dok nema dovoljno uzoraka)
+# vidi pravo kašnjenje. Server drajver prvom uzorku RTT-a posle zagrevanja doda PRVI_SPOR_MS (jedan spor pong). Klijent pije
+# test_kratki_speed čim server ima PRVI_UZORAKA uzoraka (kao prvi napitak posle prijave). Procena RTT-a ne sme da zavisi od
+# jednog uzorka: početak <= RTT + 200 ms (+ samo izmereno kašnjenje frame-ova), 0 snap, <= 4 korekcije, <= 0,10 m.
+const PRVI_RTT := 250
+const PRVI_SPOR_MS := 400
+const PRVI_UZORAKA := 4
+var _pr_krenuo := false
+var _pr_kraj := false
+var _pr_yaw := -PI / 2
+var _pr_hoda := false
+var _pr_srv_spor := false
+var _pr_srv_upisano := ""
+
+func _uloga_prvi() -> bool:
+	var p = _moj()
+	if p == null or not p.get_node("ui/Control")._ucitano:
+		return (_pr_krenuo and p == null) or t > 2 * MAX_T
+	if not _pr_krenuo:
+		_pr_krenuo = true
+		_prvi_scenario(p)
+	if _pr_hoda:
+		if p.server_poz.x < 50.0: _pr_yaw = -PI / 2
+		elif p.server_poz.x > 62.0: _pr_yaw = PI / 2
+		p.rotation.y = _pr_yaw
+	return _pr_kraj or t > 2 * MAX_T
+
+func _pr_srv() -> Dictionary:
+	var d = JSON.parse_string(FileAccess.get_file_as_string(dir + "/prvi_server"))
+	return d if d is Dictionary else {}
+
+func _prvi_scenario(p) -> void:
+	await _cekaj(func(): return p.is_on_floor(), 5.0)
+	_pr_hoda = true
+	Input.action_press("ui_up")
+	await _cekaj(func(): return int(_pr_srv().get("rtt_uzoraka", 0)) >= PRVI_UZORAKA, BR_ROK)
+	var srv0 := _pr_srv()
+	var k0: int = p.korekcije_glatke
+	var s0: int = p.korekcije_snap
+	p.greska_max = 0.0
+	p.set("test_brzina_pocela_ms", -1)
+	var klik := Time.get_ticks_msec()
+	var od := Time.get_unix_time_from_system()
+	var odg: Dictionary = await p.koristi_item_na_serveru("test_kratki_speed")
+	var pocela: bool = await _cekaj(func(): return _br_pocela(p) > 0, 3.0)
+	var kasni: int = _br_pocela(p) - klik if pocela else -1
+	var kasn := _kasnjenje_izmedju(od, Time.get_unix_time_from_system())
+	await create_timer(1.5 + PRVI_RTT / 1000.0 + 0.8).timeout
+	var x := {"ok": bool(odg.get("ok", false)) and pocela, "glatke": p.korekcije_glatke - k0, "snap": p.korekcije_snap - s0,
+		"max": snappedf(p.greska_max, 0.001), "kasni": kasni}
+	var srv := _pr_srv()
+	Input.action_release("ui_up")
+	_pr_hoda = false
+	var opis := "uzorci pri napitku %s (prvi +%d ms), procena pri zakazivanju %s ms; napitak %s, početak %d ms (granica %d, kašnjenje frame-ova %d ms), glatke %d, snap %d, max greška %.3f m" % [
+		srv0.get("uzorci"), PRVI_SPOR_MS, srv.get("rtt_zakazano"), odg.get("ok", odg.get("poruka")), kasni, PRVI_RTT + 200, kasn, x.glatke, x.snap, x.max]
+	_provera("brzina_prvi_napitak_spor_pong", x.ok and x.snap == 0 and x.glatke <= 4 and x.max <= 0.10 and kasni >= 0
+		and kasni <= PRVI_RTT + 200 + kasn, opis)
+	_pr_kraj = true
+
+func _server_prvi() -> void:
+	if dir == "" or _world() == null: return
+	var p = _ai_lik("PrviLik")
+	if p == null: return
+	var uz = p.get("_rtt_uzorci")
+	if not uz is Array: return
+	if not _pr_srv_spor and uz.size() >= 1: # prvi uzorak posle zagrevanja: spor pong
+		_pr_srv_spor = true
+		uz[0] = int(uz[0]) + PRVI_SPOR_MS
+		print("[S] PrviLik: prvi uzorak RTT-a +%d ms -> %d ms" % [PRVI_SPOR_MS, uz[0]])
+	var rasp := str(p.get("_raspored_brzine"))
+	if rasp != _br_rasp_pre_prvi:
+		_br_rasp_pre_prvi = rasp
+		if p.get("_raspored_brzine") is Array and not p.get("_raspored_brzine").is_empty():
+			_pr_rtt_zakazano = p._rtt_ms()
+	var st := JSON.stringify({"rtt_uzoraka": uz.size(), "uzorci": uz, "rtt_zakazano": _pr_rtt_zakazano})
+	if st != _pr_srv_upisano:
+		_pr_srv_upisano = st
+		_pisi("prvi_server", st)
+
+var _br_rasp_pre_prvi := ""
+var _pr_rtt_zakazano := -1
