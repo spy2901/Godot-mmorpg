@@ -171,6 +171,14 @@ elif grep -q "Attempt to call RPC with unknown peer ID" "$OUT/server.log"; then
 else
   echo "PASS server_ne_salje_hp_odjavljenom"
 fi | tee -a "$OUT/run.log"
+# server ne šalje stanje predmeta igraču koji je otišao (_javi_predmet dok server snima odjavu Oprema2Lik-a; poziva ga server drajver)
+if ! grep -q "_javi_predmet posle odjave Oprema2Lik" "$OUT/server.log"; then
+  echo "FAIL server_ne_salje_predmet_odjavljenom  scenario nije odrađen (Oprema2Lik nije viđen posle odjave dok snima)"
+elif grep -A6 "Attempt to call RPC with unknown peer ID" "$OUT/server.log" | grep -q '\[0\] _javi_predmet'; then
+  echo "FAIL server_ne_salje_predmet_odjavljenom  $(grep -A6 "Attempt to call RPC with unknown peer ID" "$OUT/server.log" | grep -c '\[0\] _javi_predmet') grešaka iz _javi_predmet"
+else
+  echo "PASS server_ne_salje_predmet_odjavljenom"
+fi | tee -a "$OUT/run.log"
 # /save: game server šalje raspored koji backend prihvata (int slot i kolicina), i za lik koji tokom sesije ne menja
 # inventar (tada ide raspored iz baze; JSON ga čita kao float). Stub validira kao backend i upozori kao on.
 # (Odbijanje zbog broja komada je namerno: raspored se mimoišao sa izmenom na serveru, ostaje stanje iz baze.)
@@ -192,5 +200,5 @@ if [ -z "${RUN_PONOVLJEN:-}" ] && grep -qh '^FAIL seq_bez_rupa_bez_gubitka' "$OU
   kill $STUB 2>/dev/null; wait $STUB 2>/dev/null # port mora biti slobodan za novi stub
   RUN_PONOVLJEN=1 exec "$SKRIPTA" "$@"
 fi
-# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 190
-! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 190 ]
+# WARN (neodlučno) ne obara krug: uspeh = nema FAIL i PASS + WARN = 191
+! grep -qh '^FAIL' "$OUT"/*.log && [ "$(grep -ch '^PASS \|^WARN ' "$OUT"/*.log | paste -sd+ - | bc)" -eq 191 ]

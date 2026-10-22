@@ -318,6 +318,7 @@ func _server(log: bool) -> bool:
 	_server_brzina()
 	_server_efekti()
 	_server_throttle()
+	_server_predmet_odjavljenom()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
 	if cmd != "" and cmd != _cmd_izvrsena and _world():
@@ -3913,3 +3914,23 @@ func _server_throttle() -> void:
 
 func _th_primljen_seq(p) -> int: # najveći primljen seq (i oni što još čekaju u redu servera)
 	return int(p._red[-1][0]) if not p._red.is_empty() else int(p._poslednji_seq)
+
+# ---------------------------------------------------------------- _javi_predmet posle odjave
+# Oprema2Lik se odjavi, a stub mu drži /save 2,5 s (SPORI_SAVE): čvor još postoji, vlasnik više nije među peer-ovima. Tada
+# server javi stanje predmeta (kao kad odgovor backenda na item/use stigne posle odjave). run.sh: server_ne_salje_predmet_odjavljenom
+# (bez "Attempt to call RPC with unknown peer ID" iz _javi_predmet).
+var _o2_lik = null
+var _o2_javljeno := false
+
+func _server_predmet_odjavljenom() -> void:
+	if _o2_javljeno or _world() == null: return
+	if _o2_lik == null:
+		_o2_lik = _ai_lik("Oprema2Lik")
+		return
+	if not is_instance_valid(_o2_lik): # nestao pre nego što ga je server video posle odjave
+		_o2_lik = null
+		return
+	if not _o2_lik.get_multiplayer_authority() in get_multiplayer().get_peers() and _o2_lik.get("_stanje_ucitano"):
+		_o2_javljeno = true
+		print("[S] _javi_predmet posle odjave Oprema2Lik (vlasnik %d nije među peer-ovima)" % _o2_lik.get_multiplayer_authority())
+		_o2_lik._javi_predmet("small_health_potion")
