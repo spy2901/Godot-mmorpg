@@ -23,10 +23,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 ```bash
 .claude/skills/run-mmorpg/run.sh            # sve headless, ~20 s
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png,
-                                            # minimapa u prozoru + $OUT/minimapa_{1280x720,1920x1080}.png
+                                            # minimapa u prozoru + $OUT/minimapa{,_zatvorena,_mapa}_{1280x720,1920x1080}.png
 ```
 
-Izlaz: putanja do logova, 206 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 206 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 214 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 214 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `buff1.log`, `buff2.log`, `efekti1.log`, `efekti2.log`, `minimapa.log`, `stub.log`, `nameplate_*.png`, `minimapa_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -393,9 +393,12 @@ dalje osvežava), `efekti_hud_i_tooltip`, `antidote_tooltip_jedan_red` ("Click: 
 cooldown 5 s", jedan red). Svih 21 pada bez implementacije (provereno: kod igre sa main-a); mutacije bez presretanja u
 `_server_umri`, otrov kroz oklop i vaskrsenje koje ostavlja ostale buffove obaraju svoje provere.
 
-Zone, pod i minimapa (grana zone-mapa). `Scripts/World/zone.gd` je jedina lista zona (ime kroz `tr()`, `oblast` Rect2 u
-(x, z), nivoi, boja; granica poluotvorena: x = 25 je zona 2). Pod: jedna kolizija (ne dira se) i po jedan vizuelni mesh po
-zoni (`pod.gd`). Pre mreže (scena) klijent uloge `minimapa` proverava `zone_jedan_izvor` (bez preklapanja, tačno pokrivaju
+Zone, pod, minimapa i mapa sveta (grana zone-mapa). **Izvor istine je `Scripts/World/zone.gd`** (`ZONE`: ime kroz `tr()`,
+`oblast` Rect2 u (x, z), nivoi, boja; granica poluotvorena: x = 25 je zona 2). Iz nje crtaju pod (`pod.gd`: jedna kolizija
+koja se ne dira, po jedan mesh po zoni, vrh mesh-a = vrh kolizije y 1.096), minimapa i mapa sveta (M, skalira se na granice
+svih zona). **Nova zona**: jedan red u `ZONE` + ime u `translations/teksti.csv`; oblast bez preklapanja, unutar kolizije poda
+(ako zona izlazi van, prvo se proširi kolizija poda pa `POD_Y`/transformacija u `_provere_poda`), nivoi = min/max spawn
+tačaka u njoj (`zone_jedan_izvor`). Kod poda, minimape i mape se ne menja. Pre mreže (scena) klijent uloge `minimapa` proverava `zone_jedan_izvor` (bez preklapanja, tačno pokrivaju
 pod, svaka spawn tačka u zoni, nivoi = min/max spawn tačaka, `zona_na(25)` = zona 2, `zona_na(24.999)` = zona 1),
 `pod_boja_po_zoni` (tačno jedan mesh iznad tačke, u boji zone, i na x = 25) i `pod_kolizija_nepromenjena` (jedan
 CollisionShape3D, transformacija kao pre zona, zrak u mreži tačaka preko x = 25 pogađa Pod na y 1.096094); server istu
@@ -414,6 +417,16 @@ zumira, zum minimape isti), `minimapa_N` (N, N, N sa fokusom u LineEdit-u: [fals
 action barom, imenom, HP/mana/XP, zlatom i buffovima). Bez implementacije (kod igre iz main, drajver grane) pada svih 8
 osim dve provere kolizije (one čuvaju postojeće stanje; mutacije: kolizija u dva oblika, minimapa ne troši točkić, troši ga
 svuda, bez filtera po radijusu, stari položaj trackera, svaka obara svoju proveru).
+Mapa sveta (ista uloga, posle minimape; `MapaSveta` CanvasLayer 40 pod igračem): `mapa_M_otvara_zatvara`,
+`mapa_esc_zatvara_cilj_ostaje` (cilj goblin_990, Esc zatvara mapu i cilj ostaje; drugi Esc bez mape ga skida),
+`mapa_ne_otvara_uz_dijalog` (M uz `DialogueUI`, `MerchantUI` i fokus u LineEdit-u: mapa ostaje zatvorena; svaki slučaj
+od zatvorene mape), `mapa_klik_ne_menja_cilj` (klik na pod preko mape ne skida cilj, bez mape skida; uz mapu hod 1 s bez
+korekcija i R dobije odgovor servera), `mapa_zone_ime_nivo` (zone kao `ZONE`: `tr(ime)`, "Lv. a-b", boja, ista razmera i
+raspored, na ekranu, skalirane do margine `mapa_stil.MARGINA`; istaknuta samo zona igrača), `mapa_marker_igraca`,
+`mapa_inventar_iskljucivi` ([inventar, mapa] posle I, M, I, I), `mapa_nova_zona_bez_koda` (test doda Testland (75..100,
+21-25) u `ZONE`, `static var`: mapa je crta uz Darkwood i smanji razmeru, posle uklanjanja opet 2 zone). Bez implementacije
+(commit 9fe4880) pada svih 8; mutacije (Esc ne troši, klik prolazi kroz mapu, M bez provere dijaloga, I ne zatvara mapu,
+ručne granice, marker sa obrnutim z) obaraju svaka svoju proveru.
 
 Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
 igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u
