@@ -4399,6 +4399,7 @@ func _mm_scenario(p) -> void:
 		for i in 5: await process_frame
 		rlose += _mm_raspored(p, mm, vel)
 		if shot != "":
+			await _mm_teleport(p, Vector2(10, -20)) # zona 1 (testovi imena ostave lika na x 25.1)
 			for stanje in ["", "_zatvorena", "_mapa", "_zona2"]:
 				mm.visible = stanje != "_zatvorena"
 				if mapa and stanje == "_mapa": mapa.otvori()
@@ -4410,7 +4411,6 @@ func _mm_scenario(p) -> void:
 				print("[MM] screenshot %s (%dx%d) -> %s" % [vel, slika.get_width(), slika.get_height(), putanja])
 				if mapa: mapa.zatvori()
 			mm.visible = true
-			await _mm_teleport(p, Vector2(10, -20))
 	root.size = Vector2i(1280, 720)
 	_provera("minimapa_tracker_bez_preklapanja", rlose.is_empty(), "%s" % [rlose])
 	_mm_kraj = true
@@ -4646,7 +4646,7 @@ func _zona_ime_scenario(p, mm) -> void:
 	Z.ZONE = stare
 	var greske: int = _script_greske() - greske0
 	_provera("zona_ime_van_zona", van == "" and crta and greske == 0,
-		"tekst van zona '%s', minimapa i dalje crta=%s, novih SCRIPT ERROR u logu %d" % [van, crta, greske])
+		"tekst van zona '%s', minimapa i dalje crta=%s, novih grešaka skripte u logu %d" % [van, crta, greske])
 
 	# nova zona (iz testa, privremeno) na mestu lika, prva u listi: ime se pojavi bez izmene minimape, pa nestane
 	await create_timer(0.2).timeout
