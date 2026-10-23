@@ -4379,20 +4379,208 @@ func _mm_scenario(p) -> void:
 	_provera("minimapa_ne_menja_kretanje", mm.visible and mm._crtano_ms != crtanja0 and kor == 0 and hod > 8.0 and raz < 0.05,
 		"minimapa vidljiva=%s crtana=%s, korekcija %d, hod %.2f m, razlika klijent/server %.3f m" % [mm.visible, mm._crtano_ms != crtanja0, kor, hod, raz])
 
-	# 6. HUD: minimapa, quest tracker i dugme bez preklapanja sa ostalim i unutar ekrana, 1280x720 i 1920x1080
+	# 6. mapa sveta (M)
+	var mapa = p.get_node_or_null("MapaSveta")
+	await _mapa_scenario(p, mapa)
+
+	# 7. HUD: minimapa, quest tracker i dugme bez preklapanja sa ostalim i unutar ekrana, 1280x720 i 1920x1080; sa shot=
+	# screenshot-ovi: minimapa uključena, isključena i otvorena mapa sveta
 	var rlose := []
 	for vel in [Vector2i(1280, 720), Vector2i(1920, 1080)]:
 		root.size = vel
 		for i in 5: await process_frame
 		rlose += _mm_raspored(p, mm, vel)
 		if shot != "":
-			var putanja := "%s_%dx%d.png" % [shot, vel.x, vel.y]
-			var slika := root.get_viewport().get_texture().get_image()
-			slika.save_png(putanja)
-			print("[MM] screenshot %s (%dx%d) -> %s" % [vel, slika.get_width(), slika.get_height(), putanja])
+			for stanje in ["", "_zatvorena", "_mapa"]:
+				mm.visible = stanje != "_zatvorena"
+				if mapa and stanje == "_mapa": mapa.otvori()
+				for i in 3: await process_frame
+				var putanja := "%s%s_%dx%d.png" % [shot, stanje, vel.x, vel.y]
+				var slika := root.get_viewport().get_texture().get_image()
+				slika.save_png(putanja)
+				print("[MM] screenshot %s (%dx%d) -> %s" % [vel, slika.get_width(), slika.get_height(), putanja])
+				if mapa: mapa.zatvori()
+			mm.visible = true
 	root.size = Vector2i(1280, 720)
 	_provera("minimapa_tracker_bez_preklapanja", rlose.is_empty(), "%s" % [rlose])
 	_mm_kraj = true
+
+# Taster kao sa tastature: pritisak, dva frame-a (TopBar čita I preko Input.is_action_just_pressed u _process), otpuštanje
+func _taster(kod: Key, slovo := 0) -> void:
+	for dole in [true, false]:
+		var e := InputEventKey.new()
+		e.keycode = kod
+		e.physical_keycode = kod
+		e.unicode = slovo if dole else 0
+		e.pressed = dole
+		Input.parse_input_event(e)
+		await process_frame
+		await process_frame
+
+# Mapa sveta (M): otvaranje i zatvaranje, Esc (cilj ostaje), dijalog/prodavnica/polje za tekst, klik, kretanje i napad uz
+# otvorenu mapu, zone iz zone.gd (ime, nivoi, razmera), marker igrača, inventar, nova zona bez izmene koda mape.
+const MAPA_PROVERE := ["mapa_M_otvara_zatvara", "mapa_esc_zatvara_cilj_ostaje", "mapa_ne_otvara_uz_dijalog", "mapa_klik_ne_menja_cilj",
+	"mapa_zone_ime_nivo", "mapa_marker_igraca", "mapa_inventar_iskljucivi", "mapa_nova_zona_bez_koda"]
+func _mapa_scenario(p, mapa) -> void:
+	if mapa == null or not mapa.has_method("raspored"):
+		for ime in MAPA_PROVERE: _provera(ime, false, "nema MapaSveta (raspored)")
+		return
+	var M := func() -> void: await _taster(KEY_M, 109)
+	var v := []
+	await M.call()
+	v.append(mapa.visible)
+	await M.call()
+	v.append(mapa.visible)
+	_provera("mapa_M_otvara_zatvara", v == [true, false], "vidljiva posle M, M: %s (očekivano [true, false])" % [v])
+
+	# Esc zatvara samo mapu, cilj ostaje; bez mape Esc skida cilj (kao do sada)
+	var cilj := func() -> String: return str(p.cilj_id)
+	p.izaberi_cilj("goblin_990")
+	await _cekaj(func(): return cilj.call() == "goblin_990", 3.0)
+	var c0: String = cilj.call()
+	await M.call()
+	var otvorena: bool = mapa.visible
+	await _taster(KEY_ESCAPE)
+	await create_timer(0.5).timeout # odgovor servera bi stigao da je zahtev otišao
+	var posle_esc: Array = [mapa.visible, cilj.call()]
+	await _taster(KEY_ESCAPE)
+	await _cekaj(func(): return cilj.call() == "", 3.0)
+	_provera("mapa_esc_zatvara_cilj_ostaje", c0 == "goblin_990" and otvorena and posle_esc == [false, "goblin_990"] and cilj.call() == "",
+		"cilj pre '%s', mapa otvorena=%s; posle Esc [vidljiva, cilj] %s; drugi Esc bez mape skida cilj: '%s'" % [c0, otvorena, posle_esc, cilj.call()])
+
+	# M se ignoriše uz dijalog, prodavnicu i fokus u polju za tekst
+	var uz := {}
+	var dialog = root.get_node("DialogueUI")
+	mapa.zatvori() # svaki slučaj od zatvorene mape
+	dialog.open("Test", ["Test"])
+	await _cekaj(func(): return dialog._active, 3.0)
+	await M.call()
+	uz["dijalog"] = mapa.visible
+	dialog._close()
+	mapa.zatvori()
+	var prodavnica = root.get_node("MerchantUI")
+	prodavnica.open("Merchant")
+	await process_frame
+	await M.call()
+	uz["prodavnica"] = mapa.visible
+	prodavnica._close()
+	mapa.zatvori()
+	var polje := LineEdit.new()
+	p.get_node("ui").add_child(polje)
+	polje.grab_focus()
+	await process_frame
+	await M.call()
+	uz["polje"] = mapa.visible
+	polje.queue_free()
+	mapa.zatvori()
+	await process_frame
+	await M.call()
+	var posle: bool = mapa.visible
+	await M.call()
+	_provera("mapa_ne_otvara_uz_dijalog", uz == {"dijalog": false, "prodavnica": false, "polje": false} and posle and not mapa.visible,
+		"otvorena uz %s; posle zatvaranja svega M otvara=%s" % [uz, posle])
+
+	# klik preko mape ne menja cilj (bez mape isti klik na pod ga skida); kretanje i napad (R) rade uz otvorenu mapu
+	p.izaberi_cilj("goblin_990")
+	await _cekaj(func(): return cilj.call() == "goblin_990", 3.0)
+	var napad := []
+	p.napad_odgovor.connect(func(d): napad.append(d))
+	mapa.otvori()
+	var tacka := Vector2(root.size) * Vector2(0.5, 0.85) # pod ispred lika
+	_klik(tacka)
+	await create_timer(0.5).timeout
+	var cilj_mapa: String = cilj.call()
+	var k0: int = p.korekcije_glatke + p.korekcije_snap
+	var od: Vector3 = p.global_position
+	Input.action_press("ui_up")
+	await create_timer(1.0).timeout
+	Input.action_release("ui_up")
+	await create_timer(0.5).timeout
+	var hod: float = od.distance_to(p.global_position)
+	var kor: int = p.korekcije_glatke + p.korekcije_snap - k0
+	await _taster(KEY_R, 114)
+	await _cekaj(func(): return not napad.is_empty(), 3.0)
+	var jos_otvorena: bool = mapa.visible
+	mapa.zatvori()
+	await process_frame
+	_klik(tacka)
+	await _cekaj(func(): return cilj.call() == "", 3.0)
+	_provera("mapa_klik_ne_menja_cilj", cilj_mapa == "goblin_990" and cilj.call() == "" and hod > 4.0 and kor == 0 and not napad.is_empty() and jos_otvorena,
+		"cilj posle klika preko mape '%s', bez mape '%s'; uz mapu hod %.2f m, korekcija %d, odgovor na napad %s, mapa otvorena=%s" % [
+			cilj_mapa, cilj.call(), hod, kor, napad, jos_otvorena])
+
+	# zone: isto što i zone.gd (ime kroz tr(), "Lv. a-b", boja), ista razmera po x i z, raspored kao u svetu, na ekranu;
+	# skalirana na granice (dodiruje marginu po jednoj osi); istaknuta je samo zona igrača
+	var Z = load(ZONE_SKRIPTA)
+	mapa.otvori()
+	await process_frame
+	var r: Dictionary = mapa.raspored()
+	var zlose := _mapa_zone_greske(r, Z.ZONE)
+	var moja: int = Z.zona_na(p.global_position.x, p.global_position.z)
+	var istaknute := range(r.zone.size()).filter(func(i): return r.zone[i].istaknuta)
+	if istaknute != [moja]: zlose.append("istaknute %s, igrač u zoni %d" % [istaknute, moja])
+	_provera("mapa_zone_ime_nivo", zlose.is_empty(), "%s; greške %s" % [r.zone.map(func(z): return "%s %s %s" % [z.ime, z.nivoi, z.rect]), zlose])
+
+	# marker igrača: pozicija lika u razmeri mape, unutar istaknute zone
+	var z0: Dictionary = r.zone[0]
+	var k: float = z0.rect.size.x / Z.ZONE[0].oblast.size.x
+	var ocekivano: Vector2 = z0.rect.position + (Vector2(p.global_position.x, p.global_position.z) - Z.ZONE[0].oblast.position) * k
+	var u_zoni: bool = moja >= 0 and r.zone[moja].rect.has_point(r.igrac)
+	_provera("mapa_marker_igraca", r.igrac.distance_to(ocekivano) < 0.5 and u_zoni,
+		"marker %s, očekivano %s (lik %s), u istaknutoj zoni=%s" % [r.igrac, ocekivano, p.global_position, u_zoni])
+	mapa.zatvori()
+
+	# inventar i mapa se isključuju: I otvara inventar, M ga zatvara i otvara mapu, I zatvara mapu i otvara inventar
+	var inv = p.get_node("ui/InventoryUI")
+	var st := []
+	await _taster(KEY_I, 105)
+	st.append([inv.visible, mapa.visible])
+	await M.call()
+	st.append([inv.visible, mapa.visible])
+	await _taster(KEY_I, 105)
+	st.append([inv.visible, mapa.visible])
+	await _taster(KEY_I, 105)
+	st.append([inv.visible, mapa.visible])
+	_provera("mapa_inventar_iskljucivi", st == [[true, false], [false, true], [true, false], [false, false]],
+		"[inventar, mapa] posle I, M, I, I: %s" % [st])
+
+	# nova zona samo u listi zone.gd (iz testa, privremeno): mapa je crta bez izmene koda, pored Darkwood-a, razmera se smanji
+	var pre: Rect2 = mapa.raspored().zone[0].rect
+	var nova := {"ime": "Testland", "oblast": Rect2(75, -25, 25, 50), "nivoi": Vector2i(21, 25), "boja": Color(0.3, 0.3, 0.6)}
+	Z.ZONE.append(nova)
+	mapa.otvori()
+	await process_frame
+	var r3: Dictionary = mapa.raspored()
+	var nlose := _mapa_zone_greske(r3, Z.ZONE)
+	Z.ZONE.pop_back()
+	var n3: int = r3.zone.size()
+	if n3 == 3:
+		if absf(r3.zone[2].rect.position.x - r3.zone[1].rect.end.x) > 0.01: nlose.append("Testland nije uz Darkwood")
+		if not r3.zone[0].rect.size.x < pre.size.x - 1.0: nlose.append("razmera se nije smanjila: Meadowvale %s -> %s" % [pre, r3.zone[0].rect])
+	var n_posle: int = mapa.raspored().zone.size()
+	mapa.zatvori()
+	_provera("mapa_nova_zona_bez_koda", n3 == 3 and n_posle == 2 and nlose.is_empty() and r3.zone[2].ime == "Testland" and r3.zone[2].nivoi == "Lv. 21-25",
+		"zona sa novom: %d %s, posle uklanjanja %d; greške %s" % [n3, r3.zone.map(func(z): return "%s %s %s" % [z.ime, z.nivoi, z.rect]), n_posle, nlose])
+
+# Zone na mapi prema listi: ime, nivoi, boja, ista razmera i raspored kao u svetu, unutar ekrana, skalirane na granice
+func _mapa_zone_greske(r: Dictionary, lista: Array) -> Array:
+	var lose := []
+	if r.zone.size() != lista.size(): return ["zona na mapi %d, u listi %d" % [r.zone.size(), lista.size()]]
+	var k: float = r.zone[0].rect.size.x / lista[0].oblast.size.x
+	var ekran := Rect2(Vector2.ZERO, Vector2(root.size))
+	var sve: Rect2 = r.zone[0].rect
+	for i in lista.size():
+		var z: Dictionary = r.zone[i]
+		var o: Rect2 = lista[i].oblast
+		sve = sve.merge(z.rect)
+		if z.ime != tr(lista[i].ime) or z.nivoi != "Lv. %d-%d" % [lista[i].nivoi.x, lista[i].nivoi.y] or z.boja != lista[i].boja:
+			lose.append("%s: '%s' '%s' %s" % [lista[i].ime, z.ime, z.nivoi, z.boja])
+		var ocek := Rect2(r.zone[0].rect.position + (o.position - lista[0].oblast.position) * k, o.size * k)
+		if not z.rect.is_equal_approx(ocek): lose.append("%s rect %s, po razmeri %s" % [lista[i].ime, z.rect, ocek])
+		if not ekran.encloses(z.rect): lose.append("%s van ekrana" % lista[i].ime)
+	var slobodno: Vector2 = ekran.size - sve.size # skalirano na granice: po jednoj osi ostaje tačno 2 * margina
+	if absf(minf(slobodno.x, slobodno.y) - 2 * load("res://Scripts/UI/mapa_stil.gd").MARGINA) > 1.0: lose.append("granice %s na ekranu %s nisu skalirane do margine" % [sve, ekran.size])
+	return lose
 
 func _mm_raspored(p, mm, vel: Vector2i) -> Array:
 	var hud = p.get_node("ui/Control")
