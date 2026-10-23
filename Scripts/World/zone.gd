@@ -1,10 +1,11 @@
 # Zone sveta: JEDINA lista (pod u bojama, minimapa, mapa sveta). Nova zona = jedan red ovde + ime u teksti.csv.
 # oblast je Rect2 u ravni (x, z). Granica je poluotvorena (Rect2.has_point): tačka na x = 25 pripada zoni 2.
 # nivoi = najmanji i najveći nivo spawn tačaka u oblasti (proverava ih test zone_jedan_izvor). Isti kod je i na
-# serveru, pa zona_na() radi i tamo, bez mreže.
+# serveru, pa zona_na() radi i tamo, bez mreže. static var, ne const (const niz je samo za čitanje): pod, minimapa i mapa
+# je čitaju pri crtanju, pa test mapa_nova_zona_bez_koda privremeno doda zonu bez izmene koda mape. Igra je ne menja.
 extends RefCounted
 
-const ZONE := [
+static var ZONE := [
 	{"ime": "Meadowvale", "oblast": Rect2(-25, -25, 50, 50), "nivoi": Vector2i(1, 10), "boja": Color(0.38, 0.52, 0.3)},
 	{"ime": "Darkwood", "oblast": Rect2(25, -25, 50, 50), "nivoi": Vector2i(11, 20), "boja": Color(0.4, 0.33, 0.24)},
 ]

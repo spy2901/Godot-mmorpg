@@ -5,7 +5,7 @@
 extends Control
 
 const STIL := preload("res://Scripts/UI/minimap_stil.gd")
-const ZONE := preload("res://Scripts/World/zone.gd").ZONE
+const Z := preload("res://Scripts/World/zone.gd")
 const ZUM := [20.0, 40.0, 80.0] # m od centra do ivice (polovina stranice)
 
 var zum := 1           # indeks u ZUM
@@ -74,10 +74,11 @@ func _input(event: InputEvent) -> void:
 		_tocak = 0.0
 		postavi_zum(zum + smer)
 
-# Prozori preko minimape (inventar preko celog ekrana, dijalog): točkić tada ide kao i do sada
+# Prozori preko minimape (inventar preko celog ekrana, mapa sveta, dijalog): točkić tada ide kao i do sada
 func _pokrivena() -> bool:
 	var inv := get_node_or_null("../InventoryUI")
-	return (inv != null and inv.visible) or DialogueUI._active
+	var mapa := _igrac.get_node_or_null("MapaSveta") as CanvasLayer
+	return (inv != null and inv.visible) or (mapa != null and mapa.visible) or DialogueUI._active
 
 # N uključuje i isključuje; ne dok se kuca u polje za tekst
 func _unhandled_input(event: InputEvent) -> void:
@@ -120,7 +121,7 @@ func _draw() -> void:
 	var k: float = size.x / (2.0 * ZUM[zum]) # px po m
 	var u_px := func(p: Vector2) -> Vector2: return size / 2.0 + (p - c) * k
 	draw_rect(Rect2(Vector2.ZERO, size), STIL.BOJA_POZADINA)
-	for z in ZONE:
+	for z in Z.ZONE:
 		var o: Rect2 = z.oblast
 		draw_rect(Rect2(u_px.call(o.position), o.size * k), Color(z.boja, STIL.PROVIDNOST_ZONA))
 	for m in markeri():
@@ -139,14 +140,15 @@ func _draw() -> void:
 				draw_circle(p, STIL.MARKER, STIL.BOJA_QUEST)
 				draw_string(ThemeDB.fallback_font, p + Vector2(-2, -STIL.MARKER - 1), "!", HORIZONTAL_ALIGNMENT_LEFT, -1,
 					STIL.FONT_QUEST, STIL.BOJA_QUEST)
-	# strelica: napred je -basis.z lika, u (x, z) = (-sin yaw, -cos yaw); na minimapi x desno, z dole
-	var napred := Vector2(-sin(_igrac.rotation.y), -cos(_igrac.rotation.y))
-	var bok := Vector2(-napred.y, napred.x)
-	var s := size / 2.0
-	var strelica := PackedVector2Array([s + napred * STIL.STRELICA_DUZINA,
-		s - napred * STIL.STRELICA_DUZINA * 0.6 + bok * STIL.STRELICA_SIRINA,
-		s - napred * STIL.STRELICA_DUZINA * 0.3,
-		s - napred * STIL.STRELICA_DUZINA * 0.6 - bok * STIL.STRELICA_SIRINA])
-	draw_colored_polygon(strelica, STIL.BOJA_STRELICA)
-	draw_polyline(strelica + PackedVector2Array([strelica[0]]), STIL.BOJA_STRELICA_IVICA, 1.0)
+	var s := strelica(size / 2.0, _igrac.rotation.y, STIL.STRELICA_DUZINA, STIL.STRELICA_SIRINA)
+	draw_colored_polygon(s, STIL.BOJA_STRELICA)
+	draw_polyline(s + PackedVector2Array([s[0]]), STIL.BOJA_STRELICA_IVICA, 1.0)
 	draw_rect(Rect2(Vector2.ZERO, size), STIL.BOJA_IVICA, false, STIL.IVICA)
+
+# Strelica lika sa vrhom ka smeru gledanja (i za mapu sveta): napred je -basis.z, u (x, z) = (-sin yaw, -cos yaw); na
+# mapi x desno, z dole
+static func strelica(s: Vector2, yaw: float, duzina: float, sirina: float) -> PackedVector2Array:
+	var napred := Vector2(-sin(yaw), -cos(yaw))
+	var bok := Vector2(-napred.y, napred.x)
+	return PackedVector2Array([s + napred * duzina, s - napred * duzina * 0.6 + bok * sirina, s - napred * duzina * 0.3,
+		s - napred * duzina * 0.6 - bok * sirina])

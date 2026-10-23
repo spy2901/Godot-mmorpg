@@ -459,6 +459,9 @@ func _process(delta):
 	if je_mrtav:
 		_osvezi_smrt_ekran()  # odbrojavanje
 	elif Input.is_action_just_pressed("ui_inventory"):
+		var mapa = get_tree().get_first_node_in_group("mapa_sveta") # I zatvara mapu sveta (M zatvara inventar)
+		if mapa and mapa.visible:
+			mapa.zatvori()
 		inventory_ui.toggle()
 
 	vreme += delta

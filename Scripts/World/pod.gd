@@ -3,11 +3,11 @@
 @tool
 extends StaticBody3D
 
-const ZONE := preload("res://Scripts/World/zone.gd").ZONE
+const Z := preload("res://Scripts/World/zone.gd")
 const DEBLJINA := 0.1 # m = debljina kolizije (CollisionShape3D), centar na visini Pod-a: vrh mesh-a = vrh kolizije
 
 func _ready() -> void:
-	for z in ZONE:
+	for z in Z.ZONE:
 		var o: Rect2 = z.oblast
 		var mat := StandardMaterial3D.new()
 		mat.albedo_color = z.boja

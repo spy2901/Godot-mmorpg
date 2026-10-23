@@ -7,6 +7,7 @@
 [ext_resource type="PackedScene" path="res://Scenes/UI/ActionBar.tscn" id="5_abar"]
 [ext_resource type="PackedScene" path="res://Scenes/UI/OkvirCilja.tscn" id="6_cilj"]
 [ext_resource type="Script" path="res://Scripts/UI/minimapa.gd" id="7_mini"]
+[ext_resource type="Script" path="res://Scripts/UI/mapa_sveta.gd" id="8_mapa"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_7q7q3"]
 margin = 0.0
@@ -136,6 +137,9 @@ script = ExtResource("7_mini")
 [node name="ActionBar" parent="ui" instance=ExtResource("5_abar")]
 
 [node name="OkvirCilja" parent="ui" instance=ExtResource("6_cilj")]
+
+[node name="MapaSveta" type="CanvasLayer" parent="."]
+script = ExtResource("8_mapa")
 
 [node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="." unique_id=1105863601]
 replication_config = SubResource("SceneReplicationConfig_vgqql")
