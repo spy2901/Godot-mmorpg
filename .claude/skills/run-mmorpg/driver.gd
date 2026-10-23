@@ -4198,18 +4198,23 @@ func _server_minimapa() -> void:
 	var z := FileAccess.get_file_as_string(dir + "/mm_zahtev")
 	if z == "" or z == _mm_srv_zahtev: return
 	_mm_srv_zahtev = z
-	if z.ends_with(" spawn"):
+	var c := z.split(" ")
+	if c.size() == 2 and c[1] == "spawn":
 		for id in MM_GOBLINI:
 			_world().goblin_spawner.spawn({"vrsta": "goblin", "id": id, "pos": Vector3(MM_GOBLINI[id].x, 2, MM_GOBLINI[id].y)})
-	z = z.get_slice(" ", 0)
+	if c.size() == 4 and c[1] == "teleport": # MinimapaLik na (x, z): reset kao respawn, klijent ga prima kao snap
+		for p in _world().get_children():
+			if p.is_in_group("player") and p.ime_lika == "MinimapaLik":
+				p.server_postavi_poziciju(Vector3(float(c[2]), 1.16, float(c[3])), true)
+	z = c[0]
 	var d := []
 	for e in get_nodes_in_group("neprijatelj"):
 		if e.hp > 0: d.append("%s %.3f %.3f" % [e.get_parent().name, e.global_position.x, e.global_position.z])
 	_pisi("mm_server", z + "|" + ";".join(d))
 
-func _mm_server(spawn := false) -> Dictionary: # ime -> (x, z) po serveru
+func _mm_server(spawn := false, komanda := "") -> Dictionary: # ime -> (x, z) po serveru
 	_mm_br += 1
-	_pisi("mm_zahtev", str(_mm_br) + (" spawn" if spawn else ""))
+	_pisi("mm_zahtev", str(_mm_br) + (" spawn" if spawn else "") + (" " + komanda if komanda != "" else ""))
 	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/mm_server").begins_with(str(_mm_br) + "|"), 5.0)
 	var r := {}
 	var f := FileAccess.get_file_as_string(dir + "/mm_server").split("|")
@@ -4383,7 +4388,10 @@ func _mm_scenario(p) -> void:
 	var mapa = p.get_node_or_null("MapaSveta")
 	await _mapa_scenario(p, mapa)
 
-	# 7. HUD: minimapa, quest tracker i dugme bez preklapanja sa ostalim i unutar ekrana, 1280x720 i 1920x1080; sa shot=
+	# 7. ime zone uz minimapu
+	await _zona_ime_scenario(p, mm)
+
+	# 8. HUD: minimapa, quest tracker i dugme bez preklapanja sa ostalim i unutar ekrana, 1280x720 i 1920x1080; sa shot=
 	# screenshot-ovi: minimapa uključena, isključena i otvorena mapa sveta
 	var rlose := []
 	for vel in [Vector2i(1280, 720), Vector2i(1920, 1080)]:
@@ -4391,9 +4399,10 @@ func _mm_scenario(p) -> void:
 		for i in 5: await process_frame
 		rlose += _mm_raspored(p, mm, vel)
 		if shot != "":
-			for stanje in ["", "_zatvorena", "_mapa"]:
+			for stanje in ["", "_zatvorena", "_mapa", "_zona2"]:
 				mm.visible = stanje != "_zatvorena"
 				if mapa and stanje == "_mapa": mapa.otvori()
+				if stanje == "_zona2": await _mm_teleport(p, Vector2(30, -20)) # ime druge zone (prva je u ostalim slikama)
 				for i in 3: await process_frame
 				var putanja := "%s%s_%dx%d.png" % [shot, stanje, vel.x, vel.y]
 				var slika := root.get_viewport().get_texture().get_image()
@@ -4401,6 +4410,7 @@ func _mm_scenario(p) -> void:
 				print("[MM] screenshot %s (%dx%d) -> %s" % [vel, slika.get_width(), slika.get_height(), putanja])
 				if mapa: mapa.zatvori()
 			mm.visible = true
+			await _mm_teleport(p, Vector2(10, -20))
 	root.size = Vector2i(1280, 720)
 	_provera("minimapa_tracker_bez_preklapanja", rlose.is_empty(), "%s" % [rlose])
 	_mm_kraj = true
@@ -4590,6 +4600,9 @@ func _mm_raspored(p, mm, vel: Vector2i) -> Array:
 	var desno := {"minimapa": mm, "quest_tracker": hud.quest_tracker, "odustani": hud.quest_abandon_btn}
 	var ekran := Rect2(Vector2.ZERO, Vector2(vel))
 	var lose := []
+	var ime = mm.get("oznaka_zone") # ime zone je unutar minimape (pa ne preklapa ništa što ne preklapa ni ona)
+	if ime == null or not mm.get_global_rect().encloses(ime.get_global_rect()):
+		lose.append("%s ime zone %s nije unutar minimape %s" % [vel, ime.get_global_rect() if ime else "-", mm.get_global_rect()])
 	for a in desno:
 		var ra: Rect2 = desno[a].get_global_rect()
 		if not ekran.encloses(ra): lose.append("%s %s: %s van ekrana" % [vel, a, ra])
@@ -4598,3 +4611,64 @@ func _mm_raspored(p, mm, vel: Vector2i) -> Array:
 		for b in ostali:
 			if ra.intersects(ostali[b].get_global_rect()): lose.append("%s %s %s preklapa %s %s" % [vel, a, ra, b, ostali[b].get_global_rect()])
 	return lose
+
+# Server pomeri MinimapaLik-a na (x, z) (reset), klijent čeka da lik stigne
+func _mm_teleport(p, xz: Vector2) -> void:
+	await _mm_server(false, "teleport %s %s" % [xz.x, xz.y])
+	await _cekaj(func(): return Vector2(p.global_position.x, p.global_position.z).distance_to(xz) < 0.05, 5.0)
+	await create_timer(0.2).timeout # bar jedan ciklus minimape (20 Hz) i pad na pod
+
+# Ime zone uz minimapu: iz zone.gd za poziciju lika (x = 0, 24.9, 25.1), prazno van zona bez SCRIPT ERROR, nova zona bez
+# izmene minimape, sakriveno uz N.
+const ZONA_IME_PROVERE := ["zona_ime_prati_poziciju", "zona_ime_van_zona", "zona_ime_nova_zona_bez_koda", "zona_ime_sakriveno_uz_N"]
+func _zona_ime_scenario(p, mm) -> void:
+	var ime = mm.get("oznaka_zone")
+	if ime == null:
+		for i in ZONA_IME_PROVERE: _provera(i, false, "nema oznaka_zone na minimapi")
+		return
+	var Z = load(ZONE_SKRIPTA)
+	var tekst := func() -> String: return ime.text if ime.is_visible_in_tree() else "<sakriveno>"
+	var vidi := {}
+	for x in [0.0, 24.9, 25.1]:
+		await _mm_teleport(p, Vector2(x, -20))
+		vidi[x] = [tekst.call(), Vector2(p.global_position.x, p.global_position.z)]
+	var ocek := {0.0: tr(Z.ZONE[0].ime), 24.9: tr(Z.ZONE[0].ime), 25.1: tr(Z.ZONE[1].ime)}
+	_provera("zona_ime_prati_poziciju", vidi.keys().all(func(x): return vidi[x][0] == ocek[x] and absf(vidi[x][1].x - x) < 0.05),
+		"[ime, lik] po x %s, očekivano %s" % [vidi, ocek])
+
+	# van svih zona: ZONE privremeno samo zona daleko od lika
+	var greske0 := _script_greske()
+	var stare: Array = Z.ZONE
+	Z.ZONE = [{"ime": "Daleko", "oblast": Rect2(1000, 1000, 10, 10), "nivoi": Vector2i(1, 1), "boja": Color.BLACK}]
+	await create_timer(0.3).timeout
+	var van: String = tekst.call()
+	var crta: bool = Time.get_ticks_msec() - mm._crtano_ms < 200
+	Z.ZONE = stare
+	var greske: int = _script_greske() - greske0
+	_provera("zona_ime_van_zona", van == "" and crta and greske == 0,
+		"tekst van zona '%s', minimapa i dalje crta=%s, novih SCRIPT ERROR u logu %d" % [van, crta, greske])
+
+	# nova zona (iz testa, privremeno) na mestu lika, prva u listi: ime se pojavi bez izmene minimape, pa nestane
+	await create_timer(0.2).timeout
+	var pre: String = tekst.call()
+	var c := Vector2(p.global_position.x, p.global_position.z)
+	Z.ZONE.insert(0, {"ime": "Testland", "oblast": Rect2(c - Vector2(2, 2), Vector2(4, 4)), "nivoi": Vector2i(21, 25), "boja": Color(0.3, 0.3, 0.6)})
+	await create_timer(0.3).timeout
+	var sa_novom: String = tekst.call()
+	Z.ZONE.remove_at(0)
+	await create_timer(0.3).timeout
+	var posle: String = tekst.call()
+	_provera("zona_ime_nova_zona_bez_koda", sa_novom == "Testland" and posle == pre and pre != "",
+		"pre '%s', sa novom zonom na mestu lika '%s', posle uklanjanja '%s'" % [pre, sa_novom, posle])
+
+	# N isključuje minimapu i ime, ponovo N vraća oba
+	var n := []
+	for i in 2:
+		await _taster(KEY_N, 110)
+		n.append([mm.visible, ime.is_visible_in_tree(), ime.text])
+	_provera("zona_ime_sakriveno_uz_N", n[0][0] == false and n[0][1] == false and n[1][0] and n[1][1] and n[1][2] == pre,
+		"[minimapa, ime vidljivo, tekst] posle N, N: %s" % [n])
+
+# Broj SCRIPT ERROR linija u logu ove uloge (run.sh: $OUT/<uloga>.log)
+func _script_greske() -> int:
+	return FileAccess.get_file_as_string(dir + "/" + uloga + ".log").count("SCRIPT ERROR")
