@@ -23,10 +23,10 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 ```bash
 .claude/skills/run-mmorpg/run.sh            # sve headless, ~20 s
 .claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png,
-                                            # minimapa u prozoru + $OUT/minimapa{,_zatvorena,_mapa}_{1280x720,1920x1080}.png
+                                            # minimapa u prozoru + $OUT/minimapa{,_zatvorena,_mapa,_zona2}_{1280x720,1920x1080}.png
 ```
 
-Izlaz: putanja do logova, 214 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 214 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 218 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 218 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
 `potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `buff1.log`, `buff2.log`, `efekti1.log`, `efekti2.log`, `minimapa.log`, `stub.log`, `nameplate_*.png`, `minimapa_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
@@ -427,6 +427,14 @@ raspored, na ekranu, skalirane do margine `mapa_stil.MARGINA`; istaknuta samo zo
 21-25) u `ZONE`, `static var`: mapa je crta uz Darkwood i smanji razmeru, posle uklanjanja opet 2 zone). Bez implementacije
 (commit 9fe4880) pada svih 8; mutacije (Esc ne troši, klik prolazi kroz mapu, M bez provere dijaloga, I ne zatvara mapu,
 ručne granice, marker sa obrnutim z) obaraju svaka svoju proveru.
+Ime zone (ista uloga, posle mape): `minimapa.oznaka_zone`, Label uz gornju ivicu minimape (njeno dete: sakriva se sa njom),
+ime iz `zone.gd` (`zona_na` za poziciju lika, `tr()`), osvežava se u ciklusu minimape i menja tekst samo kad se ime promeni.
+Server drajver na `mm_zahtev "br teleport x z"` resetuje MinimapaLik-a na (x, 1.16, z). `zona_ime_prati_poziciju` (x 0 /
+24.9 / 25.1 na z -20: Meadowvale, Meadowvale, Darkwood), `zona_ime_van_zona` (`ZONE` privremeno samo zona daleko: tekst
+prazan, minimapa crta, bez novih `SCRIPT ERROR` u `$OUT/minimapa.log`), `zona_ime_nova_zona_bez_koda` (Testland umetnut kao
+prva zona oko lika: ime Testland, posle uklanjanja opet staro), `zona_ime_sakriveno_uz_N`; `minimapa_tracker_bez_preklapanja`
+traži i da je ime unutar minimape. Bez implementacije (main b81e99a) pada svih 5; mutacije: ime upisano ručno obara
+`nova_zona_bez_koda`, indeks van zona (`ZONE[5]`) obara `van_zona` (6 SCRIPT ERROR).
 
 Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
 igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u
