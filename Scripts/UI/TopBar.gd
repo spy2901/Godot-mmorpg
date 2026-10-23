@@ -22,6 +22,7 @@ var gold_label: Label
 
 # Buffovi (stanje drži server, ovde samo prikaz sa preostalim vremenom); izgled u buff_stil.gd
 const BUFF_STIL := preload("res://Scripts/UI/buff_stil.gd")
+const MINIMAP_STIL := preload("res://Scripts/UI/minimap_stil.gd")
 var buff_label: Label
 var debuff_label: Label
 
@@ -121,11 +122,10 @@ func _ready():
 	debuff_label = _napravi_buff_label("DebuffLabel", BUFF_STIL.BOJA_DEBUFF)
 	buff_kutija.add_child(debuff_label)
 
-	# Quest tracker (gore desno)
-	var screen_w = get_viewport().get_visible_rect().size.x
+	# Quest tracker (gore desno, ispod minimape)
+	var ispod_minimape: int = MINIMAP_STIL.MARGINA + MINIMAP_STIL.VELICINA + MINIMAP_STIL.RAZMAK_ISPOD
 	quest_tracker = Label.new()
-	quest_tracker.position = Vector2(screen_w - 340, 20)
-	quest_tracker.size = Vector2(320, 80)
+	_sidri_desno(quest_tracker, Rect2(340, ispod_minimape, 320, 80))
 	quest_tracker.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	quest_tracker.add_theme_font_size_override("font_size", 14)
 	quest_tracker.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
@@ -137,8 +137,7 @@ func _ready():
 
 	quest_abandon_btn = Button.new()
 	quest_abandon_btn.text = "✕ " + tr("Abandon")
-	quest_abandon_btn.position = Vector2(screen_w - 340, 100)
-	quest_abandon_btn.size = Vector2(110, 26)
+	_sidri_desno(quest_abandon_btn, Rect2(340, ispod_minimape + 80, 110, 26))
 	quest_abandon_btn.add_theme_font_size_override("font_size", 12)
 	quest_abandon_btn.add_theme_color_override("font_color", Color(1, 0.45, 0.4))
 	quest_abandon_btn.visible = false
@@ -274,6 +273,16 @@ func _osvezi_barove() -> void:
 
 func _osvezi_gold() -> void:
 	gold_label.text = "🪙 %d" % gold
+
+# Sidri c uz gornju desnu ivicu ekrana: r.position.x = px od desne ivice do levog ruba, r.position.y = px od vrha.
+# top_level: sidra se računaju prema ekranu, ne prema ovom malom Control-u.
+func _sidri_desno(c: Control, r: Rect2) -> void:
+	c.top_level = true
+	c.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	c.offset_left = -r.position.x
+	c.offset_right = -r.position.x + r.size.x
+	c.offset_top = r.position.y
+	c.offset_bottom = r.position.y + r.size.y
 
 func _osvezi_quest_tracker() -> void:
 	if not QuestManager.ima_aktivan_quest():
