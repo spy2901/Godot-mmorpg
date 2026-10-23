@@ -457,7 +457,7 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
   po pretnji, pa samo aggro 0 nije dovoljan). Test server ne pali spawn tačke scene (`hostuj()` bez
   `pokreni_spawn_tacke`), pa sveta neprijatelja nema; postoje samo oni koje drajver napravi. Borba nad igračima se
   testira komandama servera (`potion_cmd`, `cilj_cmd`).
-- **NPC stoji na (0, 2.7, -10)** (crna kapsula na screenshot-u) i blokira kretanje ka -z, pa se lik zaglavi zavisno od nasumičnog x spawna. Zato prva W faza ide ka +z.
+- **NPC stoji na (0, 2.1, -10)** (kapsula na podu) (crna kapsula na screenshot-u) i blokira kretanje ka -z, pa se lik zaglavi zavisno od nasumičnog x spawna. Zato prva W faza ide ka +z.
 - **Spawn je nasumičan** (±2 oko (0,1,0)), pa lik ponekad zakači prepreku. Tolerancije
   bočnog pomeranja su 1.5.
 - **`has_multiplayer_peer()` ne štiti od zatvorenog peer-a.** Vraća false samo za `null` peer;

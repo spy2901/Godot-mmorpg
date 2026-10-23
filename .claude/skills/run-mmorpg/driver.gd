@@ -4174,7 +4174,7 @@ func _provere_poda(sufiks: String, sve: bool) -> void:
 			zlose.append("granica x = 25: zona_na(25) = %d, zona_na(24.999) = %d" % [na, pre])
 	_provera("zone_jedan_izvor" + sufiks, Z != null and zlose.is_empty(),
 		"%s, pod %s; %s" % [zone.map(func(z): return "%s %s %s" % [z.ime, z.oblast, z.nivoi]), pod_r, zlose])
-	# boja: tačno jedan mesh poda iznad tačke, u boji njene zone (i tačno na x = 25)
+	# boja: tačno jedan mesh poda iznad tačke, u boji njene zone (i tačno na x = 25), vrh mesh-a = vrh kolizije
 	var blose := []
 	var mesh: Array = pod.find_children("*", "MeshInstance3D", true, false) if pod else []
 	for t2 in [Vector2(-20, -20), Vector2(0, 0), Vector2(24.9, 0), Vector2(25, 0), Vector2(25.1, 0), Vector2(50, 10), Vector2(74, 20)]:
@@ -4184,8 +4184,9 @@ func _provere_poda(sufiks: String, sve: bool) -> void:
 			return Rect2(a.position.x, a.position.z, a.size.x, a.size.z).has_point(t2))
 		var mat = ispod[0].get_active_material(0) if ispod.size() == 1 else null
 		var boja = mat.albedo_color if mat is BaseMaterial3D else null
-		if zi < 0 or boja == null or not boja.is_equal_approx(zone[zi].boja):
-			blose.append("%s: zona %d, mesh-eva %d, boja %s" % [t2, zi, ispod.size(), boja])
+		var vrh: float = (ispod[0].global_transform * ispod[0].get_aabb()).end.y if ispod.size() == 1 else INF
+		if zi < 0 or boja == null or not boja.is_equal_approx(zone[zi].boja) or absf(vrh - POD_Y) > 0.001:
+			blose.append("%s: zona %d, mesh-eva %d, boja %s, vrh mesh-a %.3f" % [t2, zi, ispod.size(), boja, vrh])
 	_provera("pod_boja_po_zoni" + sufiks, Z != null and blose.is_empty(), "mesh-eva poda %d; %s" % [mesh.size(), blose])
 
 # server: na zahtev (dir/mm_zahtev = "broj [spawn]") upiše žive neprijatelje "broj|ime x z;..." u dir/mm_server; spawn

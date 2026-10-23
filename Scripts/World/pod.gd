@@ -4,7 +4,7 @@
 extends StaticBody3D
 
 const ZONE := preload("res://Scripts/World/zone.gd").ZONE
-const DEBLJINA := 1.0 # m, centar na visini Pod-a (kao stari mesh)
+const DEBLJINA := 0.1 # m = debljina kolizije (CollisionShape3D), centar na visini Pod-a: vrh mesh-a = vrh kolizije
 
 func _ready() -> void:
 	for z in ZONE:
