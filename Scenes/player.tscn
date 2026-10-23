@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://cljkfnkgprjv5" path="res://Scenes/Inventory/InventoryUI.tscn" id="4_3smsa"]
 [ext_resource type="PackedScene" path="res://Scenes/UI/ActionBar.tscn" id="5_abar"]
 [ext_resource type="PackedScene" path="res://Scenes/UI/OkvirCilja.tscn" id="6_cilj"]
+[ext_resource type="Script" path="res://Scripts/UI/minimapa.gd" id="7_mini"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_7q7q3"]
 margin = 0.0
@@ -126,6 +127,9 @@ offset_bottom = 40.0
 
 [node name="Inventory" type="Label" parent="ui/Panel/VBoxContainer" unique_id=1098072043]
 layout_mode = 2
+
+[node name="Minimapa" type="Control" parent="ui"]
+script = ExtResource("7_mini")
 
 [node name="InventoryUI" parent="ui" unique_id=1342373889 instance=ExtResource("4_3smsa")]
 
