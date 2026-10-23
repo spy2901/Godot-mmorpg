@@ -22,13 +22,14 @@ prijavljen kao `TestLik` preko stub-a, testira napitke). Drajver sam proverava r
 
 ```bash
 .claude/skills/run-mmorpg/run.sh            # sve headless, ~20 s
-.claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png
+.claude/skills/run-mmorpg/run.sh --window   # observer u prozoru 1280x720 + $OUT/nameplate_{zeleno,zuto,crveno,mrtav}.png,
+                                            # minimapa u prozoru + $OUT/minimapa_{1280x720,1920x1080}.png
 ```
 
-Izlaz: putanja do logova, 196 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 196 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
+Izlaz: putanja do logova, 206 linija `PASS`/`FAIL` i linija `[M] korekcije ...` (broj glatkih/snap korekcija, prosečna/max greška predikcije). Exit 0 = svih 206 prošlo (WARN se računa kao prošao). `run.sh` pokreće movera i potion klijenta tek kad observer ispiše
 `OBSERVER_SPREMAN` (prozorski observer kasni ~8 s, a mora da vidi movera od početka). Logovi su u
 `$OUT` (podrazumevano `$TMPDIR/run-mmorpg`): `server.log`, `observer.log`, `mover.log`,
-`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `buff1.log`, `buff2.log`, `efekti1.log`, `efekti2.log`, `stub.log`, `nameplate_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
+`potion.log`, `raspored1.log`, `raspored2.log`, `cilj.log`, `drugi.log`, `ai1.log`, `ai2.log`, `oprema1.log`, `oprema2.log`, `oprema3.log`, `napredak1.log`, `napredak2.log`, `quest1.log`, `quest2.log`, `quest3.log`, `buff1.log`, `buff2.log`, `efekti1.log`, `efekti2.log`, `minimapa.log`, `stub.log`, `nameplate_*.png`, `minimapa_*.png`. Postavi `OUT=<scratchpad>/run1`: Read alat ne sme da čita `$TMPDIR` van radnih
 direktorijuma (`blockReadsOutsideWorkingDirectories`), pa screenshot iz podrazumevane putanje ne možeš da pogledaš.
 
 Šta mover radi (vreme od pojave sopstvenog lika): 4–6 s drži W (yaw = PI, ka +z); 7–8 s yaw = PI/2 + W;
@@ -392,6 +393,28 @@ dalje osvežava), `efekti_hud_i_tooltip`, `antidote_tooltip_jedan_red` ("Click: 
 cooldown 5 s", jedan red). Svih 21 pada bez implementacije (provereno: kod igre sa main-a); mutacije bez presretanja u
 `_server_umri`, otrov kroz oklop i vaskrsenje koje ostavlja ostale buffove obaraju svoje provere.
 
+Zone, pod i minimapa (grana zone-mapa). `Scripts/World/zone.gd` je jedina lista zona (ime kroz `tr()`, `oblast` Rect2 u
+(x, z), nivoi, boja; granica poluotvorena: x = 25 je zona 2). Pod: jedna kolizija (ne dira se) i po jedan vizuelni mesh po
+zoni (`pod.gd`). Pre mreže (scena) klijent uloge `minimapa` proverava `zone_jedan_izvor` (bez preklapanja, tačno pokrivaju
+pod, svaka spawn tačka u zoni, nivoi = min/max spawn tačaka, `zona_na(25)` = zona 2, `zona_na(24.999)` = zona 1),
+`pod_boja_po_zoni` (tačno jedan mesh iznad tačke, u boji zone, i na x = 25) i `pod_kolizija_nepromenjena` (jedan
+CollisionShape3D, transformacija kao pre zona, zrak u mreži tačaka preko x = 25 pogađa Pod na y 1.096094); server istu
+koliziju kao `pod_kolizija_nepromenjena_server`. `samo_pod=1` uradi samo provere poda i izađe (mutacije bez servera:
+kolizija podeljena na dve zone pada). Uloga `minimapa` (`MinimapaLik` na (10, -20), aktivan quest; `run.sh` je pokreće
+poslednju u throttle lancu, tek kad se završi i buff/efekti/brzina lanac, prozor drajvera 1280x720, sa `--window` u prozoru i `shot=`):
+`minimapa_markeri_server` (server drajver na `mm_zahtev "br spawn"` napravi test goblin_990 (4, -14) i goblin_991 (60, -18),
+pa na `mm_zahtev` upiše žive neprijatelje u `mm_server`; markeri neprijatelja = server ±0,5 m, ponavlja do 10 s; tuđi
+igrači = vidljivi tuđi likovi; 4 quest NPC-a i trgovac; po zumu 20/40/80 m [Village Elder, goblin_990, goblin_991] =
+[ne, da, ne] / [da, da, ne] / [da, da, da]), `minimapa_skrol_zumira_minimapu` (točkić pritisak + otpuštanje u centru
+minimape: 40 -> 20 -> 80 -> ostaje 80, factor 0,4 dva puta bez promene pa treći put jedan nivo, oznaka "40 m",
+`_kamera_poz` isti), `skrol_van_minimape_zumira_kameru` (sredina ekrana i iznad minimape sa otvorenim inventarom: kamera
+zumira, zum minimape isti), `minimapa_N` (N, N, N sa fokusom u LineEdit-u: [false, true, true]), `minimapa_ne_menja_kretanje`
+(hod 2 s ka +z sa vidljivom minimapom: 0 korekcija, hod > 8 m, klijent = server < 0,05 m), `minimapa_tracker_bez_preklapanja`
+(1280x720 i 1920x1080: minimapa, quest tracker i "Abandon" unutar ekrana, bez preklapanja međusobno i sa okvirom cilja,
+action barom, imenom, HP/mana/XP, zlatom i buffovima). Bez implementacije (kod igre iz main, drajver grane) pada svih 8
+osim dve provere kolizije (one čuvaju postojeće stanje; mutacije: kolizija u dva oblika, minimapa ne troši točkić, troši ga
+svuda, bez filtera po radijusu, stari položaj trackera, svaka obara svoju proveru).
+
 Tekstovi (`proveri_tekstove.py`, bez Godot-a, `run.sh` ga pokreće na kraju; log `$OUT/tekstovi.log`). Svi tekstovi koje
 igrač vidi idu kroz `tr()` iz `translations/teksti.csv` (`keys,en,sr`, ključ = engleski tekst, podrazumevani jezik en u
 `GameState.JEZIK`); server šalje engleske ključeve, klijent ih prevodi pri prikazu. `run.sh` na početku radi
@@ -421,6 +444,11 @@ MultiplayerTest → Hostuj/Pridruži se. Dedicated server je export sa feature t
 - **Prozorski klijent kasni ~8 s** (Metal/shaderi). Zato se uloge ne usklađuju po satu:
   server se gasi kad svi peer-ovi odu, observer kreće posle yaw faze movera, a mover meri
   vreme od pojave svog lika.
+- **Točkić: kamera reaguje na pritisak I otpuštanje** (`Player._input` gleda samo `button_index`), pa jedan zarez točkića
+  pomera kameru dva koraka. Minimapa zato troši oba događaja iznad sebe. Test točkića šalje oba (kao pravi točkić);
+  stari `kamera_fp_pa_nazad_isti_ugao_i_offset` šalje samo pritisak na (0, 0) (van minimape).
+- **Hover (`gui_get_hovered_control`) je headless null** i posle `parse_input_event` pokreta miša: minimapa zato proverava
+  pravougaonik i da li je pokrivena (inventar, dijalog), ne hover.
 - **Snimanje screenshot-a koči frame** (GPU readback). Zato prozor ima observer (ne mover): zastoj
   u moveru bi skratio W fazu i `W_2s_napred` bi pao (-8 umesto -10).
 - **Headless ne može screenshot** (dummy renderer). Za sliku koristi `--window`.
