@@ -108,6 +108,8 @@ func _initialize():
 			_izgubi_reset = true
 		if a.begins_with("korak="):
 			_korak = int(a.substr(6))
+		if a == "samo_pod=1":
+			_samo_pod = true
 		if a.begins_with("port="):
 			_port = int(a.substr(5))
 		if a.begins_with("skok="):
@@ -200,6 +202,10 @@ func _process(d):
 			elif uloga == "throttle": # ThrottleLik preko udp_proksi.py: skok RTT-a koji ENet vidi
 				root.get_node("GameState").token = "throttle-token"
 				root.get_node("GameState").ime_igraca = "ThrottleLik"
+			elif uloga == "minimapa": # MinimapaLik: minimapa, zum, N, HUD (prozor kao u igri, ne 64x64)
+				root.size = Vector2i(1280, 720)
+				root.get_node("GameState").token = "minimapa-token"
+				root.get_node("GameState").ime_igraca = "MinimapaLik"
 			elif uloga == "raspored":
 				root.get_node("GameState").token = "raspored-token"
 				root.size = Vector2i(1280, 720) # headless je 64x64: traka bi virila van prozora, a okvir cilja ležao preko nje
@@ -212,6 +218,10 @@ func _process(d):
 		return false
 	if _faza == "scena":
 		if t < 1.0: return false
+		if uloga == "server": _provere_poda("_server", false)
+		if uloga == "minimapa":
+			_provere_poda("", true)
+			if _samo_pod: return true
 		_faza = "mreza"
 		if uloga == "server": _nm().hostuj()
 		else:
@@ -231,6 +241,7 @@ func _process(d):
 		"raspored": return _raspored()
 		"cilj": return _cilj()
 		"drugi": return _uloga_drugi()
+		"minimapa": return _uloga_minimapa()
 		"ai": return _uloga_ai()
 		"oprema": return _uloga_oprema()
 		"napredak": return _uloga_napredak()
@@ -328,6 +339,7 @@ func _server(log: bool) -> bool:
 	_server_throttle()
 	_server_prvi()
 	_server_odjava()
+	_server_minimapa()
 	_server_predmet_odjavljenom()
 	# komande od potion klijenta: "br steta N" / "br ubij"
 	var cmd := FileAccess.get_file_as_string(dir + "/potion_cmd") if dir != "" else ""
@@ -4097,3 +4109,303 @@ func _server_odjava() -> void:
 	p.server_isplati_xp(5, "test_odjava")
 	p.server_isplati_loot(["apple"])
 	_pisi("odjava_poslato", "1")
+
+# ---------------------------------------------------------------- ZONE, POD I MINIMAPA (uloga minimapa, MinimapaLik na (10, -20))
+# Pod i zone (scena, pre mreže): klijent proverava zone_jedan_izvor, pod_boja_po_zoni i pod_kolizija_nepromenjena, server
+# još jednom koliziju (ista scena, predikcija zavisi od nje). samo_pod=1: samo provere poda pa izlaz (mutacije bez servera).
+# Minimapa: markeri prema serveru (server drajver na zahtev dir/mm_zahtev upiše žive neprijatelje u dir/mm_server), zum
+# točkićem iznad minimape (kamera ostaje) i van nje (minimapa ostaje), N, kretanje bez korekcija, HUD bez preklapanja u
+# 1280x720 i 1920x1080. Sa shot= (run.sh --window) i screenshot-ovi $OUT/minimapa_<velicina>.png.
+
+const ZONE_SKRIPTA := "res://Scripts/World/zone.gd"
+const POD_Y := 1.096094 # m: vrh kolizije poda pre zona (zrak); mora ostati isti
+var _samo_pod := false
+var _mm_krenuo := false
+var _mm_kraj := false
+var _mm_br := 0
+
+func _provere_poda(sufiks: String, sve: bool) -> void:
+	var pod: Node3D = current_scene.get_node_or_null("Pod")
+	var Z = load(ZONE_SKRIPTA) if ResourceLoader.exists(ZONE_SKRIPTA) else null
+	var zone: Array = Z.ZONE if Z else []
+	var oblici: Array = (pod.find_children("*", "CollisionShape3D", true, false) + pod.find_children("*", "CollisionPolygon3D", true, false)) if pod else []
+	var cs: CollisionShape3D = oblici[0] if oblici.size() == 1 and oblici[0] is CollisionShape3D else null
+	var oblik_ok: bool = cs != null and cs.shape is BoxShape3D and cs.shape.size == Vector3.ONE \
+		and cs.transform.is_equal_approx(Transform3D(Basis.from_scale(Vector3(100, 0.1, 50)), Vector3.ZERO)) \
+		and pod.transform.is_equal_approx(Transform3D(Basis.IDENTITY, Vector3(25, 1.0460923, 0)))
+	var lose := []
+	for x in [-24.5, 0.0, 24.9, 25.0, 25.1, 50.0, 74.5]:
+		for z in [-24.5, 0.0, 24.5]:
+			var h := root.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(Vector3(x, 20, z), Vector3(x, -20, z)))
+			if h.get("collider") != pod or absf(h.get("position", Vector3.INF).y - POD_Y) > 0.001:
+				lose.append("(%s, %s): %s" % [x, z, h.get("position")])
+	_provera("pod_kolizija_nepromenjena" + sufiks, oblik_ok and lose.is_empty(),
+		"oblika %d, oblik i transformacija kao pre zona=%s, zraci van y %.6f: %s" % [oblici.size(), oblik_ok, POD_Y, lose])
+	if not sve: return
+	# zone: bez preklapanja, tačno pokrivaju pod, svaka spawn tačka u zoni, nivoi = spawn tačke, x = 25 pripada zoni 2
+	var zlose := []
+	if Z == null: zlose.append("nema " + ZONE_SKRIPTA)
+	var s: Vector3 = cs.global_transform.basis.get_scale() if cs else Vector3.ZERO
+	var pod_r := Rect2(cs.global_position.x - s.x / 2, cs.global_position.z - s.z / 2, s.x, s.z) if cs else Rect2()
+	var povrsina := 0.0
+	for i in zone.size():
+		var o: Rect2 = zone[i].oblast
+		povrsina += o.get_area()
+		if not pod_r.encloses(o): zlose.append("%s van poda" % zone[i].ime)
+		for j in range(i + 1, zone.size()):
+			if o.intersects(zone[j].oblast): zlose.append("%s preklapa %s" % [zone[i].ime, zone[j].ime])
+	if Z and not is_equal_approx(povrsina, pod_r.get_area()): zlose.append("zone pokrivaju %.0f od %.0f m2 poda" % [povrsina, pod_r.get_area()])
+	var nivoi := {}
+	for tacka in get_nodes_in_group("spawn_tacka"):
+		var g: Vector3 = tacka.global_position
+		var zi: int = Z.zona_na(g.x, g.z) if Z else -1
+		if zi < 0:
+			zlose.append("%s van zona" % tacka.name)
+			continue
+		var mm: Array = nivoi.get(zi, [tacka.nivo, tacka.nivo])
+		nivoi[zi] = [mini(mm[0], tacka.nivo), maxi(mm[1], tacka.nivo)]
+	for i in zone.size():
+		var sp = nivoi.get(i, [0, 0])
+		if Vector2i(sp[0], sp[1]) != zone[i].nivoi: zlose.append("%s nivoi %s, spawn tačke %s" % [zone[i].ime, zone[i].nivoi, sp])
+	if Z:
+		var na: int = Z.zona_na(25.0, 0.0)
+		var pre: int = Z.zona_na(24.999, 0.0)
+		if na < 0 or zone[na].oblast.position.x != 25.0 or pre < 0 or zone[pre].oblast.end.x != 25.0:
+			zlose.append("granica x = 25: zona_na(25) = %d, zona_na(24.999) = %d" % [na, pre])
+	_provera("zone_jedan_izvor" + sufiks, Z != null and zlose.is_empty(),
+		"%s, pod %s; %s" % [zone.map(func(z): return "%s %s %s" % [z.ime, z.oblast, z.nivoi]), pod_r, zlose])
+	# boja: tačno jedan mesh poda iznad tačke, u boji njene zone (i tačno na x = 25)
+	var blose := []
+	var mesh: Array = pod.find_children("*", "MeshInstance3D", true, false) if pod else []
+	for t2 in [Vector2(-20, -20), Vector2(0, 0), Vector2(24.9, 0), Vector2(25, 0), Vector2(25.1, 0), Vector2(50, 10), Vector2(74, 20)]:
+		var zi: int = Z.zona_na(t2.x, t2.y) if Z else -1
+		var ispod := mesh.filter(func(m):
+			var a: AABB = m.global_transform * m.get_aabb()
+			return Rect2(a.position.x, a.position.z, a.size.x, a.size.z).has_point(t2))
+		var mat = ispod[0].get_active_material(0) if ispod.size() == 1 else null
+		var boja = mat.albedo_color if mat is BaseMaterial3D else null
+		if zi < 0 or boja == null or not boja.is_equal_approx(zone[zi].boja):
+			blose.append("%s: zona %d, mesh-eva %d, boja %s" % [t2, zi, ispod.size(), boja])
+	_provera("pod_boja_po_zoni" + sufiks, Z != null and blose.is_empty(), "mesh-eva poda %d; %s" % [mesh.size(), blose])
+
+# server: na zahtev (dir/mm_zahtev = "broj [spawn]") upiše žive neprijatelje "broj|ime x z;..." u dir/mm_server; spawn
+# prvo napravi test neprijatelje MM_GOBLINI (spawn tačke drajver servera ne pali, a ostale uloge ih ubiju ili ne prave)
+const MM_GOBLINI := {990: Vector2(4, -14), 991: Vector2(60, -18)} # 7 m od MinimapaLik-a; zona 2 (samo na 80 m)
+var _mm_srv_zahtev := ""
+func _server_minimapa() -> void:
+	if dir == "" or _world() == null: return
+	var z := FileAccess.get_file_as_string(dir + "/mm_zahtev")
+	if z == "" or z == _mm_srv_zahtev: return
+	_mm_srv_zahtev = z
+	if z.ends_with(" spawn"):
+		for id in MM_GOBLINI:
+			_world().goblin_spawner.spawn({"vrsta": "goblin", "id": id, "pos": Vector3(MM_GOBLINI[id].x, 2, MM_GOBLINI[id].y)})
+	z = z.get_slice(" ", 0)
+	var d := []
+	for e in get_nodes_in_group("neprijatelj"):
+		if e.hp > 0: d.append("%s %.3f %.3f" % [e.get_parent().name, e.global_position.x, e.global_position.z])
+	_pisi("mm_server", z + "|" + ";".join(d))
+
+func _mm_server(spawn := false) -> Dictionary: # ime -> (x, z) po serveru
+	_mm_br += 1
+	_pisi("mm_zahtev", str(_mm_br) + (" spawn" if spawn else ""))
+	await _cekaj(func(): return FileAccess.get_file_as_string(dir + "/mm_server").begins_with(str(_mm_br) + "|"), 5.0)
+	var r := {}
+	var f := FileAccess.get_file_as_string(dir + "/mm_server").split("|")
+	if f.size() == 2 and f[1] != "":
+		for s in f[1].split(";"):
+			var c := s.split(" ")
+			r[c[0]] = Vector2(float(c[1]), float(c[2]))
+	return r
+
+func _uloga_minimapa() -> bool:
+	var p = _moj()
+	if not _mm_krenuo and p and p.get_node("ui/Control")._ucitano:
+		_mm_krenuo = true
+		_mm_scenario(p)
+	return _mm_kraj or t > 2 * MAX_T or (_mm_krenuo and p == null)
+
+# Markeri prema serveru i sceni; "" = poklapaju se
+func _mm_markeri_greske(p, mm, srv: Dictionary) -> Array:
+	var lose := []
+	var mk: Array = mm.markeri()
+	var nep := {}
+	for m in mk:
+		if m[0] == "neprijatelj": nep[str(m[2].get_parent().name)] = m[1]
+	var c := Vector2(p.global_position.x, p.global_position.z)
+	var rad: float = mm.ZUM[mm.zum]
+	for ime in srv:
+		var u_polju: bool = absf(srv[ime].x - c.x) <= rad - 0.5 and absf(srv[ime].y - c.y) <= rad - 0.5
+		if u_polju and (not nep.has(ime) or nep[ime].distance_to(srv[ime]) > 0.5):
+			lose.append("%s server %s, minimapa %s" % [ime, srv[ime], nep.get(ime, "-")])
+	for ime in nep:
+		if not srv.has(ime): lose.append("%s nije živ na serveru" % ime)
+	for m in mk:
+		if absf(m[1].x - c.x) > rad or absf(m[1].y - c.y) > rad: lose.append("%s %s van polja %.0f m" % [m[0], m[1], rad])
+		if m[1].distance_to(Vector2(m[2].global_position.x, m[2].global_position.z)) > 0.001: lose.append("%s nije na poziciji čvora" % m[0])
+	var tudji := get_nodes_in_group("player").filter(func(i): return i != p and i.is_visible_in_tree() and absf(i.global_position.x - c.x) <= rad and absf(i.global_position.z - c.y) <= rad)
+	var igraci := mk.filter(func(m): return m[0] == "igrac").map(func(m): return m[2])
+	if igraci.size() != tudji.size() or tudji.any(func(i): return not i in igraci): lose.append("igrači %s, vidljivi tuđi %s" % [igraci.map(func(i): return i.name), tudji.map(func(i): return i.name)])
+	var npc := get_nodes_in_group("npc").filter(func(n): return absf(n.global_position.x - c.x) <= rad and absf(n.global_position.z - c.y) <= rad)
+	for n in npc:
+		var v: String = "quest" if n.interaction_type == n.InteractionType.QUEST_GIVER else "npc"
+		if not mk.any(func(m): return m[2] == n and m[0] == v): lose.append("%s nema marker %s" % [n.npc_name, v])
+	return lose
+
+func _mm_scenario(p) -> void:
+	var mm = p.get_node_or_null("ui/Minimapa")
+	var ima: bool = mm != null and mm.has_method("markeri")
+	p.rotation.y = PI # gleda ka +z (yaw ide serveru sa unosima)
+	await create_timer(1.5).timeout # tuđi likovi i neprijatelji stignu (prvi snimci)
+	if not ima:
+		for ime in ["minimapa_markeri_server", "minimapa_skrol_zumira_minimapu", "skrol_van_minimape_zumira_kameru", "minimapa_N",
+				"minimapa_ne_menja_kretanje", "minimapa_tracker_bez_preklapanja"]:
+			_provera(ime, false, "nema ui/Minimapa (markeri)")
+		_mm_kraj = true
+		return
+
+	# 1. markeri = server (80 m: ceo pod; test goblini MM_GOBLINI), pa radijus: Village Elder (-11, -9) je 21 m po x od
+	# MinimapaLik-a, van polja na 20 m, u polju na 40 m; goblin_991 (60, -18) samo na 80 m
+	var lose := []
+	var srv: Dictionary = await _mm_server(true)
+	await _cekaj(func(): return MM_GOBLINI.keys().all(func(id): return _nep("goblin_%d" % id) != null), 5.0)
+	await create_timer(1.0).timeout # padnu na pod, pozicija stigne klijentu
+	var kraj := Time.get_ticks_msec() + 10000
+	while true: # neprijatelj ume da umre ili se rodi između čitanja servera i markera: ponovi do roka
+		mm.postavi_zum(2)
+		srv = await _mm_server()
+		lose = _mm_markeri_greske(p, mm, srv)
+		if lose.is_empty() or Time.get_ticks_msec() > kraj: break
+		await create_timer(0.5).timeout
+	var vrste := {}
+	for m in mm.markeri(): vrste[m[0]] = vrste.get(m[0], 0) + 1
+	var ima_marker := func(ime: String) -> bool: return mm.markeri().any(func(m):
+		return (m[0] in ["npc", "quest"] and m[2].npc_name == ime) or (m[0] == "neprijatelj" and str(m[2].get_parent().name) == ime))
+	var vidi := {}
+	for i in 3:
+		mm.postavi_zum(i)
+		if i == 0: lose += _mm_markeri_greske(p, mm, srv)
+		vidi[mm.ZUM[i]] = [ima_marker.call("Village Elder"), ima_marker.call("goblin_990"), ima_marker.call("goblin_991")]
+	_provera("minimapa_markeri_server", lose.is_empty() and srv.has("goblin_990") and srv.has("goblin_991") and vrste.get("igrac", 0) >= 1
+		and vrste.get("quest", 0) == 4 and vrste.get("npc", 0) == 1 and vidi == {20.0: [false, true, false], 40.0: [true, true, false], 80.0: [true, true, true]},
+		"neprijatelja na serveru %d, markera na 80 m %s; [Village Elder, goblin_990, goblin_991] po zumu %s; greške %s" % [srv.size(), vrste, vidi, lose])
+
+	# 2. točkić iznad minimape: zum minimape (jedan nivo po koraku, mali koraci do praga), kamera ostaje
+	var tocak := func(poz: Vector2, gore: bool, faktor := 1.0) -> void:
+		for dole in [true, false]: # kao pravi točkić: pritisak pa otpuštanje (kamera reaguje na oba)
+			var e := InputEventMouseButton.new()
+			e.button_index = MOUSE_BUTTON_WHEEL_UP if gore else MOUSE_BUTTON_WHEEL_DOWN
+			e.pressed = dole
+			e.factor = faktor
+			e.position = poz
+			e.global_position = poz
+			Input.parse_input_event(e)
+		await process_frame
+		await process_frame
+	var centar: Vector2 = mm.get_global_rect().get_center()
+	mm.postavi_zum(1)
+	var kam0: Vector3 = p._kamera_poz
+	var z := []
+	await tocak.call(centar, true)          # 40 -> 20
+	z.append(mm.zum)
+	await tocak.call(centar, false)
+	await tocak.call(centar, false)         # -> 80
+	z.append(mm.zum)
+	await tocak.call(centar, false)         # ostaje 80
+	z.append(mm.zum)
+	await tocak.call(centar, true, 0.4)
+	await tocak.call(centar, true, 0.4)     # 0.8: ispod praga
+	z.append(mm.zum)
+	await tocak.call(centar, true, 0.4)     # 1.2: jedan nivo
+	z.append(mm.zum)
+	_provera("minimapa_skrol_zumira_minimapu", z == [0, 2, 2, 2, 1] and p._kamera_poz == kam0 and mm._oznaka_zuma.text == "40 m",
+		"zum po koracima %s (očekivano [0, 2, 2, 2, 1]), oznaka '%s', kamera pre %s posle %s" % [z, mm._oznaka_zuma.text, kam0, p._kamera_poz])
+
+	# 3. točkić van minimape (sredina ekrana) i preko otvorenog inventara: kamera kao do sada, minimapa ostaje
+	var svet := Vector2(root.size) * Vector2(0.5, 0.6)
+	var zum0: int = mm.zum
+	await tocak.call(svet, true)
+	var kam_svet: Vector3 = p._kamera_poz
+	await tocak.call(svet, false)
+	var vracena: bool = p._kamera_poz.is_equal_approx(kam0)
+	var inv = p.get_node("ui/InventoryUI")
+	inv.toggle()
+	await tocak.call(centar, true)
+	var kam_inv: Vector3 = p._kamera_poz
+	await tocak.call(centar, false)
+	inv.toggle()
+	_provera("skrol_van_minimape_zumira_kameru", kam_svet.z < kam0.z and vracena and kam_inv.z < kam0.z and p._kamera_poz.is_equal_approx(kam0) and mm.zum == zum0,
+		"kamera z %.3f -> van minimape %.3f -> nazad %s; preko inventara %.3f; zum minimape %d -> %d" % [kam0.z, kam_svet.z, vracena, kam_inv.z, zum0, mm.zum])
+
+	# 4. N uključuje i isključuje; ne dok fokus ima polje za tekst
+	var taster_n := func() -> void:
+		for dole in [true, false]:
+			var e := InputEventKey.new()
+			e.keycode = KEY_N
+			e.physical_keycode = KEY_N
+			e.unicode = 110 if dole else 0
+			e.pressed = dole
+			Input.parse_input_event(e)
+		await process_frame
+		await process_frame
+	var v := []
+	await taster_n.call()
+	v.append(mm.visible)
+	await taster_n.call()
+	v.append(mm.visible)
+	var polje := LineEdit.new()
+	p.get_node("ui").add_child(polje)
+	polje.grab_focus()
+	await process_frame
+	await taster_n.call()
+	v.append(mm.visible)
+	var otkucano := polje.text
+	polje.queue_free()
+	_provera("minimapa_N", v == [false, true, true], "vidljiva posle N, N, N u polju za tekst: %s (očekivano [false, true, true]), polje '%s'" % [v, otkucano])
+
+	# 5. hod 2 s ka +z sa minimapom: bez korekcija predikcije, klijent = server posle zaustavljanja
+	mm.visible = true
+	var k0: int = p.korekcije_glatke + p.korekcije_snap
+	var crtanja0: int = mm._crtano_ms
+	var od: Vector3 = p.global_position
+	Input.action_press("ui_up")
+	await create_timer(2.0).timeout
+	Input.action_release("ui_up")
+	await create_timer(1.0).timeout
+	var kor: int = p.korekcije_glatke + p.korekcije_snap - k0
+	var hod: float = od.distance_to(p.global_position)
+	var raz: float = p.global_position.distance_to(p.server_poz)
+	_provera("minimapa_ne_menja_kretanje", mm.visible and mm._crtano_ms != crtanja0 and kor == 0 and hod > 8.0 and raz < 0.05,
+		"minimapa vidljiva=%s crtana=%s, korekcija %d, hod %.2f m, razlika klijent/server %.3f m" % [mm.visible, mm._crtano_ms != crtanja0, kor, hod, raz])
+
+	# 6. HUD: minimapa, quest tracker i dugme bez preklapanja sa ostalim i unutar ekrana, 1280x720 i 1920x1080
+	var rlose := []
+	for vel in [Vector2i(1280, 720), Vector2i(1920, 1080)]:
+		root.size = vel
+		for i in 5: await process_frame
+		rlose += _mm_raspored(p, mm, vel)
+		if shot != "":
+			var putanja := "%s_%dx%d.png" % [shot, vel.x, vel.y]
+			var slika := root.get_viewport().get_texture().get_image()
+			slika.save_png(putanja)
+			print("[MM] screenshot %s (%dx%d) -> %s" % [vel, slika.get_width(), slika.get_height(), putanja])
+	root.size = Vector2i(1280, 720)
+	_provera("minimapa_tracker_bez_preklapanja", rlose.is_empty(), "%s" % [rlose])
+	_mm_kraj = true
+
+func _mm_raspored(p, mm, vel: Vector2i) -> Array:
+	var hud = p.get_node("ui/Control")
+	var ostali := {"okvir_cilja": p.get_node("ui/OkvirCilja").okvir, "action_bar": p.get_node("ui/ActionBar").get_child(0),
+		"ime": hud.label_ime, "hp": hud.hp_bar, "mana": hud.mana_bar, "xp": hud.xp_bar, "zlato": hud.gold_label,
+		"buffovi": hud.buff_label.get_parent()}
+	var desno := {"minimapa": mm, "quest_tracker": hud.quest_tracker, "odustani": hud.quest_abandon_btn}
+	var ekran := Rect2(Vector2.ZERO, Vector2(vel))
+	var lose := []
+	for a in desno:
+		var ra: Rect2 = desno[a].get_global_rect()
+		if not ekran.encloses(ra): lose.append("%s %s: %s van ekrana" % [vel, a, ra])
+		for b in desno:
+			if a < b and ra.intersects(desno[b].get_global_rect()): lose.append("%s %s preklapa %s" % [vel, a, b])
+		for b in ostali:
+			if ra.intersects(ostali[b].get_global_rect()): lose.append("%s %s %s preklapa %s %s" % [vel, a, ra, b, ostali[b].get_global_rect()])
+	return lose

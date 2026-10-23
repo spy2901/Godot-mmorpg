@@ -236,6 +236,9 @@ PLAYERS["RasporedLik"] = dict(PLAYERS["TestLik"], ime="RasporedLik", pos_x=-14, 
     {"slot": 2, "id": "apple", "kolicina": 1},
     {"slot": 3, "id": "mana_potion", "kolicina": 1},
 ])
+# MinimapaLik: minimapa (uloga minimapa, na kraju kruga); aktivan quest da se vidi tracker ispod minimape
+PLAYERS["MinimapaLik"] = dict(PLAYERS["TestLik"], ime="MinimapaLik", hp=100000, max_hp=100000, pos_x=10, pos_y=1.16, pos_z=-20,
+                              aktivni_quest_id="goblin_killer", quest_progres=0, inventory=[])
 # CiljLik: ciljanje (uloga cilj), u uglu mape da test neprijatelji ne smetaju ostalima
 PLAYERS["CiljLik"] = dict(PLAYERS["TestLik"], ime="CiljLik", pos_x=-20, pos_y=1.16, pos_z=-20, inventory=[])
 # DrugiLik: drugi igrač pored CiljLik-ovog cilja (napad bez sopstvenog cilja)
@@ -323,7 +326,8 @@ XP_LIKOVI = {"OdjavaLik", "NapredakLik", "QuestLik", "PosmatracLik", "LovacLik",
 TOKENI = {"napredak-token": "NapredakLik", "oprema-token": "OpremaLik", "oprema2-token": "Oprema2Lik", "ailik-token": "AiLik", "ai2lik-token": "Ai2Lik", "potion-token": "TestLik", "mover-token": "MoverLik", "observer-token": "ObserverLik",
           "raspored-token": "RasporedLik", "cilj-token": "CiljLik", "drugi-token": "DrugiLik", "quest-token": "QuestLik",
           "posmatrac-token": "PosmatracLik", "lovac-token": "LovacLik", "buff-token": "BuffLik", "buff2-token": "Buff2Lik", "brzina-token": "BrzinaLik",
-          "efekti-token": "EfektiLik", "efekti2-token": "Efekti2Lik", "throttle-token": "ThrottleLik", "prvi-token": "PrviLik", "odjava-token": "OdjavaLik"}
+          "efekti-token": "EfektiLik", "efekti2-token": "Efekti2Lik", "throttle-token": "ThrottleLik", "prvi-token": "PrviLik", "odjava-token": "OdjavaLik",
+          "minimapa-token": "MinimapaLik"}
 LOCK = threading.Lock()
 
 
