@@ -33,4 +33,9 @@ const BOJA_OUTLINE := Color(0, 0, 0)
 const OUTLINE := 3
 const UVLAKA_ZUM := 4              # px od ivice
 
+# ime zone (gore, sredina, unutar okvira)
+const FONT_ZONA := 13
+const BOJA_ZONA := Color(1.0, 0.85, 0.3)
+const UVLAKA_ZONA := 3             # px od gornje ivice
+
 const OSVEZAVANJE_HZ := 20         # najviše toliko crtanja u sekundi

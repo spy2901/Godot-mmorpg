@@ -13,6 +13,7 @@ var _igrac: Node
 var _tocak := 0.0      # sabrani mali koraci točkića (factor < 1) do praga 1
 var _crtano_ms := -1000
 var _oznaka_zuma: Label
+var oznaka_zone: Label # ime zone u kojoj je lik (zone.gd), uz gornju ivicu
 
 func _ready() -> void:
 	if not is_multiplayer_authority():
@@ -31,17 +32,24 @@ func _ready() -> void:
 	offset_bottom = STIL.MARGINA + STIL.VELICINA
 	mouse_filter = Control.MOUSE_FILTER_STOP # klik preko minimape ne ide u svet (ne menja cilj)
 	clip_contents = true
-	_oznaka_zuma = Label.new()
-	_oznaka_zuma.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_oznaka_zuma.add_theme_font_size_override("font_size", STIL.FONT_ZUM)
-	_oznaka_zuma.add_theme_color_override("font_color", STIL.BOJA_ZUM)
-	_oznaka_zuma.add_theme_color_override("font_outline_color", STIL.BOJA_OUTLINE)
-	_oznaka_zuma.add_theme_constant_override("outline_size", STIL.OUTLINE)
+	_oznaka_zuma = _oznaka(STIL.FONT_ZUM, STIL.BOJA_ZUM)
 	_oznaka_zuma.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT, Control.PRESET_MODE_MINSIZE, STIL.UVLAKA_ZUM)
 	_oznaka_zuma.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 	_oznaka_zuma.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	add_child(_oznaka_zuma)
+	oznaka_zone = _oznaka(STIL.FONT_ZONA, STIL.BOJA_ZONA)
+	oznaka_zone.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	oznaka_zone.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE, Control.PRESET_MODE_MINSIZE, STIL.UVLAKA_ZONA)
 	postavi_zum(zum)
+
+func _oznaka(velicina: int, boja: Color) -> Label:
+	var l := Label.new()
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.add_theme_font_size_override("font_size", velicina)
+	l.add_theme_color_override("font_color", boja)
+	l.add_theme_color_override("font_outline_color", STIL.BOJA_OUTLINE)
+	l.add_theme_constant_override("outline_size", STIL.OUTLINE)
+	add_child(l)
+	return l
 
 func postavi_zum(i: int) -> void:
 	zum = clampi(i, 0, ZUM.size() - 1)
@@ -52,7 +60,15 @@ func _process(_d: float) -> void:
 	var sada := Time.get_ticks_msec()
 	if visible and sada - _crtano_ms >= 1000 / STIL.OSVEZAVANJE_HZ:
 		_crtano_ms = sada
+		_osvezi_ime_zone()
 		queue_redraw()
+
+# Ime zone iz zone.gd za poziciju lika; tekst se dodeljuje samo kad se promeni. Van svih zona prazno.
+func _osvezi_ime_zone() -> void:
+	var z := Z.zona_na(_igrac.global_position.x, _igrac.global_position.z)
+	var ime: String = tr(Z.ZONE[z].ime) if z >= 0 else ""
+	if oznaka_zone.text != ime:
+		oznaka_zone.text = ime
 
 # Točkić iznad minimape je njen, ne kamerin. Zum kamere je u Player._input; minimapa je dete igrača, a _input ide obrnutim
 # redosledom stabla (dete pre roditelja), pa set_input_as_handled ovde zaustavi zum kamere. Isti ulaz kao kamera
